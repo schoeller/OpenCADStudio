@@ -4,7 +4,7 @@ use super::history::history_dropdown_labels;
 use super::helpers::grid_plane_from_camera;
 use crate::scene::{VIEWCUBE_DRAW_PX, VIEWCUBE_PAD};
 use crate::scene::grip::grips_to_screen;
-use crate::scene::viewport_pane::ViewportPane;
+use crate::scene::viewport_pane::{PaperViewportPane, ViewportPane};
 use crate::ui::overlay;
 use iced::widget::{button, column, container, mouse_area, row, shader, stack, text, Row, Space};
 use iced::window;
@@ -457,22 +457,52 @@ impl H7CAD {
 
 // ── Paper canvas ──────────────────────────────────────────────────────────
 //
-// Renders the full paper canvas as a single full-size shader widget using the
-// PaperSheet mode, which includes both paper-space entities (title blocks,
-// frames, borders) and model-space content projected through each viewport's
-// view matrix into paper-space coordinates.
+// PSPACE: single full-canvas PaperSheet widget — renders paper entities plus
+//   model content of all viewports via CPU projection.
 //
-// Note: A per-viewport widget approach (ViewportPane::Paper) was attempted but
-// does not work correctly because Iced 0.14 batches all shader prepare() calls
-// before any render() calls, causing widgets that share the same Pipeline type
-// to overwrite each other's GPU buffers. The CPU-projection approach used here
-// is the correct solution within Iced's shader framework.
+// MSPACE (active viewport): PaperSheet widget (excludes the active viewport
+//   from its CPU projection) + a PaperViewportPane widget overlaid at the
+//   active viewport's screen-space position.  PaperViewportPane uses a
+//   distinct pipeline type (PaperViewportPipeline) so Iced's per-type storage
+//   keeps the two prepare() calls from overwriting each other.
 
 fn paper_canvas_view<'a>(tab: &'a super::document::DocumentTab) -> Element<'a, Message> {
-    shader(ViewportPane::paper_sheet(&tab.scene))
+    let scene = &tab.scene;
+
+    let paper_sheet = shader(ViewportPane::paper_sheet(scene))
         .width(Fill)
-        .height(Fill)
-        .into()
+        .height(Fill);
+
+    if let Some(vp_handle) = scene.active_viewport {
+        let (canvas_w, canvas_h) = scene.selection.borrow().vp_size;
+        if let Some(rect) = scene.viewport_screen_rect(vp_handle, (canvas_w, canvas_h)) {
+            let w = rect.width.max(1.0);
+            let h = rect.height.max(1.0);
+            let x = rect.x.max(0.0);
+            let y = rect.y.max(0.0);
+
+            let vp_widget = shader(PaperViewportPane::new(scene, vp_handle))
+                .width(iced::Length::Fixed(w))
+                .height(iced::Length::Fixed(h));
+
+            let positioned = column![
+                Space::new().height(iced::Length::Fixed(y)),
+                row![
+                    Space::new().width(iced::Length::Fixed(x)),
+                    vp_widget,
+                ],
+            ]
+            .width(Fill)
+            .height(Fill);
+
+            return stack![paper_sheet, positioned]
+                .width(Fill)
+                .height(Fill)
+                .into();
+        }
+    }
+
+    paper_sheet.into()
 }
 
 // ── Document tab bar ───────────────────────────────────────────────────────

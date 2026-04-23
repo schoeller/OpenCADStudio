@@ -1,4 +1,4 @@
-use super::render::{CameraState, Primitive};
+use super::render::{CameraState, PaperViewportPrimitive, Primitive};
 use super::Scene;
 use acadrust::Handle;
 use iced::widget::shader;
@@ -48,7 +48,59 @@ impl<'a> ViewportPane<'a> {
     }
 }
 
-// ── shader::Program impl ──────────────────────────────────────────────────
+// ── PaperViewportPane ─────────────────────────────────────────────────────
+//
+// A shader widget for the MSPACE active viewport.  Uses PaperViewportPrimitive
+// (and therefore PaperViewportPipeline) so it gets its own Iced storage entry,
+// separate from the ViewportPane/PaperSheet pipeline.
+
+pub struct PaperViewportPane<'a> {
+    pub scene: &'a Scene,
+    pub handle: Handle,
+}
+
+impl<'a> PaperViewportPane<'a> {
+    pub fn new(scene: &'a Scene, handle: Handle) -> Self {
+        Self { scene, handle }
+    }
+}
+
+impl<'a, Msg: std::fmt::Debug + Clone> shader::Program<Msg> for PaperViewportPane<'a> {
+    type State = CameraState;
+    type Primitive = PaperViewportPrimitive;
+
+    fn draw(
+        &self,
+        state: &Self::State,
+        _cursor: mouse::Cursor,
+        bounds: Rectangle,
+    ) -> Self::Primitive {
+        self.scene.build_active_viewport_primitive(self.handle, state.hover_region, bounds)
+    }
+
+    fn update(
+        &self,
+        state: &mut Self::State,
+        event: &Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> Option<iced::widget::Action<Msg>> {
+        self.scene.update_viewcube_state(state, bounds, cursor);
+        let _ = event;
+        None
+    }
+
+    fn mouse_interaction(
+        &self,
+        state: &Self::State,
+        _b: Rectangle,
+        _c: mouse::Cursor,
+    ) -> mouse::Interaction {
+        self.scene.viewcube_mouse_interaction(state)
+    }
+}
+
+// ── ViewportPane shader::Program impl ────────────────────────────────────
 
 impl<'a, Msg: std::fmt::Debug + Clone> shader::Program<Msg> for ViewportPane<'a> {
     type State = CameraState;

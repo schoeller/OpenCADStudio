@@ -351,7 +351,7 @@ impl Scene {
             if let Some(((x0, y0), (x1, y1))) = self.paper_limits() {
                 wires.insert(0, paper_boundary_wire(x0 as f32, y0 as f32, x1 as f32, y1 as f32));
             }
-            wires.extend(self.viewport_content_wires(layout_block, None));
+            wires.extend(self.viewport_content_wires(layout_block, None, None));
         }
         wires
     }
@@ -375,7 +375,7 @@ impl Scene {
             }
             Some(vp_handle) => {
                 // MSPACE: only model content visible through the active viewport
-                self.viewport_content_wires(layout_block, Some(vp_handle))
+                self.viewport_content_wires(layout_block, Some(vp_handle), None)
             }
         }
     }
@@ -667,7 +667,12 @@ impl Scene {
 
     /// Collect model-space wires projected into paper space for all (or one specific)
     /// user viewports.  `only_vp = Some(h)` restricts output to that viewport.
-    fn viewport_content_wires(&self, paper_block: Handle, only_vp: Option<Handle>) -> Vec<WireModel> {
+    fn viewport_content_wires(
+        &self,
+        paper_block: Handle,
+        only_vp: Option<Handle>,
+        exclude_vp: Option<Handle>,
+    ) -> Vec<WireModel> {
         use acadrust::entities::Viewport;
         use std::collections::HashSet as HSet;
 
@@ -682,6 +687,7 @@ impl Scene {
                     && vp.common.owner_handle == paper_block
                     && vp.status.is_on
                     && only_vp.map_or(true, |h| vp.common.handle == h)
+                    && exclude_vp.map_or(true, |h| vp.common.handle != h)
             })
             .collect();
 
@@ -2104,8 +2110,7 @@ impl Scene {
     ///
     /// `canvas_px`  — the pixel dimensions of the area that shows the paper.
     /// Map a paper-space viewport into screen-pixel coordinates.
-    /// Needed when per-viewport shader widgets are revived (see `ViewportPaneMode::Paper`).
-    #[allow(dead_code)]
+    /// Used to position the active-viewport widget in MSPACE paper space.
     pub fn viewport_screen_rect(
         &self,
         vp_handle: Handle,

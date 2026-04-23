@@ -14,6 +14,56 @@ use super::pipeline::Pipeline;
 use super::tessellate;
 use super::{HatchModel, ImageModel, MeshModel, Scene, Uniforms, WireModel};
 
+// ── PaperViewportPipeline / PaperViewportPrimitive ────────────────────────
+//
+// Newtype wrappers around Pipeline / Primitive so that the active-MSPACE
+// viewport widget gets its own Iced storage entry (keyed by TypeId of the
+// Pipeline type).  This prevents the shared-pipeline prepare() overwrite
+// that occurs when PaperSheet and the viewport widget both use `Pipeline`.
+
+/// Dedicated pipeline for the MSPACE active-viewport shader widget.
+pub struct PaperViewportPipeline(pub(super) Pipeline);
+
+impl iced::widget::shader::Pipeline for PaperViewportPipeline {
+    fn new(
+        device: &iced::wgpu::Device,
+        queue: &iced::wgpu::Queue,
+        format: iced::wgpu::TextureFormat,
+    ) -> Self {
+        Self(Pipeline::new(device, queue, format))
+    }
+}
+
+/// Primitive returned by `PaperViewportPane`; delegates everything to the
+/// inner `Primitive` via the dedicated `PaperViewportPipeline`.
+#[derive(Debug)]
+pub struct PaperViewportPrimitive(pub(super) Primitive);
+
+impl shader::Primitive for PaperViewportPrimitive {
+    type Pipeline = PaperViewportPipeline;
+
+    fn prepare(
+        &self,
+        pipeline: &mut PaperViewportPipeline,
+        device: &iced::wgpu::Device,
+        queue: &iced::wgpu::Queue,
+        bounds: &Rectangle,
+        viewport: &Viewport,
+    ) {
+        self.0.prepare(&mut pipeline.0, device, queue, bounds, viewport);
+    }
+
+    fn render(
+        &self,
+        pipeline: &PaperViewportPipeline,
+        encoder: &mut iced::wgpu::CommandEncoder,
+        target: &iced::wgpu::TextureView,
+        clip: &Rectangle<u32>,
+    ) {
+        self.0.render(&pipeline.0, encoder, target, clip);
+    }
+}
+
 // ── Camera hover state (shader::Program::State) ───────────────────────────
 
 #[derive(Clone, Default)]
@@ -209,7 +259,9 @@ impl Scene {
 
         let layout_block = self.current_layout_block_handle();
         let mut wires = self.paper_sheet_wires();
-        wires.extend(self.viewport_content_wires(layout_block, None));
+        // When MSPACE is active, exclude that viewport from the CPU projection —
+        // it is rendered in 3D by the separate PaperViewportPane widget.
+        wires.extend(self.viewport_content_wires(layout_block, None, self.active_viewport));
         if let Some(iw) = &self.interim_wire {
             wires.push(iw.clone());
         }
@@ -258,6 +310,17 @@ impl Scene {
             hover_region,
             bg_color: self.bg_color,
         }
+    }
+
+    /// Wrap `build_viewport_primitive()` in `PaperViewportPrimitive` for use
+    /// by `PaperViewportPane`, which needs its own dedicated pipeline type.
+    pub(super) fn build_active_viewport_primitive(
+        &self,
+        vp_handle: Handle,
+        hover_region: Option<usize>,
+        bounds: Rectangle,
+    ) -> PaperViewportPrimitive {
+        PaperViewportPrimitive(self.build_viewport_primitive(vp_handle, hover_region, bounds))
     }
 
     /// Update viewcube hover state from cursor position within `bounds`.
