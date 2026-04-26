@@ -229,18 +229,21 @@ pub fn tessellate_dimension(
     };
     let name = handle.value().to_string();
     let style_name = &dim.base().style_name;
-    let arrow_size = document
+    let (arrow_size, dimexo, dimexe) = document
         .dim_styles
         .iter()
         .find(|s| s.name.eq_ignore_ascii_case(style_name)
             || (style_name.trim().is_empty() && s.name.eq_ignore_ascii_case("Standard")))
         .map(|s| {
             let scale = if s.dimscale > 1e-6 { s.dimscale } else { 1.0 };
-            (s.dimasz * scale) as f32
+            (
+                ((s.dimasz * scale) as f32).max(0.001),
+                (s.dimexo * scale) as f32,
+                (s.dimexe * scale) as f32,
+            )
         })
-        .unwrap_or(0.12)
-        .max(0.001);
-    let points = dimension_geometry(dim, arrow_size);
+        .unwrap_or((0.12, 0.0, 0.0));
+    let points = dimension_geometry(dim, arrow_size, dimexo, dimexe);
     let key_vertices = points
         .iter()
         .copied()
@@ -683,7 +686,7 @@ fn solid_wire_fallback(entity: &EntityType) -> Vec<[f32; 3]> {
     pts
 }
 
-fn dimension_geometry(dim: &Dimension, arrow_size: f32) -> Vec<[f32; 3]> {
+fn dimension_geometry(dim: &Dimension, arrow_size: f32, dimexo: f32, dimexe: f32) -> Vec<[f32; 3]> {
     let mut points = Vec::new();
     match dim {
         Dimension::Aligned(d) => {
@@ -691,14 +694,14 @@ fn dimension_geometry(dim: &Dimension, arrow_size: f32) -> Vec<[f32; 3]> {
             let second = vec3(d.second_point);
             let def = vec3(d.definition_point);
             let axis = normalized_or(second - first, Vec3::X);
-            append_linear_dimension(&mut points, first, second, def, axis, arrow_size);
+            append_linear_dimension(&mut points, first, second, def, axis, arrow_size, dimexo, dimexe);
         }
         Dimension::Linear(d) => {
             let first = vec3(d.first_point);
             let second = vec3(d.second_point);
             let def = vec3(d.definition_point);
             let axis = Vec3::new(d.rotation.cos() as f32, d.rotation.sin() as f32, 0.0);
-            append_linear_dimension(&mut points, first, second, def, normalized_or(axis, Vec3::X), arrow_size);
+            append_linear_dimension(&mut points, first, second, def, normalized_or(axis, Vec3::X), arrow_size, dimexo, dimexe);
         }
         Dimension::Radius(d) => {
             let center = vec3(d.angle_vertex);
@@ -750,13 +753,26 @@ fn append_linear_dimension(
     def: Vec3,
     axis: Vec3,
     arrow_size: f32,
+    dimexo: f32,
+    dimexe: f32,
 ) {
     let perp = Vec3::new(-axis.y, axis.x, 0.0);
     let dim_line_pos = def.dot(perp);
-    let d1 = first + perp * (dim_line_pos - first.dot(perp));
-    let d2 = second + perp * (dim_line_pos - second.dot(perp));
-    add_segment(points, first, d1);
-    add_segment(points, second, d2);
+    // Perpendicular offset from each defpoint to the dimension line (signed).
+    let offset1 = dim_line_pos - first.dot(perp);
+    let offset2 = dim_line_pos - second.dot(perp);
+    let d1 = first + perp * offset1;
+    let d2 = second + perp * offset2;
+    // DIMEXO: gap from the definition point toward the dimension line.
+    // DIMEXE: overshoot past the dimension line.
+    let sign1 = if offset1 >= 0.0 { 1.0_f32 } else { -1.0 };
+    let sign2 = if offset2 >= 0.0 { 1.0_f32 } else { -1.0 };
+    let ext1_start = first + perp * (sign1 * dimexo);
+    let ext1_end   = d1   + perp * (sign1 * dimexe);
+    let ext2_start = second + perp * (sign2 * dimexo);
+    let ext2_end   = d2    + perp * (sign2 * dimexe);
+    add_segment(points, ext1_start, ext1_end);
+    add_segment(points, ext2_start, ext2_end);
     add_segment(points, d1, d2);
     append_arrow(points, d1, normalized_or(d2 - d1, axis), arrow_size);
     append_arrow(points, d2, normalized_or(d1 - d2, -axis), arrow_size);
