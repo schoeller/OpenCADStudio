@@ -216,11 +216,12 @@ pub fn tessellate_text_ex(
     let font = get_font(font_name);
     let scale = height / 9.0;
     let wf = width_factor.clamp(0.01, 100.0);
-    let ob = oblique_angle.tan(); // shear multiplier
+    let ob = oblique_angle.tan();
     let (cos_r, sin_r) = (rotation.cos(), rotation.sin());
 
-    let xform = |gx: f32, gy: f32, cursor_x: f32| -> [f32; 2] {
-        let sx = (cursor_x + gx) * scale * wf + gy * scale * ob;
+    // Transform from glyph-space (cursor_x + gx, gy) to world space.
+    let xform = |gx: f32, gy: f32, cx: f32| -> [f32; 2] {
+        let sx = (cx + gx) * scale * wf + gy * scale * ob;
         let sy = gy * scale;
         [
             origin[0] + sx * cos_r - sy * sin_r,
@@ -230,13 +231,122 @@ pub fn tessellate_text_ex(
 
     let mut out: Vec<Vec<[f32; 2]>> = Vec::new();
     let mut cursor_x: f32 = 0.0;
+    // Decoration toggle state: Some(start_cursor_x) when active.
+    // Y positions in 9-unit em space (baseline=0, cap=9).
+    let mut underline: Option<f32> = None;
+    let mut overline: Option<f32> = None;
+    let mut strikethrough: Option<f32> = None;
+    const UNDER_Y: f32 = -1.5;
+    const OVER_Y: f32 = 10.5;
+    const STRIKE_Y: f32 = 4.5;
 
-    for ch in text.chars() {
-        if ch == ' ' {
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        // MText decoration toggles: \L on, \l off, \O on, \o off, \K on, \k off.
+        if ch == '\\' {
+            match chars.peek().copied() {
+                Some('L') => {
+                    chars.next();
+                    if underline.is_none() { underline = Some(cursor_x); }
+                    continue;
+                }
+                Some('l') => {
+                    chars.next();
+                    if let Some(s) = underline.take() {
+                        out.push(vec![xform(s, UNDER_Y, 0.0), xform(cursor_x, UNDER_Y, 0.0)]);
+                    }
+                    continue;
+                }
+                Some('O') => {
+                    chars.next();
+                    if overline.is_none() { overline = Some(cursor_x); }
+                    continue;
+                }
+                Some('o') => {
+                    chars.next();
+                    if let Some(s) = overline.take() {
+                        out.push(vec![xform(s, OVER_Y, 0.0), xform(cursor_x, OVER_Y, 0.0)]);
+                    }
+                    continue;
+                }
+                Some('K') => {
+                    chars.next();
+                    if strikethrough.is_none() { strikethrough = Some(cursor_x); }
+                    continue;
+                }
+                Some('k') => {
+                    chars.next();
+                    if let Some(s) = strikethrough.take() {
+                        out.push(vec![xform(s, STRIKE_Y, 0.0), xform(cursor_x, STRIKE_Y, 0.0)]);
+                    }
+                    continue;
+                }
+                _ => {} // not a decoration code — fall through and render as backslash glyph
+            }
+        }
+
+        // Resolve DXF %%x special-character sequences inline.
+        let render_ch: char = if ch == '%' && chars.peek() == Some(&'%') {
+            chars.next(); // consume second '%'
+            match chars.peek().map(|c| c.to_ascii_lowercase()) {
+                Some('d') => { chars.next(); '°' }
+                Some('p') => { chars.next(); '±' }
+                Some('c') => { chars.next(); '⌀' }
+                Some('%') => { chars.next(); '%' }
+                Some('u') => {
+                    chars.next();
+                    underline = match underline.take() {
+                        Some(start) => {
+                            out.push(vec![xform(start, UNDER_Y, 0.0), xform(cursor_x, UNDER_Y, 0.0)]);
+                            None
+                        }
+                        None => Some(cursor_x),
+                    };
+                    continue;
+                }
+                Some('o') => {
+                    chars.next();
+                    overline = match overline.take() {
+                        Some(start) => {
+                            out.push(vec![xform(start, OVER_Y, 0.0), xform(cursor_x, OVER_Y, 0.0)]);
+                            None
+                        }
+                        None => Some(cursor_x),
+                    };
+                    continue;
+                }
+                Some(d) if d.is_ascii_digit() => {
+                    // %%nnn — 3-digit decimal Unicode scalar
+                    let mut digits = String::with_capacity(3);
+                    for _ in 0..3 {
+                        match chars.peek() {
+                            Some(&c) if c.is_ascii_digit() => { digits.push(chars.next().unwrap()); }
+                            _ => break,
+                        }
+                    }
+                    if digits.len() == 3 {
+                        if let Ok(n) = digits.parse::<u32>() {
+                            if let Some(c) = char::from_u32(n) {
+                                c
+                            } else { continue; }
+                        } else { continue; }
+                    } else {
+                        // Partial digit sequence — advance as unknown glyph and move on
+                        cursor_x += (6.0 + font.letter_spacing) * wf;
+                        continue;
+                    }
+                }
+                _ => { continue; } // unknown %%x — skip silently
+            }
+        } else {
+            ch
+        };
+
+        if render_ch == ' ' {
             cursor_x += font.word_spacing;
             continue;
         }
-        match font.glyph(ch) {
+        match font.glyph(render_ch) {
             Some(glyph) => {
                 for stroke in &glyph.strokes {
                     if stroke.len() < 2 {
@@ -256,6 +366,18 @@ pub fn tessellate_text_ex(
             }
         }
     }
+
+    // Close any decoration spans that weren't explicitly closed.
+    if let Some(start) = underline {
+        out.push(vec![xform(start, UNDER_Y, 0.0), xform(cursor_x, UNDER_Y, 0.0)]);
+    }
+    if let Some(start) = overline {
+        out.push(vec![xform(start, OVER_Y, 0.0), xform(cursor_x, OVER_Y, 0.0)]);
+    }
+    if let Some(start) = strikethrough {
+        out.push(vec![xform(start, STRIKE_Y, 0.0), xform(cursor_x, STRIKE_Y, 0.0)]);
+    }
+
     out
 }
 

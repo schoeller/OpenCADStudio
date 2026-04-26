@@ -3,7 +3,7 @@ use glam::Vec3;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, parse_f64, square_grip};
-use crate::entities::text_support::{resolve_text_style, text_local_bounds};
+use crate::entities::text_support::{resolve_dxf_special_chars, resolve_text_style, text_local_bounds};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
 use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
 use crate::scene::cxf;
@@ -71,9 +71,11 @@ fn to_truck(t: &Text, document: &acadrust::CadDocument) -> TruckEntity {
         (_, VA::Bottom | VA::Middle | VA::Top, Some(a)) => [a.x as f32, a.y as f32],
         _ => [t.insertion_point.x as f32, t.insertion_point.y as f32],
     };
+    // Strip %%u/%%o for bounds (they add no width); resolve %%d/%%c/%%p for correct advance.
+    let value_for_bounds = resolve_dxf_special_chars(&t.value);
     let bounds = text_local_bounds(
         &font_name,
-        &t.value,
+        &value_for_bounds,
         t.height as f32,
         width_factor,
         oblique_angle,
@@ -99,6 +101,7 @@ fn to_truck(t: &Text, document: &acadrust::CadDocument) -> TruckEntity {
         anchor[0] - (anchor_local_x * cos_r - anchor_local_y * sin_r),
         anchor[1] - (anchor_local_x * sin_r + anchor_local_y * cos_r),
     ];
+    // Pass raw value — tessellate_text_ex resolves %%x codes and emits decoration strokes.
     let strokes_2d = cxf::tessellate_text_ex(
         origin,
         t.height as f32,

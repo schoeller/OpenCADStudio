@@ -4,7 +4,7 @@ use glam::Vec3;
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, ro_prop as ro, square_grip, triangle_grip};
 use crate::entities::text_support::{
-    resolve_text_style, split_mtext_lines, strip_mtext_codes, word_wrap,
+    measure_mtext_chars, resolve_text_style, split_mtext_lines, strip_mtext_codes, word_wrap,
 };
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
 use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
@@ -145,16 +145,7 @@ fn to_truck(t: &MText, document: &acadrust::CadDocument) -> TruckEntity {
         };
         let line_w = if h_anchor > 0.0 {
             let scale = t.height as f32 / 9.0 * style_width_factor;
-            line.chars()
-                .map(|c| {
-                    if c == ' ' {
-                        return font.word_spacing * scale;
-                    }
-                    font.glyph(c)
-                        .map(|g| (g.advance + font.letter_spacing) * scale)
-                        .unwrap_or(t.height as f32 * 0.6)
-                })
-                .sum()
+            measure_mtext_chars(line, scale, font)
         } else {
             0.0
         };
