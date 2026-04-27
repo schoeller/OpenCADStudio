@@ -16,10 +16,17 @@ impl TruckConvertible for Ray {
     fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
         let bp = self.base_point;
         let dir = self.direction;
+        // Normalize direction to avoid f32 overflow when DXF stores
+        // unnormalized direction vectors (garbage data in some exporters).
+        let len = (dir.x * dir.x + dir.y * dir.y + dir.z * dir.z).sqrt();
+        if len < 1e-10 {
+            return None;
+        }
+        let (nx, ny, nz) = (dir.x / len, dir.y / len, dir.z / len);
         let far = [
-            (bp.x + dir.x * DISPLAY_EXTENT) as f32,
-            (bp.y + dir.y * DISPLAY_EXTENT) as f32,
-            (bp.z + dir.z * DISPLAY_EXTENT) as f32,
+            (bp.x + nx * DISPLAY_EXTENT) as f32,
+            (bp.y + ny * DISPLAY_EXTENT) as f32,
+            (bp.z + nz * DISPLAY_EXTENT) as f32,
         ];
         let start = [bp.x as f32, bp.y as f32, bp.z as f32];
         Some(TruckEntity {
@@ -138,15 +145,20 @@ impl TruckConvertible for XLine {
     fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
         let bp = self.base_point;
         let dir = self.direction;
+        let len = (dir.x * dir.x + dir.y * dir.y + dir.z * dir.z).sqrt();
+        if len < 1e-10 {
+            return None;
+        }
+        let (nx, ny, nz) = (dir.x / len, dir.y / len, dir.z / len);
         let far_pos = [
-            (bp.x + dir.x * DISPLAY_EXTENT) as f32,
-            (bp.y + dir.y * DISPLAY_EXTENT) as f32,
-            (bp.z + dir.z * DISPLAY_EXTENT) as f32,
+            (bp.x + nx * DISPLAY_EXTENT) as f32,
+            (bp.y + ny * DISPLAY_EXTENT) as f32,
+            (bp.z + nz * DISPLAY_EXTENT) as f32,
         ];
         let far_neg = [
-            (bp.x - dir.x * DISPLAY_EXTENT) as f32,
-            (bp.y - dir.y * DISPLAY_EXTENT) as f32,
-            (bp.z - dir.z * DISPLAY_EXTENT) as f32,
+            (bp.x - nx * DISPLAY_EXTENT) as f32,
+            (bp.y - ny * DISPLAY_EXTENT) as f32,
+            (bp.z - nz * DISPLAY_EXTENT) as f32,
         ];
         Some(TruckEntity {
             object: TruckObject::Lines(vec![far_neg, far_pos]),

@@ -126,6 +126,10 @@ pub struct Scene {
     /// Scene centroid subtracted from all coordinates before f32 conversion.
     /// Eliminates f32 precision loss at large world coordinates (e.g. UTM 4,000,000 m).
     pub world_offset: [f64; 3],
+    /// Largest local-space coordinate expected from real geometry, derived from
+    /// EXTMIN/EXTMAX (10× safety margin). Used by fit_all() to ignore garbage
+    /// entity coordinates (origin-stuck entities, bad Ray/XLine direction vectors).
+    pub local_extent_max: f32,
 }
 
 impl Scene {
@@ -157,6 +161,7 @@ impl Scene {
             bg_color: [0.11, 0.11, 0.11, 1.0],
             paper_bg_color: [1.0, 1.0, 1.0, 1.0],
             world_offset: [0.0; 3],
+            local_extent_max: 1e9,
         }
     }
 
@@ -173,15 +178,22 @@ impl Scene {
         // Sentinel: DXF files with no geometry have EXTMIN = 1e20, EXTMAX = -1e20.
         // Fall back to no offset so the scene stays at the origin.
         let valid = min.x < max.x && min.y < max.y;
-        self.world_offset = if valid {
-            [
+        if valid {
+            self.world_offset = [
                 (min.x + max.x) * 0.5,
                 (min.y + max.y) * 0.5,
                 (min.z + max.z) * 0.5,
-            ]
+            ];
+            // 10× the EXTMIN→EXTMAX half-diagonal gives fit_all() a threshold to
+            // reject origin-stuck/corrupted entities far outside the drawing area.
+            let hw = ((max.x - min.x) * 0.5) as f32;
+            let hh = ((max.y - min.y) * 0.5) as f32;
+            let hz = ((max.z - min.z) * 0.5).max(1.0) as f32;
+            self.local_extent_max = hw.max(hh).max(hz) * 10.0;
         } else {
-            [0.0; 3]
-        };
+            self.world_offset = [0.0; 3];
+            self.local_extent_max = 1e9;
+        }
     }
 
     /// Public accessor for the block-record handle of the current layout.
@@ -2316,11 +2328,25 @@ impl Scene {
 
         let mut min = glam::Vec3::splat(f32::MAX);
         let mut max = glam::Vec3::splat(f32::MIN);
+        // Reject points beyond 10× the drawing's EXTMIN→EXTMAX half-size.
+        // These come from origin-stuck entities (y ≈ -world_offset.y after subtraction),
+        // Ray/XLine far-points with bad direction vectors, or corrupt coordinates.
+        let lim = self.local_extent_max;
         for wire in &wires {
             for &[x, y, z] in &wire.points {
+                if !x.is_finite() || !y.is_finite() || !z.is_finite() {
+                    continue;
+                }
+                if x.abs() > lim || y.abs() > lim || z.abs() > lim {
+                    continue;
+                }
                 min = min.min(glam::Vec3::new(x, y, z));
                 max = max.max(glam::Vec3::new(x, y, z));
             }
+        }
+        // If no usable points found, leave the camera unchanged.
+        if min.x > max.x {
+            return;
         }
         if min == max {
             max += glam::Vec3::splat(1.0);

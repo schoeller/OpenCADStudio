@@ -65,8 +65,11 @@ pub fn tessellate(
         match te.object {
             // ── Text / MText: pre-tessellated glyph strokes ───────────────
             TruckObject::Text(strokes_2d) => {
-                // Elevation comes from the entity's Z coordinate.
-                let elev = entity_z(entity);
+                // Glyph strokes come from acad_to_truck in world-space f32.
+                // Subtract world_offset (f32 subtraction — acceptable precision
+                // for text rendering; the anchor was already cast to f32 there).
+                let [ox, oy, oz] = world_offset;
+                let elev = entity_z(entity) - oz as f32;
 
                 // Pack all strokes into one flat point list, separated by
                 // NaN sentinels so wire_gpu.rs skips disconnected segments.
@@ -81,10 +84,11 @@ pub fn tessellate(
                         points.push([f32::NAN, f32::NAN, f32::NAN]);
                     }
                     for &[x, y] in stroke {
-                        points.push([x, y, elev]);
+                        points.push([x - ox as f32, y - oy as f32, elev]);
                     }
                 }
 
+                let snap_pts = offset_snap_pts(te.snap_pts, world_offset);
                 return WireModel {
                     name,
                     points,
@@ -93,7 +97,7 @@ pub fn tessellate(
                     pattern_length: 0.0,
                     pattern: [0.0; 8],
                     line_weight_px,
-                    snap_pts: te.snap_pts,
+                    snap_pts,
                     tangent_geoms: te.tangent_geoms,
                     aci: 0,
             key_vertices: te.key_vertices,
@@ -107,6 +111,7 @@ pub fn tessellate(
                 match result {
                     TruckTessResult::Point([x, y, z]) => {
                         let s = 0.1_f32;
+                        let snap_pts = offset_snap_pts(te.snap_pts, world_offset);
                         return WireModel {
                             name,
                             points: vec![
@@ -120,11 +125,11 @@ pub fn tessellate(
                             pattern_length: 0.0,
                             pattern: [0.0; 8],
                             line_weight_px: 1.0,
-                            snap_pts: te.snap_pts,
+                            snap_pts,
                             tangent_geoms: te.tangent_geoms,
                             aci: 0,
-            key_vertices: te.key_vertices,
-            aabb: WireModel::UNBOUNDED_AABB,
+                            key_vertices: te.key_vertices,
+                            aabb: WireModel::UNBOUNDED_AABB,
                         };
                     }
                     _ => {}
@@ -133,6 +138,11 @@ pub fn tessellate(
 
             TruckObject::Curve(e) => {
                 if let TruckTessResult::Lines(points) = tessellate_edge(&e, world_offset) {
+                    let [ox, oy, oz] = world_offset;
+                    let snap_pts = offset_snap_pts(te.snap_pts, world_offset);
+                    let key_vertices: Vec<[f32; 3]> = te.key_vertices.into_iter()
+                        .map(|[x, y, z]| [x - ox as f32, y - oy as f32, z - oz as f32])
+                        .collect();
                     return WireModel {
                         name,
                         points,
@@ -141,17 +151,22 @@ pub fn tessellate(
                         pattern_length,
                         pattern,
                         line_weight_px,
-                        snap_pts: te.snap_pts,
+                        snap_pts,
                         tangent_geoms: te.tangent_geoms,
                         aci: 0,
-            key_vertices: te.key_vertices,
-            aabb: WireModel::UNBOUNDED_AABB,
+                        key_vertices,
+                        aabb: WireModel::UNBOUNDED_AABB,
                     };
                 }
             }
 
             TruckObject::Contour(w) => {
                 if let TruckTessResult::Lines(points) = tessellate_wire(&w, world_offset) {
+                    let [ox, oy, oz] = world_offset;
+                    let snap_pts = offset_snap_pts(te.snap_pts, world_offset);
+                    let key_vertices: Vec<[f32; 3]> = te.key_vertices.into_iter()
+                        .map(|[x, y, z]| [x - ox as f32, y - oy as f32, z - oz as f32])
+                        .collect();
                     return WireModel {
                         name,
                         points,
@@ -160,29 +175,41 @@ pub fn tessellate(
                         pattern_length,
                         pattern,
                         line_weight_px,
-                        snap_pts: te.snap_pts,
+                        snap_pts,
                         tangent_geoms: te.tangent_geoms,
                         aci: 0,
-            key_vertices: te.key_vertices,
-            aabb: WireModel::UNBOUNDED_AABB,
+                        key_vertices,
+                        aabb: WireModel::UNBOUNDED_AABB,
                     };
                 }
             }
 
             TruckObject::Lines(points) => {
+                // Points are world-space f32 from entity converters (polyline,
+                // leader, mesh, solid2d, etc.).  Subtract world_offset so the
+                // geometry lands in local space alongside Line/Arc/Circle.
+                let [ox, oy, oz] = world_offset;
+                let local_pts: Vec<[f32; 3]> = points.into_iter().map(|[x, y, z]| {
+                    if x.is_nan() { [x, y, z] }
+                    else { [x - ox as f32, y - oy as f32, z - oz as f32] }
+                }).collect();
+                let snap_pts = offset_snap_pts(te.snap_pts, world_offset);
+                let key_vertices: Vec<[f32; 3]> = te.key_vertices.into_iter()
+                    .map(|[x, y, z]| [x - ox as f32, y - oy as f32, z - oz as f32])
+                    .collect();
                 return WireModel {
                     name,
-                    points,
+                    points: local_pts,
                     color,
                     selected,
                     pattern_length: 0.0,
                     pattern: [0.0; 8],
                     line_weight_px,
-                    snap_pts: te.snap_pts,
+                    snap_pts,
                     tangent_geoms: te.tangent_geoms,
                     aci: 0,
-            key_vertices: te.key_vertices,
-            aabb: WireModel::UNBOUNDED_AABB,
+                    key_vertices,
+                    aabb: WireModel::UNBOUNDED_AABB,
                 };
             }
 
@@ -954,6 +981,13 @@ fn dimension_text_height(dim: &Dimension) -> f64 {
 
 fn vec3_local(v: Vector3, off: [f64; 3]) -> Vec3 {
     Vec3::new((v.x - off[0]) as f32, (v.y - off[1]) as f32, (v.z - off[2]) as f32)
+}
+
+fn offset_snap_pts(pts: Vec<(Vec3, SnapHint)>, off: [f64; 3]) -> Vec<(Vec3, SnapHint)> {
+    let [ox, oy, oz] = off;
+    pts.into_iter()
+        .map(|(p, h)| (Vec3::new(p.x - ox as f32, p.y - oy as f32, p.z - oz as f32), h))
+        .collect()
 }
 
 /// Returns the text position of a dimension in DXF world-space (f64, no offset applied).

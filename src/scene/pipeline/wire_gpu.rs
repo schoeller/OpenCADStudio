@@ -150,9 +150,9 @@ impl WireGpu {
         for i in 1..n {
             let p = wire.points[i - 1];
             let q = wire.points[i];
-            // If either point is a NaN sentinel, keep the same distance
-            // (the segment will be skipped anyway).
-            if p[0].is_nan() || q[0].is_nan() {
+            // If either point is non-finite (NaN sentinel or ±inf from overflow),
+            // keep the same distance — the segment will be skipped anyway.
+            if !p[0].is_finite() || !q[0].is_finite() {
                 dists[i] = dists[i - 1];
             } else {
                 let dx = q[0] - p[0];
@@ -166,15 +166,15 @@ impl WireGpu {
             let a = wire.points[i];
             let b = wire.points[i + 1];
 
-            // Skip any segment that involves a NaN sentinel point.
-            // NaN sentinels are inserted between disconnected glyph strokes
-            // by tessellate.rs so that multiple strokes can share one WireModel.
-            if a[0].is_nan()
-                || a[1].is_nan()
-                || a[2].is_nan()
-                || b[0].is_nan()
-                || b[1].is_nan()
-                || b[2].is_nan()
+            // Skip segments where either endpoint is non-finite (NaN sentinels
+            // from disconnected glyph strokes, or ±inf from Ray/XLine far-point
+            // overflow when the direction vector is very large).
+            if !a[0].is_finite()
+                || !a[1].is_finite()
+                || !a[2].is_finite()
+                || !b[0].is_finite()
+                || !b[1].is_finite()
+                || !b[2].is_finite()
             {
                 continue;
             }
