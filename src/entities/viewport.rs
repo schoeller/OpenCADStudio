@@ -338,7 +338,12 @@ fn apply_grip(vp: &mut Viewport, grip_id: usize, apply: GripApply) {
                 vp.width = new_hw * 2.0;
             }
             if new_hh > 0.01 {
-                vp.height = new_hh * 2.0;
+                let new_h = new_hh * 2.0;
+                // Keep scale constant: view_height must scale with the viewport height.
+                if vp.height > 1e-9 && vp.view_height.abs() > 1e-9 {
+                    vp.view_height = vp.view_height * (new_h / vp.height);
+                }
+                vp.height = new_h;
             }
         }
         _ => {}
