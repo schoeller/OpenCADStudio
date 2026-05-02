@@ -45,20 +45,61 @@ fn to_truck(arc: &Arc) -> TruckEntity {
         )
     };
 
+    let cv = Vec3::new(cwx as f32, cwy as f32, cwz as f32);
+    let tangent = TangentGeom::Circle {
+        center: [cwx as f32, cwy as f32, cwz as f32],
+        radius: r as f32,
+    };
+
+    if arc.thickness.abs() > 1e-10 {
+        let t = arc.thickness;
+        let (nx, ny, nz) = normal;
+        let n = 32usize;
+        let (start_a, end_a) = if arc.normal.z < 0.0 {
+            let cw_span = if sa >= ea { sa - ea } else { sa - ea + TAU };
+            (sa, sa - cw_span)
+        } else {
+            let ccw_end = if ea >= sa { ea } else { ea + TAU };
+            (sa, ccw_end)
+        };
+        let mut pts: Vec<[f32; 3]> = Vec::with_capacity((n + 1) * 2 + 8);
+        for i in 0..=n {
+            let a = start_a + (end_a - start_a) * (i as f64 / n as f64);
+            let p = arc_pt(a);
+            pts.push([p.x as f32, p.y as f32, p.z as f32]);
+        }
+        pts.push([f32::NAN; 3]);
+        for i in 0..=n {
+            let a = start_a + (end_a - start_a) * (i as f64 / n as f64);
+            let p = arc_pt(a);
+            pts.push([(p.x + t * nx) as f32, (p.y + t * ny) as f32, (p.z + t * nz) as f32]);
+        }
+        pts.push([f32::NAN; 3]);
+        let ps = arc_pt(sa);
+        pts.push([ps.x as f32, ps.y as f32, ps.z as f32]);
+        pts.push([(ps.x + t * nx) as f32, (ps.y + t * ny) as f32, (ps.z + t * nz) as f32]);
+        pts.push([f32::NAN; 3]);
+        let pe = arc_pt(ea);
+        pts.push([pe.x as f32, pe.y as f32, pe.z as f32]);
+        pts.push([(pe.x + t * nx) as f32, (pe.y + t * ny) as f32, (pe.z + t * nz) as f32]);
+        return TruckEntity {
+            object: TruckObject::Lines(pts),
+            snap_pts: vec![(cv, SnapHint::Center)],
+            tangent_geoms: vec![tangent],
+            key_vertices: vec![],
+        };
+    }
+
     let p_start = arc_pt(sa);
     let p_end = arc_pt(ea);
     let p_mid = arc_pt(mid_a);
     let v_start = builder::vertex(p_start);
     let v_end = builder::vertex(p_end);
     let edge = builder::circle_arc(&v_start, &v_end, p_mid);
-    let cv = Vec3::new(cwx as f32, cwy as f32, cwz as f32);
     TruckEntity {
         object: TruckObject::Curve(edge),
         snap_pts: vec![(cv, SnapHint::Center)],
-        tangent_geoms: vec![TangentGeom::Circle {
-            center: [cwx as f32, cwy as f32, cwz as f32],
-            radius: r as f32,
-        }],
+        tangent_geoms: vec![tangent],
         key_vertices: vec![],
     }
 }

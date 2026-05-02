@@ -35,12 +35,6 @@ fn to_truck(circle: &Circle) -> TruckEntity {
     let p_top   = pt(ay, (0.0, 0.0, 0.0), r);
     let p_bot   = pt((ay.0 * -1.0, ay.1 * -1.0, ay.2 * -1.0), (0.0, 0.0, 0.0), r);
 
-    let right = builder::vertex(p_right);
-    let left  = builder::vertex(p_left);
-    let upper = builder::circle_arc(&right, &left, p_top);
-    let lower = builder::circle_arc(&left, &right, p_bot);
-    let wire: Wire = [upper, lower].into_iter().collect();
-
     let cv = Vec3::new(cwx as f32, cwy as f32, cwz as f32);
     let rf = r as f32;
     let q = |d: (f64, f64, f64)| Vec3::new(
@@ -48,19 +42,67 @@ fn to_truck(circle: &Circle) -> TruckEntity {
         (cwy + r * d.1) as f32,
         (cwz + r * d.2) as f32,
     );
+    let snap_pts = vec![
+        (cv, SnapHint::Center),
+        (q(ax),  SnapHint::Quadrant),
+        (q(ay),  SnapHint::Quadrant),
+        (q((-ax.0, -ax.1, -ax.2)), SnapHint::Quadrant),
+        (q((-ay.0, -ay.1, -ay.2)), SnapHint::Quadrant),
+    ];
+    let tangent = TangentGeom::Circle {
+        center: [cwx as f32, cwy as f32, cwz as f32],
+        radius: rf,
+    };
+
+    if circle.thickness.abs() > 1e-10 {
+        let t = circle.thickness;
+        let (nx, ny, nz) = normal;
+        let n = 64usize;
+        let tau = std::f64::consts::TAU;
+        let circ_pt = |a: f64| -> (f64, f64, f64) {
+            let (c, s) = (a.cos(), a.sin());
+            (
+                cwx + r * (c * ax.0 + s * ay.0),
+                cwy + r * (c * ax.1 + s * ay.1),
+                cwz + r * (c * ax.2 + s * ay.2),
+            )
+        };
+        let mut pts: Vec<[f32; 3]> = Vec::with_capacity((n + 1) * 2 + 4 * 3);
+        for i in 0..=n {
+            let (x, y, z) = circ_pt(i as f64 * tau / n as f64);
+            pts.push([x as f32, y as f32, z as f32]);
+        }
+        pts.push([f32::NAN; 3]);
+        for i in 0..=n {
+            let (x, y, z) = circ_pt(i as f64 * tau / n as f64);
+            pts.push([(x + t * nx) as f32, (y + t * ny) as f32, (z + t * nz) as f32]);
+        }
+        pts.push([f32::NAN; 3]);
+        for i in 0..4usize {
+            let (x, y, z) = circ_pt(i as f64 * std::f64::consts::FRAC_PI_2);
+            pts.push([x as f32, y as f32, z as f32]);
+            pts.push([(x + t * nx) as f32, (y + t * ny) as f32, (z + t * nz) as f32]);
+            if i < 3 {
+                pts.push([f32::NAN; 3]);
+            }
+        }
+        return TruckEntity {
+            object: TruckObject::Lines(pts),
+            snap_pts,
+            tangent_geoms: vec![tangent],
+            key_vertices: vec![],
+        };
+    }
+
+    let right = builder::vertex(p_right);
+    let left  = builder::vertex(p_left);
+    let upper = builder::circle_arc(&right, &left, p_top);
+    let lower = builder::circle_arc(&left, &right, p_bot);
+    let wire: Wire = [upper, lower].into_iter().collect();
     TruckEntity {
         object: TruckObject::Contour(wire),
-        snap_pts: vec![
-            (cv, SnapHint::Center),
-            (q(ax),  SnapHint::Quadrant),
-            (q(ay),  SnapHint::Quadrant),
-            (q((-ax.0, -ax.1, -ax.2)), SnapHint::Quadrant),
-            (q((-ay.0, -ay.1, -ay.2)), SnapHint::Quadrant),
-        ],
-        tangent_geoms: vec![TangentGeom::Circle {
-            center: [cwx as f32, cwy as f32, cwz as f32],
-            radius: rf,
-        }],
+        snap_pts,
+        tangent_geoms: vec![tangent],
         key_vertices: vec![],
     }
 }
