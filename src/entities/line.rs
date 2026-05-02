@@ -12,8 +12,15 @@ use crate::scene::object::{GripApply, GripDef, PropSection};
 use crate::scene::wire_model::TangentGeom;
 
 fn to_truck(line: &Line) -> TruckEntity {
-    let p0 = Point3::new(line.start.x, line.start.y, line.start.z);
-    let p1 = Point3::new(line.end.x, line.end.y, line.end.z);
+    let normal = (line.normal.x, line.normal.y, line.normal.z);
+    let (sx, sy, sz) = crate::scene::transform::ocs_point_to_wcs(
+        (line.start.x, line.start.y, line.start.z), normal,
+    );
+    let (ex, ey, ez) = crate::scene::transform::ocs_point_to_wcs(
+        (line.end.x, line.end.y, line.end.z), normal,
+    );
+    let p0 = Point3::new(sx, sy, sz);
+    let p1 = Point3::new(ex, ey, ez);
     let v0 = builder::vertex(p0);
     let v1 = builder::vertex(p1);
     let edge = builder::line(&v0, &v1);

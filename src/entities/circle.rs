@@ -16,38 +16,49 @@ fn to_truck(circle: &Circle) -> TruckEntity {
     let cy = circle.center.y;
     let cz = circle.center.z;
     let r = circle.radius;
-    let right = builder::vertex(Point3::new(cx + r, cy, cz));
-    let left = builder::vertex(Point3::new(cx - r, cy, cz));
-    let top = Point3::new(cx, cy + r, cz);
-    let bot = Point3::new(cx, cy - r, cz);
-    let upper = builder::circle_arc(&right, &left, top);
-    let lower = builder::circle_arc(&left, &right, bot);
+    let normal = (circle.normal.x, circle.normal.y, circle.normal.z);
+
+    let (ax, ay) = crate::scene::transform::ocs_axes(normal);
+    let (cwx, cwy, cwz) = crate::scene::transform::ocs_point_to_wcs((cx, cy, cz), normal);
+
+    // Circle points in WCS: centre_wcs ± r * Ax  and  centre_wcs ± r * Ay
+    let pt = |da: (f64, f64, f64), db: (f64, f64, f64), s: f64| {
+        Point3::new(
+            cwx + s * da.0 + s * db.0,
+            cwy + s * da.1 + s * db.1,
+            cwz + s * da.2 + s * db.2,
+        )
+    };
+    // right: centre + r*Ax, left: centre - r*Ax, top: centre + r*Ay, bot: centre - r*Ay
+    let p_right = pt(ax, (0.0, 0.0, 0.0), r);
+    let p_left  = pt((ax.0 * -1.0, ax.1 * -1.0, ax.2 * -1.0), (0.0, 0.0, 0.0), r);
+    let p_top   = pt(ay, (0.0, 0.0, 0.0), r);
+    let p_bot   = pt((ay.0 * -1.0, ay.1 * -1.0, ay.2 * -1.0), (0.0, 0.0, 0.0), r);
+
+    let right = builder::vertex(p_right);
+    let left  = builder::vertex(p_left);
+    let upper = builder::circle_arc(&right, &left, p_top);
+    let lower = builder::circle_arc(&left, &right, p_bot);
     let wire: Wire = [upper, lower].into_iter().collect();
-    let cv = Vec3::new(cx as f32, cy as f32, cz as f32);
+
+    let cv = Vec3::new(cwx as f32, cwy as f32, cwz as f32);
     let rf = r as f32;
+    let q = |d: (f64, f64, f64)| Vec3::new(
+        (cwx + r * d.0) as f32,
+        (cwy + r * d.1) as f32,
+        (cwz + r * d.2) as f32,
+    );
     TruckEntity {
         object: TruckObject::Contour(wire),
         snap_pts: vec![
             (cv, SnapHint::Center),
-            (
-                Vec3::new(cx as f32 + rf, cy as f32, cz as f32),
-                SnapHint::Quadrant,
-            ),
-            (
-                Vec3::new(cx as f32, cy as f32 + rf, cz as f32),
-                SnapHint::Quadrant,
-            ),
-            (
-                Vec3::new(cx as f32 - rf, cy as f32, cz as f32),
-                SnapHint::Quadrant,
-            ),
-            (
-                Vec3::new(cx as f32, cy as f32 - rf, cz as f32),
-                SnapHint::Quadrant,
-            ),
+            (q(ax),  SnapHint::Quadrant),
+            (q(ay),  SnapHint::Quadrant),
+            (q((-ax.0, -ax.1, -ax.2)), SnapHint::Quadrant),
+            (q((-ay.0, -ay.1, -ay.2)), SnapHint::Quadrant),
         ],
         tangent_geoms: vec![TangentGeom::Circle {
-            center: [cx as f32, cy as f32, cz as f32],
+            center: [cwx as f32, cwy as f32, cwz as f32],
             radius: rf,
         }],
         key_vertices: vec![],

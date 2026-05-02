@@ -63,3 +63,51 @@ pub fn mirror_xy_line(line: &mut acadrust::entities::Line, p1: Vec3, p2: Vec3) {
     reflect_xy_point(&mut line.start.x, &mut line.start.y, p1, p2);
     reflect_xy_point(&mut line.end.x, &mut line.end.y, p1, p2);
 }
+
+/// DXF arbitrary-axis algorithm — returns the OCS X and Y basis vectors in WCS
+/// for a given entity normal vector.
+///
+/// Returns (Ax, Ay) each as (x, y, z) tuples.  When normal ≈ (0,0,1) the
+/// function returns the standard basis ((1,0,0), (0,1,0)) without any
+/// cross-product computation.
+pub fn ocs_axes(normal: (f64, f64, f64)) -> ((f64, f64, f64), (f64, f64, f64)) {
+    let (nx, ny, nz) = normal;
+    // Fast path: normal is effectively Z-up, OCS = WCS.
+    if nx.abs() < 1e-10 && ny.abs() < 1e-10 && (nz - 1.0).abs() < 1e-10 {
+        return ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0));
+    }
+    // Arbitrary-axis algorithm (DXF spec).
+    // When |Nx| < 1/64 and |Ny| < 1/64 use Wy=(0,1,0)×N, else Wx=(1,0,0)×N.
+    let (ax_x, ax_y, ax_z) = if nx.abs() < 1.0 / 64.0 && ny.abs() < 1.0 / 64.0 {
+        // (0,1,0) × (nx,ny,nz) = (nz, 0, -nx)
+        let (x, y, z) = (nz, 0.0, -nx);
+        let len = (x * x + y * y + z * z).sqrt().max(1e-12);
+        (x / len, y / len, z / len)
+    } else {
+        // (1,0,0) × (nx,ny,nz) = (0, -nz, ny)
+        let (x, y, z) = (0.0, -nz, ny);
+        let len = (x * x + y * y + z * z).sqrt().max(1e-12);
+        (x / len, y / len, z / len)
+    };
+    // Ay = N × Ax
+    let ay_x = ny * ax_z - nz * ax_y;
+    let ay_y = nz * ax_x - nx * ax_z;
+    let ay_z = nx * ax_y - ny * ax_x;
+    ((ax_x, ax_y, ax_z), (ay_x, ay_y, ay_z))
+}
+
+/// Transform a single OCS point to WCS using the given normal vector.
+#[inline]
+pub fn ocs_point_to_wcs(
+    ocs: (f64, f64, f64),
+    normal: (f64, f64, f64),
+) -> (f64, f64, f64) {
+    let (ax, ay) = ocs_axes(normal);
+    let (ox, oy, oz) = ocs;
+    let (nx, ny, nz) = normal;
+    (
+        ox * ax.0 + oy * ay.0 + oz * nx,
+        ox * ax.1 + oy * ay.1 + oz * ny,
+        ox * ax.2 + oy * ay.2 + oz * nz,
+    )
+}

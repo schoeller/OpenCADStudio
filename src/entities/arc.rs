@@ -18,8 +18,12 @@ fn to_truck(arc: &Arc) -> TruckEntity {
     let r = arc.radius;
     let sa = arc.start_angle;
     let ea = arc.end_angle;
-    // normal.z < 0 means the arc sweeps clockwise in the XY plane;
-    // place the midpoint on the CW side so the curve goes the right way.
+    let normal = (arc.normal.x, arc.normal.y, arc.normal.z);
+
+    // Compute OCS basis vectors for this entity's normal.
+    let (ax, ay) = crate::scene::transform::ocs_axes(normal);
+
+    // When normal.z < 0 the arc sweeps clockwise; reverse the half-angle choice.
     let mid_a = if arc.normal.z < 0.0 {
         let cw_span = if sa >= ea { sa - ea } else { sa - ea + TAU };
         sa - cw_span * 0.5
@@ -27,18 +31,32 @@ fn to_truck(arc: &Arc) -> TruckEntity {
         let ccw_end = if ea >= sa { ea } else { ea + TAU };
         sa + (ccw_end - sa) * 0.5
     };
-    let p_start = Point3::new(cx + r * sa.cos(), cy + r * sa.sin(), cz);
-    let p_end = Point3::new(cx + r * ea.cos(), cy + r * ea.sin(), cz);
-    let p_mid = Point3::new(cx + r * mid_a.cos(), cy + r * mid_a.sin(), cz);
+
+    // Arc centre in WCS.
+    let (cwx, cwy, cwz) = crate::scene::transform::ocs_point_to_wcs((cx, cy, cz), normal);
+
+    // Arc points in WCS: centre_wcs + r*cos(a)*Ax + r*sin(a)*Ay
+    let arc_pt = |a: f64| {
+        let (c, s) = (a.cos(), a.sin());
+        Point3::new(
+            cwx + r * c * ax.0 + r * s * ay.0,
+            cwy + r * c * ax.1 + r * s * ay.1,
+            cwz + r * c * ax.2 + r * s * ay.2,
+        )
+    };
+
+    let p_start = arc_pt(sa);
+    let p_end = arc_pt(ea);
+    let p_mid = arc_pt(mid_a);
     let v_start = builder::vertex(p_start);
     let v_end = builder::vertex(p_end);
     let edge = builder::circle_arc(&v_start, &v_end, p_mid);
-    let cv = Vec3::new(cx as f32, cy as f32, cz as f32);
+    let cv = Vec3::new(cwx as f32, cwy as f32, cwz as f32);
     TruckEntity {
         object: TruckObject::Curve(edge),
         snap_pts: vec![(cv, SnapHint::Center)],
         tangent_geoms: vec![TangentGeom::Circle {
-            center: [cx as f32, cy as f32, cz as f32],
+            center: [cwx as f32, cwy as f32, cwz as f32],
             radius: r as f32,
         }],
         key_vertices: vec![],
