@@ -1,8 +1,8 @@
 use acadrust::entities::Spline;
 use glam::Vec3;
 use truck_modeling::{
-    base::{BoundedCurve, ParametricCurve},
-    builder, BSplineCurve, Curve, Edge, KnotVec, Point3, Wire,
+    base::{BoundedCurve, ParametricCurve, Vector4},
+    builder, BSplineCurve, Curve, Edge, KnotVec, NurbsCurve, Point3, Wire,
 };
 
 use crate::command::EntityTransform;
@@ -12,12 +12,8 @@ use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
 use crate::scene::object::{GripApply, GripDef, PropSection};
 
 fn to_truck(spl: &Spline) -> TruckEntity {
-    let ctrl_pts: Vec<Point3> = spl
-        .control_points
-        .iter()
-        .map(|p| Point3::new(p.x, p.y, p.z))
-        .collect();
-    if ctrl_pts.len() < 2 {
+    let n = spl.control_points.len();
+    if n < 2 {
         return TruckEntity {
             object: TruckObject::Point(builder::vertex(Point3::new(0.0, 0.0, 0.0))),
             snap_pts: vec![],
@@ -25,15 +21,38 @@ fn to_truck(spl: &Spline) -> TruckEntity {
             key_vertices: vec![],
         };
     }
+
     let knot_vec = if !spl.knots.is_empty() {
         KnotVec::from(spl.knots.clone())
     } else {
-        KnotVec::uniform_knot(spl.degree as usize, ctrl_pts.len() - 1)
+        KnotVec::uniform_knot(spl.degree as usize, n - 1)
     };
-    let bspline = BSplineCurve::new(knot_vec, ctrl_pts);
-    let (t0, t1) = bspline.range_tuple();
-    let p_start = bspline.subs(t0);
-    let p_end = bspline.subs(t1);
+
+    // Use rational NURBS when weights are provided (circles/conics stored as NURBS).
+    let use_nurbs = !spl.weights.is_empty() && spl.weights.len() == n;
+    let (p_start, p_end, curve) = if use_nurbs {
+        let homo_pts: Vec<Vector4> = spl
+            .control_points
+            .iter()
+            .zip(spl.weights.iter())
+            .map(|(p, &w)| {
+                let w = if w.abs() < 1e-12 { 1.0 } else { w };
+                Vector4::new(p.x * w, p.y * w, p.z * w, w)
+            })
+            .collect();
+        let nurbs = NurbsCurve::new(BSplineCurve::new(knot_vec, homo_pts));
+        let (t0, t1) = nurbs.range_tuple();
+        (nurbs.subs(t0), nurbs.subs(t1), Curve::NurbsCurve(nurbs))
+    } else {
+        let ctrl_pts: Vec<Point3> = spl
+            .control_points
+            .iter()
+            .map(|p| Point3::new(p.x, p.y, p.z))
+            .collect();
+        let bspline = BSplineCurve::new(knot_vec, ctrl_pts);
+        let (t0, t1) = bspline.range_tuple();
+        (bspline.subs(t0), bspline.subs(t1), Curve::BSplineCurve(bspline))
+    };
 
     let snap_source = if !spl.fit_points.is_empty() {
         &spl.fit_points
@@ -54,18 +73,17 @@ fn to_truck(spl: &Spline) -> TruckEntity {
     };
 
     let object = if is_closed && gap > 1e-6 {
-        // The B-spline doesn't self-close — add an explicit closing segment.
         let v_start = builder::vertex(p_start);
         let v_end = builder::vertex(p_end);
         let v_close = builder::vertex(p_start);
-        let main_edge = Edge::new(&v_start, &v_end, Curve::BSplineCurve(bspline));
+        let main_edge = Edge::new(&v_start, &v_end, curve);
         let close_edge = builder::line(&v_end, &v_close);
         let wire: Wire = [main_edge, close_edge].into_iter().collect();
         TruckObject::Contour(wire)
     } else {
         let v_start = builder::vertex(p_start);
         let v_end = builder::vertex(p_end);
-        let edge = Edge::new(&v_start, &v_end, Curve::BSplineCurve(bspline));
+        let edge = Edge::new(&v_start, &v_end, curve);
         TruckObject::Curve(edge)
     };
 
