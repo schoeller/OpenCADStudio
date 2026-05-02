@@ -624,7 +624,14 @@ fn legacy_geometry(entity: &EntityType, world_offset: [f64; 3]) -> Geometry {
             (pts, vec![(ip, SnapHint::Insertion)], vec![], vec![])
         }
         EntityType::Hatch(h) => {
-            let elev = (h.elevation - oz) as f32;
+            let normal = (h.normal.x, h.normal.y, h.normal.z);
+            // Convert a 2D OCS hatch boundary point to WCS, then subtract world_offset.
+            let to_wcs = |x: f64, y: f64| -> [f32; 3] {
+                let (wx, wy, wz) = crate::scene::transform::ocs_point_to_wcs(
+                    (x, y, h.elevation), normal,
+                );
+                [(wx - ox) as f32, (wy - oy) as f32, (wz - oz) as f32]
+            };
             let mut pts: Vec<[f32; 3]> = Vec::new();
             let mut key_verts: Vec<[f32; 3]> = Vec::new();
             let mut snap_pts: Vec<(Vec3, SnapHint)> = Vec::new();
@@ -634,7 +641,7 @@ fn legacy_geometry(entity: &EntityType, world_offset: [f64; 3]) -> Geometry {
                         acadrust::entities::BoundaryEdge::Polyline(poly) => {
                             let start_idx = pts.len();
                             for v in &poly.vertices {
-                                let p = [(v.x - ox) as f32, (v.y - oy) as f32, elev];
+                                let p = to_wcs(v.x, v.y);
                                 pts.push(p);
                                 key_verts.push(p);
                             }
@@ -643,8 +650,8 @@ fn legacy_geometry(entity: &EntityType, world_offset: [f64; 3]) -> Geometry {
                             }
                         }
                         acadrust::entities::BoundaryEdge::Line(ln) => {
-                            let p0 = [(ln.start.x - ox) as f32, (ln.start.y - oy) as f32, elev];
-                            let p1 = [(ln.end.x - ox) as f32, (ln.end.y - oy) as f32, elev];
+                            let p0 = to_wcs(ln.start.x, ln.start.y);
+                            let p1 = to_wcs(ln.end.x, ln.end.y);
                             if !pts.is_empty() { pts.push([f32::NAN; 3]); }
                             pts.push(p0);
                             pts.push(p1);
@@ -652,9 +659,6 @@ fn legacy_geometry(entity: &EntityType, world_offset: [f64; 3]) -> Geometry {
                             key_verts.push(p1);
                         }
                         acadrust::entities::BoundaryEdge::CircularArc(arc) => {
-                            let cx = (arc.center.x - ox) as f32;
-                            let cy = (arc.center.y - oy) as f32;
-                            let r = arc.radius as f32;
                             let sa = (arc.start_angle as f32).to_radians();
                             let ea = (arc.end_angle as f32).to_radians();
                             let span = if ea > sa {
@@ -668,15 +672,16 @@ fn legacy_geometry(entity: &EntityType, world_offset: [f64; 3]) -> Geometry {
                             if !pts.is_empty() { pts.push([f32::NAN; 3]); }
                             for i in 0..=segs {
                                 let t = sa + span * (i as f32 / segs as f32);
-                                let p = [cx + r * t.cos(), cy + r * t.sin(), elev];
+                                let p = to_wcs(
+                                    arc.center.x + arc.radius * t.cos() as f64,
+                                    arc.center.y + arc.radius * t.sin() as f64,
+                                );
                                 pts.push(p);
                                 if i == 0 || i == segs { key_verts.push(p); }
                             }
-                            snap_pts.push((Vec3::new(cx, cy, elev), SnapHint::Center));
+                            snap_pts.push((Vec3::from(to_wcs(arc.center.x, arc.center.y)), SnapHint::Center));
                         }
                         acadrust::entities::BoundaryEdge::EllipticArc(ell) => {
-                            let cx = (ell.center.x - ox) as f32;
-                            let cy = (ell.center.y - oy) as f32;
                             let r_maj = ((ell.major_axis_endpoint.x * ell.major_axis_endpoint.x
                                 + ell.major_axis_endpoint.y * ell.major_axis_endpoint.y)
                                 .sqrt()) as f32;
@@ -698,15 +703,13 @@ fn legacy_geometry(entity: &EntityType, world_offset: [f64; 3]) -> Geometry {
                                 let t = sa + span * (i as f32 / segs as f32);
                                 let lx = r_maj * t.cos();
                                 let ly = r_min * t.sin();
-                                let p = [
-                                    cx + lx * rot.cos() - ly * rot.sin(),
-                                    cy + lx * rot.sin() + ly * rot.cos(),
-                                    elev,
-                                ];
+                                let ocs_x = ell.center.x + (lx * rot.cos() - ly * rot.sin()) as f64;
+                                let ocs_y = ell.center.y + (lx * rot.sin() + ly * rot.cos()) as f64;
+                                let p = to_wcs(ocs_x, ocs_y);
                                 pts.push(p);
                                 if i == 0 || i == segs { key_verts.push(p); }
                             }
-                            snap_pts.push((Vec3::new(cx, cy, elev), SnapHint::Center));
+                            snap_pts.push((Vec3::from(to_wcs(ell.center.x, ell.center.y)), SnapHint::Center));
                         }
                         _ => {}
                     }
