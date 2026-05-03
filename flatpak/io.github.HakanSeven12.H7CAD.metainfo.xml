@@ -36,6 +36,15 @@
   </screenshots>
 
   <releases>
+    <release version="0.2.2" date="2026-05-03">
+      <description>
+        <ul>
+          <li>Fixed creating a new drawing so existing open files remain in their tabs.</li>
+          <li>Fixed arc creation to preserve clicked positions and keep internal arc angles in radians.</li>
+          <li>Improved OCS/WCS handling, snap points, hatch boundary rendering, and thickness extrusion support.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-03-22">
       <description>
         <p>Initial release of H7CAD.</p>
