@@ -221,6 +221,9 @@ fn fix_dxf_dimension_rotations(doc: &mut CadDocument) {
             EntityType::AttributeEntity(a) => {
                 a.rotation = a.rotation.to_radians();
             }
+            EntityType::Shape(s) => {
+                s.rotation = s.rotation.to_radians();
+            }
             _ => {}
         }
     }

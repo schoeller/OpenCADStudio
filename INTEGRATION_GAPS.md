@@ -43,7 +43,7 @@ Legend: ✅ Done · ⚠️ Partial · ❌ Not done
 | Status | Entity | Notes |
 |---|---|---|
 | ✅ | **Face3D** | Full tessellation, grips, properties panel — `src/entities/mesh.rs` |
-| ❌ | **OLE2Frame** | Bounding box + X mark only; no interactivity |
+| ✅ | **OLE2Frame** | Bounding box + X mark with grips, properties panel, transform — `src/entities/ole2frame.rs` |
 
 ### Wire Fallback Only (no full mesh)
 
@@ -189,7 +189,7 @@ These are fixed in our post-load `fix_dxf_dimension_rotations()` in `src/io/mod.
 | ✅ | **Dimension (all)** | `text_rotation` | 53 | `src/scene/tessellate.rs::dimension_text_natural_rotation()` |
 | ✅ | **AttributeEntity** | `rotation` | 50 | `src/io/mod.rs:224` |
 | ✅ | **AttributeDefinition** | `rotation` | 50 | `src/io/mod.rs:219` |
-| ❌ | **Shape** | `rotation` | 50 | Shape not currently rendered — low priority |
+| ✅ | **Shape** | `rotation` | 50 | Fixed in `fix_dxf_dimension_rotations()` — `src/io/mod.rs` |
 
 ---
 
@@ -207,13 +207,13 @@ These are fixed in our post-load `fix_dxf_dimension_rotations()` in `src/io/mod.
 
 | Status | Count |
 |---|---|
-| ✅ Done | 44 |
+| ✅ Done | 46 |
 | ⚠️ Partial | 3 |
-| ❌ Not done | 2 |
+| ❌ Not done | 0 |
 | **Total** | **49** |
 
 ### Remaining gaps by priority
 
 **Medium:** Viewport GPU scissor rect (pixel-level boundary clipping for overlapping viewports)
 
-**Low:** LWPolyline plinegen (GPU shader change needed) · OLE2Frame improvement · Shape rotation
+**Low:** LWPolyline plinegen (GPU shader change needed)
