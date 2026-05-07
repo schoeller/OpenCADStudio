@@ -12,6 +12,50 @@ Current pipeline order:
 
 ---
 
+## Temporary Workarounds (to be reverted)
+
+> **These are stop-gap measures to prevent crashes on large files. They must be removed
+> once the proper Phase 1–3 optimizations are in place, because they silently drop geometry
+> rather than culling it intelligently.**
+
+### Wire Segment Hard Caps (commit 321433e)
+
+**Problem:** Some entities — particularly dense `PolyfaceMesh` / `PolygonMesh` edge meshes,
+high-resolution splines, or very large polylines — tessellate into hundreds of thousands of
+line segments. Each segment expands to 6 GPU vertices × 96 bytes = 576 bytes. A single
+pathological entity could allocate hundreds of megabytes; a large file with many such entities
+exhausts all available GPU memory and crashes the renderer.
+
+**Temporary fix applied in `src/scene/pipeline/wire_gpu.rs` and `src/scene/pipeline/mod.rs`:**
+
+1. **Per-entity cap — `MAX_SEGS_PER_WIRE = 100_000`**
+   Defined as a `pub const` in `wire_gpu.rs`. Applied in both `WireGpu::build()` (used by
+   `WireGpu::new`) and `WireGpu::from_batch()`. If a single `WireModel` contains more than
+   100 K segments, the excess tail is silently truncated and a warning is printed to stderr:
+   ```
+   [H7CAD] wire '<handle>': <N> segments exceeds limit (100000), truncating
+   ```
+
+2. **Scene-level budget — `MAX_TOTAL_SEGS = 3_000_000`**
+   Enforced in `Pipeline::upload_wires()`. Wires are processed in the order they arrive; once
+   the running segment total would exceed 3 M, all remaining wires are skipped for that frame:
+   ```
+   [H7CAD] upload_wires: skipped <N> wire(s) — total segment budget (3000000) exceeded
+   ```
+   At 576 bytes/segment the budget caps GPU wire memory at roughly **1.6 GB**.
+
+**Why this must be reverted:**
+- Truncation cuts an entity mid-geometry; the rendered result is visually wrong.
+- Skipping by arrival order is arbitrary — important visible entities may be dropped while
+  invisible off-screen entities are retained (no spatial awareness).
+- The correct solution is Phase 1 (AABB cull before upload) + Phase 3.2 (adaptive arc segments),
+  which eliminate the excess geometry without ever creating it in the first place.
+
+**Revert when:** Phase 1.3 (CPU cull before upload) is landed and verified to keep peak GPU
+wire memory below ~512 MB for the pathological files that triggered these caps.
+
+---
+
 ## Phase 1 — Viewport Bounding-Box Culling
 
 **Goal:** Skip CPU upload and draw calls for entities outside the camera view.
