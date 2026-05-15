@@ -101,24 +101,22 @@ pub fn build_derived_caches(doc: &CadDocument) -> DerivedCaches {
                 .unwrap_or(Handle::NULL)
         });
 
-    // world_offset (from DXF header extents — fast and works when the
-    // writer correctly folded Insert→Block expansion into $EXTMIN/$EXTMAX).
-    let h = &doc.header;
-    let (min, max) = (h.model_space_extents_min, h.model_space_extents_max);
-    let valid = min.x < max.x && min.y < max.y;
-    let (world_offset, local_extent_max) = if valid {
-        let offset = [
-            (min.x + max.x) * 0.5,
-            (min.y + max.y) * 0.5,
-            (min.z + max.z) * 0.5,
-        ];
-        let hw = ((max.x - min.x) * 0.5) as f32;
-        let hh = ((max.y - min.y) * 0.5) as f32;
-        let hz = ((max.z - min.z) * 0.5).max(1.0) as f32;
-        (offset, hw.max(hh).max(hz) * 10.0)
-    } else {
-        ([0.0; 3], 1e9_f32)
-    };
+    // world_offset selection
+    //
+    // Header `$EXTMIN`/`$EXTMAX` is the fast path, but it's untrustworthy:
+    // the sentinel (1e20 / -1e20) when the writer never computed extents,
+    // stale values when a drawing was edited and extents weren't refreshed,
+    // and Civil-3D-style top-level extents that span only an Insert's
+    // bounding box rather than the actual MSPACE geometry. Any of those
+    // leave the precision-preserving offset wrong, so direct MSPACE
+    // entities render at huge magnitudes and f32 wires lose precision.
+    //
+    // Cross-check the header against a per-entity AABB scan of MSPACE
+    // (same `bounding_box()` API and same SANE_EXTENT/zero-placeholder
+    // filters that `block_cache::build_defn` already uses for block defns)
+    // and prefer the entity-scan when the header center drifts more than
+    // 10× its own half-span away from the entity centroid.
+    let (world_offset, local_extent_max) = compute_world_offset(doc, model_block);
 
     use rayon::prelude::*;
 
@@ -201,6 +199,143 @@ pub fn build_derived_caches(doc: &CadDocument) -> DerivedCaches {
         images,
         meshes,
         corrupt_dropped: 0,
+    }
+}
+
+/// Pick the model-space precision-preserving offset and the `fit_all`
+/// outlier-rejection limit.
+///
+/// Tries header `$EXTMIN/$EXTMAX` first, then cross-checks against a direct
+/// MSPACE entity AABB scan. The entity scan wins when the header is invalid
+/// (sentinel / sub-empty) or when the header center has drifted more than
+/// 10× its own half-span from the entity centroid (a stale-extents DXF).
+fn compute_world_offset(
+    doc: &acadrust::CadDocument,
+    model_block: Handle,
+) -> ([f64; 3], f32) {
+    // Mirrors `block_cache::SANE_EXTENT` — wire coords past this magnitude
+    // are treated as corruption rather than precision-relevant geometry.
+    const SANE_EXTENT: f64 = 1.0e8;
+
+    // ── Pass 1: scan MSPACE entity bounding boxes ────────────────────────
+    let mut emin = [f64::INFINITY; 3];
+    let mut emax = [f64::NEG_INFINITY; 3];
+    let mut have = [false; 3];
+    for e in doc.entities() {
+        let c = e.common();
+        if c.owner_handle != model_block {
+            continue;
+        }
+        // Skip block-defn sentinels and AttributeDefinition — same as
+        // block_cache::build_defn. Their bboxes don't represent drawable
+        // MSPACE geometry.
+        if matches!(
+            e,
+            EntityType::Block(_)
+                | EntityType::BlockEnd(_)
+                | EntityType::AttributeDefinition(_)
+        ) {
+            continue;
+        }
+        let (bmin, bmax) = match e {
+            EntityType::Insert(ins) => (ins.insert_point, ins.insert_point),
+            _ => {
+                let bb = e.as_entity().bounding_box();
+                (bb.min, bb.max)
+            }
+        };
+        // Empty-entity placeholder (Polyline/Hatch/Spline/Mesh with no
+        // vertices). Including these would pull the centroid toward origin
+        // and destroy precision on UTM-authored content.
+        if bmin.x == 0.0
+            && bmin.y == 0.0
+            && bmin.z == 0.0
+            && bmax.x == 0.0
+            && bmax.y == 0.0
+            && bmax.z == 0.0
+        {
+            continue;
+        }
+        let lo = [bmin.x, bmin.y, bmin.z];
+        let hi = [bmax.x, bmax.y, bmax.z];
+        for i in 0..3 {
+            if !lo[i].is_finite() || !hi[i].is_finite() {
+                continue;
+            }
+            if lo[i].abs() > SANE_EXTENT || hi[i].abs() > SANE_EXTENT {
+                continue;
+            }
+            if lo[i] < emin[i] {
+                emin[i] = lo[i];
+            }
+            if hi[i] > emax[i] {
+                emax[i] = hi[i];
+            }
+            have[i] = true;
+        }
+    }
+    let entity_ok = have[0] && have[1];
+
+    // ── Pass 2: read header extents ──────────────────────────────────────
+    let h = &doc.header;
+    let hmin = h.model_space_extents_min;
+    let hmax = h.model_space_extents_max;
+    let header_ok = hmin.x < hmax.x
+        && hmin.y < hmax.y
+        && hmin.x.abs() < SANE_EXTENT
+        && hmax.x.abs() < SANE_EXTENT
+        && hmin.y.abs() < SANE_EXTENT
+        && hmax.y.abs() < SANE_EXTENT;
+
+    let from_header = || -> ([f64; 3], f32) {
+        let offset = [
+            (hmin.x + hmax.x) * 0.5,
+            (hmin.y + hmax.y) * 0.5,
+            (hmin.z + hmax.z) * 0.5,
+        ];
+        let hw = ((hmax.x - hmin.x) * 0.5) as f32;
+        let hh = ((hmax.y - hmin.y) * 0.5) as f32;
+        let hz = ((hmax.z - hmin.z) * 0.5).max(1.0) as f32;
+        (offset, hw.max(hh).max(hz) * 10.0)
+    };
+    let from_entity = || -> ([f64; 3], f32) {
+        let z_have = have[2];
+        let offset = [
+            (emin[0] + emax[0]) * 0.5,
+            (emin[1] + emax[1]) * 0.5,
+            if z_have { (emin[2] + emax[2]) * 0.5 } else { 0.0 },
+        ];
+        let hw = ((emax[0] - emin[0]) * 0.5) as f32;
+        let hh = ((emax[1] - emin[1]) * 0.5) as f32;
+        let hz = if z_have {
+            ((emax[2] - emin[2]) * 0.5).max(1.0) as f32
+        } else {
+            1.0
+        };
+        (offset, hw.max(hh).max(hz) * 10.0)
+    };
+
+    match (header_ok, entity_ok) {
+        (false, false) => ([0.0; 3], 1e9_f32),
+        (false, true) => from_entity(),
+        (true, false) => from_header(),
+        (true, true) => {
+            // Stale-header detection: how many header half-spans is the
+            // header center away from the entity centroid? > 10 → trust
+            // entities, header is lying.
+            let hcx = (hmin.x + hmax.x) * 0.5;
+            let hcy = (hmin.y + hmax.y) * 0.5;
+            let ecx = (emin[0] + emax[0]) * 0.5;
+            let ecy = (emin[1] + emax[1]) * 0.5;
+            let hhw = ((hmax.x - hmin.x).abs() * 0.5).max(1.0);
+            let hhh = ((hmax.y - hmin.y).abs() * 0.5).max(1.0);
+            let drift = ((hcx - ecx).abs() / hhw).max((hcy - ecy).abs() / hhh);
+            if drift > 10.0 {
+                from_entity()
+            } else {
+                from_header()
+            }
+        }
     }
 }
 
@@ -454,28 +589,10 @@ impl Scene {
 
     #[allow(dead_code)]
     pub fn compute_and_set_world_offset(&mut self) {
-        let h = &self.document.header;
-        let min = h.model_space_extents_min;
-        let max = h.model_space_extents_max;
-        // Sentinel: DXF files with no geometry have EXTMIN = 1e20, EXTMAX = -1e20.
-        // Fall back to no offset so the scene stays at the origin.
-        let valid = min.x < max.x && min.y < max.y;
-        if valid {
-            self.world_offset = [
-                (min.x + max.x) * 0.5,
-                (min.y + max.y) * 0.5,
-                (min.z + max.z) * 0.5,
-            ];
-            // 10× the EXTMIN→EXTMAX half-diagonal gives fit_all() a threshold to
-            // reject origin-stuck/corrupted entities far outside the drawing area.
-            let hw = ((max.x - min.x) * 0.5) as f32;
-            let hh = ((max.y - min.y) * 0.5) as f32;
-            let hz = ((max.z - min.z) * 0.5).max(1.0) as f32;
-            self.local_extent_max = hw.max(hh).max(hz) * 10.0;
-        } else {
-            self.world_offset = [0.0; 3];
-            self.local_extent_max = 1e9;
-        }
+        let model_block = self.model_space_block_handle();
+        let (offset, lim) = compute_world_offset(&self.document, model_block);
+        self.world_offset = offset;
+        self.local_extent_max = lim;
     }
 
     /// Returns true if this viewport should display model-space content
