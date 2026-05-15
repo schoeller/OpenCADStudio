@@ -36,6 +36,21 @@
   </screenshots>
 
   <releases>
+    <release version="0.2.8" date="2026-05-15">
+      <description>
+        <ul>
+          <li>Fixed major precision loss on UTM-authored drawings: world_offset now derives from the median of MSPACE entity centroids instead of the DXF $EXTMIN/$EXTMAX midpoint, so a single stray entity can no longer drag the offset hundreds of kilometres away from the real geometry (about 120× better precision on the affected files).</li>
+          <li>Fixed Zoom Extents collapsing the drawing to sub-pixel size on files with orphan or block-defn entities leaking into model space.</li>
+          <li>Fixed phantom selectable segments from BLOCK / ENDBLK sentinels showing up far from the visible drawing.</li>
+          <li>Fixed two text rendering bugs: greek (sub-pixel) rectangle now fills at the text's own color, and the rectangle honours word-wrapped sub-line count.</li>
+          <li>Performance: multi-resolution mesh LOD for 3D solids — the render pipeline now picks one of three pre-built tessellation densities per frame based on projected pixel size.</li>
+          <li>Performance: hatch LOD substitutes solid fill when pattern spacing falls below ~2 px, and skips draw calls entirely when the whole hatch projects to sub-pixel size.</li>
+          <li>Performance: zoom-adaptive curve tolerance for top-level wires — distant arcs no longer emit hundreds of segments that all collapse onto one pixel.</li>
+          <li>Performance: text LOD ladder (baseline-line / greek / full) now also applies to MultiLeader text content.</li>
+          <li>Performance: paper-space viewport scissor extended to hatch / image / wipeout passes (in addition to the existing wire scissor).</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.2" date="2026-05-03">
       <description>
         <ul>
