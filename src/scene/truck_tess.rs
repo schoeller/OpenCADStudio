@@ -20,6 +20,38 @@ const CURVE_TOL: f64 = 0.005;
 // Triangle mesh tolerance (world units).
 pub const MESH_TOL: f64 = 0.01;
 
+// ── Zoom-adaptive curve tolerance override ────────────────────────────────
+//
+// The Scene sets this once per render frame to a value derived from
+// `world_per_pixel` (target ≈ 0.5 px chord height). All Edge tessellations
+// inside the frame — including those running on rayon worker threads — read
+// from the same atomic, so callers don't need to thread a tolerance
+// parameter through every entity-converter signature. Zero means "use
+// `CURVE_TOL`"; that is the default, and what BlockCache::build expects.
+use std::sync::atomic::{AtomicU64, Ordering};
+static CURVE_TOL_BITS: AtomicU64 = AtomicU64::new(0);
+
+/// Set the per-frame curve tolerance. `None` (or any non-finite/<=0 value)
+/// reverts to the default `CURVE_TOL`.
+pub fn set_curve_tol_override(tol: Option<f64>) {
+    let bits = match tol {
+        Some(t) if t > 0.0 && t.is_finite() => t.to_bits(),
+        _ => 0,
+    };
+    CURVE_TOL_BITS.store(bits, Ordering::Relaxed);
+}
+
+/// Resolve the active curve tolerance. Clamped to the floor `CURVE_TOL` so
+/// extreme zoom-in never under-samples below the existing baseline quality.
+fn current_curve_tol() -> f64 {
+    let bits = CURVE_TOL_BITS.load(Ordering::Relaxed);
+    if bits == 0 {
+        CURVE_TOL
+    } else {
+        f64::from_bits(bits).max(CURVE_TOL)
+    }
+}
+
 // ── Public result type ────────────────────────────────────────────────────
 
 /// Output of any truck topology tessellation.
@@ -65,8 +97,9 @@ pub fn tessellate_edge(e: &Edge, offset: [f64; 3]) -> TruckTessResult {
     let curve = e.oriented_curve();
     let (t0, t1) = curve.range_tuple();
     // parameter_division samples adaptively: fewer points on straight segments,
-    // more on tight curves, all within CURVE_TOL chord-height error.
-    let (_, pts) = curve.parameter_division((t0, t1), CURVE_TOL);
+    // more on tight curves, all within the active chord-height tolerance.
+    // The Scene scales this with zoom so far-out arcs aren't oversampled.
+    let (_, pts) = curve.parameter_division((t0, t1), current_curve_tol());
     let lines = pts
         .iter()
         .map(|p| to_local(p.x, p.y, p.z, offset))

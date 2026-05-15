@@ -1051,6 +1051,21 @@ impl Scene {
         let blk_ref: &block_cache::BlockCache = &blk_cache;
         let view_aabb = self.view_world_aabb();
         let wpp = self.world_per_pixel();
+        // Zoom-adaptive curve sampling for top-level Edge tessellation. Target
+        // ~0.5 px chord height — far-out arcs that used to emit hundreds of
+        // segments now collapse to a handful. The guard clears the override
+        // when this scope exits so off-render tessellation (snap previews,
+        // hit-test, block_cache rebuild) sees the default.
+        struct CurveTolGuard;
+        impl Drop for CurveTolGuard {
+            fn drop(&mut self) {
+                crate::scene::truck_tess::set_curve_tol_override(None);
+            }
+        }
+        let _tol_guard = wpp.map(|w| {
+            crate::scene::truck_tess::set_curve_tol_override(Some((w * 0.5) as f64));
+            CurveTolGuard
+        });
         let mut wires: Vec<WireModel> = visible
             .into_par_iter()
             .flat_map(|e| {

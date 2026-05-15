@@ -64,31 +64,6 @@ let candidates = scene.quadtree.query_rect(view_aabb);
 
 **Goal:** Reduce geometric complexity when entities are small or far away.
 
-### 3.2 Wire LOD — Curve Segment Reduction
-
-Arcs, ellipses, and splines tessellate to N segments (currently fixed). Replace with
-zoom-adaptive segment count.
-
-```rust
-fn arc_segments(radius_world: f64, px_per_unit: f64) -> u32 {
-    // target: ~1 segment per 2px of arc length on screen
-    let arc_px = radius_world * px_per_unit * TWO_PI;
-    (arc_px / 2.0).clamp(8.0, 256.0) as u32
-}
-```
-
-Recompute segments when zoom crosses a threshold (epoch-based invalidation already in place).
-Store LOD level per entity; retessellate only on LOD level change.
-
-LOD levels (example):
-
-| Zoom (px/unit) | Segments per 90° arc |
-|----------------|----------------------|
-| > 100 px/u     | 64 (full detail)     |
-| 10–100 px/u    | 24                   |
-| 1–10 px/u      | 12                   |
-| < 1 px/u       | 6 (or sub-pixel cull)|
-
 ### 3.3 Hatch LOD — Density Reduction
 
 At low zoom, hatch line spacing appears smaller than 1px. Options:
@@ -163,7 +138,6 @@ Relevant only for perspective (3D) mode with many overlapping solids.
 ```
 Phase 1.4  Scissor for hatch/image          low complexity
 Phase 2.1  Quadtree for 2D                  medium complexity, scales 2D docs
-Phase 3.2  Wire curve LOD                   medium, affects tessellation cache
 Phase 3.3  Hatch LOD                        low complexity
 Phase 3.4  Mesh LOD                         high complexity, background thread
 Phase 2.2  Octree for 3D                    medium, needed for dense 3D
@@ -180,7 +154,6 @@ Phase 4.2  Hi-Z occlusion                   high complexity, 3D only, last
 | `src/scene/mesh_model.rs` | Add `Aabb3`, LOD mesh array |
 | `src/scene/hatch_model.rs` | Add `Aabb2` field |
 | `src/scene/image_model.rs` | Add `Aabb2` field |
-| `src/scene/tessellate.rs` | Adaptive arc segments |
 | `src/scene/truck_tess.rs` | Multi-resolution mesh tessellation |
 | `src/scene/mod.rs` | Quadtree/octree; LOD epoch tracking |
 | `src/scene/pipeline/mod.rs` | Cull hatch/image entities before upload loops |
