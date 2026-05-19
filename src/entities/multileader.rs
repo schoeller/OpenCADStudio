@@ -510,9 +510,112 @@ fn properties(ml: &MultiLeader) -> PropSection {
                 "Bottom Line",
             ],
         ),
+        // Top / Bottom attach (used when text_attachment_direction = Vertical)
+        choice(
+            "Top Attach",
+            "text_top_attachment",
+            attachment_str(&ml.text_top_attachment),
+            &[
+                "Top of Top",
+                "Mid of Top",
+                "Mid of Text",
+                "Mid of Bot",
+                "Bot of Bot",
+                "Bottom Line",
+            ],
+        ),
+        choice(
+            "Bottom Attach",
+            "text_bottom_attachment",
+            attachment_str(&ml.text_bottom_attachment),
+            &[
+                "Top of Top",
+                "Mid of Top",
+                "Mid of Text",
+                "Mid of Bot",
+                "Bot of Bot",
+                "Bottom Line",
+            ],
+        ),
         // Stats
         ro("Leader Pts", "total_pts", total_pts.to_string()),
         ro("Roots", "root_count", ctx.leader_roots.len().to_string()),
+        // Style references / handles (read-only — the multileader's own
+        // copies of the style values are the authoritative render inputs).
+        ro(
+            "Style Handle",
+            "style_handle",
+            match ml.style_handle {
+                Some(h) if !h.is_null() => format!("{:X}", h.value()),
+                _ => "(none)".to_string(),
+            },
+        ),
+        ro(
+            "Text Style Handle",
+            "text_style_handle",
+            match ml.text_style_handle {
+                Some(h) if !h.is_null() => format!("{:X}", h.value()),
+                _ => "(none)".to_string(),
+            },
+        ),
+        ro(
+            "Arrow Handle",
+            "arrowhead_handle",
+            match ml.arrowhead_handle {
+                Some(h) if !h.is_null() => format!("{:X}", h.value()),
+                _ => "(none)".to_string(),
+            },
+        ),
+        ro(
+            "Line Type Handle",
+            "line_type_handle",
+            match ml.line_type_handle {
+                Some(h) if !h.is_null() => format!("{:X}", h.value()),
+                _ => "(none)".to_string(),
+            },
+        ),
+        ro(
+            "Block Content Handle",
+            "block_content_handle",
+            match ml.block_content_handle {
+                Some(h) if !h.is_null() => format!("{:X}", h.value()),
+                _ => "(none)".to_string(),
+            },
+        ),
+        // Less common toggles surfaced read-only.
+        ro(
+            "Extend Leader",
+            "extend_leader_to_text",
+            if ml.extend_leader_to_text { "Yes" } else { "No" },
+        ),
+        ro(
+            "Text Direction Negative",
+            "text_direction_negative",
+            if ml.text_direction_negative { "Yes" } else { "No" },
+        ),
+        ro(
+            "Text Align In IPE",
+            "text_align_in_ipe",
+            ml.text_align_in_ipe.to_string(),
+        ),
+        ro(
+            "Property Override Flags",
+            "property_override_flags",
+            format!("{:#018b}", ml.property_override_flags.bits()),
+        ),
+        ro(
+            "Block Scale",
+            "block_scale",
+            format!(
+                "{:.3} × {:.3} × {:.3}",
+                ml.block_scale.x, ml.block_scale.y, ml.block_scale.z
+            ),
+        ),
+        ro(
+            "Block Rotation",
+            "block_rotation",
+            format!("{:.3}°", ml.block_rotation.to_degrees()),
+        ),
     ];
 
     // Connection point for first root (most common case)
@@ -634,6 +737,14 @@ fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
         "text_right_attachment" => {
             ml.text_right_attachment = parse_attachment(value);
             ml.context.text_right_attachment = parse_attachment(value);
+        }
+        "text_top_attachment" => {
+            ml.text_top_attachment = parse_attachment(value);
+            ml.context.text_top_attachment = parse_attachment(value);
+        }
+        "text_bottom_attachment" => {
+            ml.text_bottom_attachment = parse_attachment(value);
+            ml.context.text_bottom_attachment = parse_attachment(value);
         }
         _ => {}
     }

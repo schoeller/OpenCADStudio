@@ -53,25 +53,73 @@ impl TruckConvertible for Table {
 
         let mut pts: Vec<[f32; 3]> = Vec::new();
 
-        let mut add_seg = |a: Vec3, b: Vec3| {
+        // Per-cell borders. When a cell carries a CellStyle, honour the
+        // visibility / `invisible` flag of each of its four borders so
+        // hidden borders disappear from the grid. Cells with no style still
+        // emit the standard four borders. To avoid drawing each shared edge
+        // twice we coalesce the segments by their (start, end) coordinates.
+        use std::collections::HashSet;
+        let mut emitted: HashSet<(i32, i32, i32, i32)> = HashSet::new();
+        let try_add = |a: Vec3, b: Vec3, vis: bool, emitted: &mut HashSet<(i32, i32, i32, i32)>, pts: &mut Vec<[f32; 3]>| {
+            if !vis {
+                return;
+            }
+            let key = (
+                (a.x * 1_000.0) as i32,
+                (a.y * 1_000.0) as i32,
+                (b.x * 1_000.0) as i32,
+                (b.y * 1_000.0) as i32,
+            );
+            let key_rev = (key.2, key.3, key.0, key.1);
+            if emitted.contains(&key) || emitted.contains(&key_rev) {
+                return;
+            }
+            emitted.insert(key);
             if !pts.is_empty() {
                 pts.push([f32::NAN; 3]);
             }
             pts.push([a.x, a.y, a.z]);
             pts.push([b.x, b.y, b.z]);
         };
-
-        for &ry in &row_offsets {
-            let left = origin + h * 0.0 + v_down * ry;
-            let right = origin + h * total_w + v_down * ry;
-            add_seg(left, right);
+        for (ri, row) in self.rows.iter().enumerate() {
+            let row_top = row_offsets[ri];
+            let row_bot = row_offsets
+                .get(ri + 1)
+                .copied()
+                .unwrap_or(row_top + row.height as f32);
+            for (ci, cell) in row.cells.iter().enumerate() {
+                let col_left = col_offsets[ci];
+                let col_right = col_offsets
+                    .get(ci + 1)
+                    .copied()
+                    .unwrap_or(col_left
+                        + self.columns.get(ci).map(|c| c.width as f32).unwrap_or(1.0));
+                // Default to visible when no style override is present.
+                let (top_vis, right_vis, bottom_vis, left_vis) = cell
+                    .style
+                    .as_ref()
+                    .map(|s| {
+                        (
+                            !s.top_border.invisible,
+                            !s.right_border.invisible,
+                            !s.bottom_border.invisible,
+                            !s.left_border.invisible,
+                        )
+                    })
+                    .unwrap_or((true, true, true, true));
+                let tl = origin + h * col_left + v_down * row_top;
+                let tr = origin + h * col_right + v_down * row_top;
+                let br_ = origin + h * col_right + v_down * row_bot;
+                let bl = origin + h * col_left + v_down * row_bot;
+                try_add(tl, tr, top_vis, &mut emitted, &mut pts);
+                try_add(tr, br_, right_vis, &mut emitted, &mut pts);
+                try_add(bl, br_, bottom_vis, &mut emitted, &mut pts);
+                try_add(tl, bl, left_vis, &mut emitted, &mut pts);
+            }
         }
-
-        for &cx in &col_offsets {
-            let top = origin + h * cx + v_down * 0.0;
-            let bottom = origin + h * cx + v_down * total_h;
-            add_seg(top, bottom);
-        }
+        // Suppress unused-variable warnings now that the simple grid-pass
+        // is gone — col/row offsets still feed cell drawing below.
+        let _ = (total_w, total_h);
 
         // Cell text — lifted into Lines points via 2D strokes
         let text_height = 0.18_f32;
@@ -187,6 +235,12 @@ impl Grippable for Table {
 
 impl PropertyEditable for Table {
     fn geometry_properties(&self, _text_style_names: &[String]) -> PropSection {
+        let fmt_h = |oh: &Option<acadrust::types::Handle>| -> String {
+            match oh {
+                Some(h) if !h.is_null() => format!("{:X}", h.value()),
+                _ => "(none)".to_string(),
+            }
+        };
         PropSection {
             title: "Table".into(),
             props: vec![
@@ -206,6 +260,73 @@ impl PropertyEditable for Table {
                     "Insert Z",
                     "tbl_iz",
                     format!("{:.4}", self.insertion_point.z),
+                ),
+                ro(
+                    "Table Style",
+                    "tbl_style_handle",
+                    fmt_h(&self.table_style_handle),
+                ),
+                ro(
+                    "Block Record",
+                    "tbl_block_rec_handle",
+                    fmt_h(&self.block_record_handle),
+                ),
+                ro("Data Version", "tbl_data_version", self.data_version.to_string()),
+                ro(
+                    "Value Flags",
+                    "tbl_value_flags",
+                    format!("{:#010x}", self.value_flags),
+                ),
+                ro(
+                    "Override Flag",
+                    "tbl_override_flag",
+                    if self.override_flag { "Yes" } else { "No" },
+                ),
+                ro(
+                    "Override Border Color",
+                    "tbl_override_border_color",
+                    if self.override_border_color { "Yes" } else { "No" },
+                ),
+                ro(
+                    "Override Border LW",
+                    "tbl_override_border_lw",
+                    if self.override_border_line_weight {
+                        "Yes"
+                    } else {
+                        "No"
+                    },
+                ),
+                ro(
+                    "Override Border Vis",
+                    "tbl_override_border_vis",
+                    if self.override_border_visibility {
+                        "Yes"
+                    } else {
+                        "No"
+                    },
+                ),
+                ro(
+                    "Break Spacing",
+                    "tbl_break_spacing",
+                    format!("{:.4}", self.break_spacing),
+                ),
+                ro(
+                    "Break Flow",
+                    "tbl_break_flow",
+                    format!("{:?}", self.break_flow_direction),
+                ),
+                ro(
+                    "Break Options",
+                    "tbl_break_options",
+                    format!("{:#018b}", self.break_options.bits()),
+                ),
+                ro(
+                    "Normal",
+                    "tbl_normal",
+                    format!(
+                        "{:.3}, {:.3}, {:.3}",
+                        self.normal.x, self.normal.y, self.normal.z
+                    ),
                 ),
             ],
         }

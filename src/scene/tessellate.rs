@@ -1291,11 +1291,40 @@ pub fn tessellate_multileader(
     anno_scale: f32,
     world_per_pixel: Option<f32>,
 ) -> Vec<WireModel> {
+    // line_color falls back to the entity colour when the MultiLeader's own
+    // colour is ByBlock/ByLayer; otherwise the leader uses its stored hue.
     let line_color = if selected {
         WireModel::SELECTED
     } else {
-        entity_color
+        color_or_inherit(&ml.line_color, entity_color)
     };
+    // ml.line_weight is the leader-line weight override. Negative codes
+    // (ByLayer/ByBlock/Default) fall through to the entity's already-resolved
+    // pixel width.
+    let leader_lw_px = match ml.line_weight {
+        acadrust::types::LineWeight::Value(v) if v >= 0 => {
+            (v as f32 / 100.0) * (96.0 / 25.4)
+        }
+        _ => line_weight_px,
+    };
+    // ml.line_type_handle — resolve via line_types table by handle and apply
+    // the resulting dash pattern to the leader wire.
+    let lt_scale = document.header.linetype_scale as f32 * ml.common.linetype_scale as f32;
+    let (leader_pat_len, leader_pat) = match ml.line_type_handle {
+        Some(h) if !h.is_null() => {
+            let name = document
+                .line_types
+                .iter()
+                .find(|lt| lt.handle == h)
+                .map(|lt| lt.name.clone());
+            match name {
+                Some(n) => crate::scene::render::resolve_pattern(&document.line_types, &n, lt_scale),
+                None => (0.0, [0.0; 8]),
+            }
+        }
+        _ => (0.0, [0.0; 8]),
+    };
+
     let name = handle.value().to_string();
     let nan = [f32::NAN; 3];
     let [ox, oy, oz] = world_offset;
@@ -1316,12 +1345,24 @@ pub fn tessellate_multileader(
     let arrow_size = ml.arrowhead_size as f32 * effective_scale;
     let draw_arrow = arrow_size > 0.0;
     let invisible = ml.path_type == MultiLeaderPathType::Invisible;
+    // arrowhead_handle resolves through the block records to a named arrow
+    // block (matches DIMLDRBLK on Dimension). Null handle / unknown name →
+    // ClosedFilled triangle.
+    let arrow_kind = match ml.arrowhead_handle {
+        Some(h) if !h.is_null() => arrow_from_block(document, h, arrow_size.max(0.001)),
+        _ => ArrowKind::Triangle {
+            size: arrow_size.max(0.001),
+            filled: true,
+            size_mul: 1.0,
+        },
+    };
 
     // ── Leader / arrow / dogleg points ───────────────────────────────────────
     let mut points: Vec<[f32; 3]> = Vec::new();
     let mut key_verts: Vec<[f32; 3]> = Vec::new();
     let mut snap_pts: Vec<(Vec3, SnapHint)> = Vec::new();
     let mut tangents: Vec<TangentGeom> = Vec::new();
+    let mut arrow_fill: Vec<[f32; 3]> = Vec::new();
     let mut first = true;
 
     for root in &ml.context.leader_roots {
@@ -1383,21 +1424,17 @@ pub fn tessellate_multileader(
                 let dx = (next.x - tip.x) as f32;
                 let dy = (next.y - tip.y) as f32;
                 let dl = (dx * dx + dy * dy).sqrt().max(1e-9);
-                let (dx, dy) = (dx / dl, dy / dl);
-                let a = std::f32::consts::PI / 6.0;
-                let (s, c) = a.sin_cos();
-                points.push(nan);
-                points.push([
-                    tip_f[0] + (dx * c - dy * s) * arrow_size,
-                    tip_f[1] + (dx * s + dy * c) * arrow_size,
-                    tip_f[2],
-                ]);
-                points.push(tip_f);
-                points.push([
-                    tip_f[0] + (dx * c + dy * s) * arrow_size,
-                    tip_f[1] + (-dx * s + dy * c) * arrow_size,
-                    tip_f[2],
-                ]);
+                let dir = Vec3::new(dx / dl, dy / dl, 0.0);
+                let tip_v = Vec3::new(tip_f[0], tip_f[1], tip_f[2]);
+                // Reuse the dim/leader arrow emitter so MultiLeader's arrow
+                // matches the block referenced by arrowhead_handle.
+                let mut arrow_geom = DimGeom::new();
+                append_arrow(&mut arrow_geom, tip_v, dir, &arrow_kind);
+                if !arrow_geom.dim_lines.is_empty() {
+                    points.push(nan);
+                    points.extend(arrow_geom.dim_lines);
+                }
+                arrow_fill.extend(arrow_geom.arrow_fill);
             }
         }
 
@@ -1405,13 +1442,25 @@ pub fn tessellate_multileader(
             let dir = &root.direction;
             let dl = (dir.x * dir.x + dir.y * dir.y).sqrt().max(1e-9);
             let d = ml.dogleg_length * effective_scale as f64;
-            points.push(nan);
-            points.push(cp_f);
-            points.push([
+            let landing_end = [
                 (cp.x + dir.x / dl * d - ox) as f32,
                 (cp.y + dir.y / dl * d - oy) as f32,
                 cp_f[2],
-            ]);
+            ];
+            points.push(nan);
+            points.push(cp_f);
+            points.push(landing_end);
+            // extend_leader_to_text: continue past the landing to the text
+            // insertion point along the same direction.
+            if ml.extend_leader_to_text
+                && ml.content_type == LeaderContentType::MText
+                && !ml.context.text_string.is_empty()
+            {
+                let tx = (ml.context.text_location.x - ox) as f32;
+                let ty = (ml.context.text_location.y - oy) as f32;
+                points.push(landing_end);
+                points.push([tx, ty, cp_f[2]]);
+            }
         }
     }
 
@@ -1425,17 +1474,77 @@ pub fn tessellate_multileader(
         color: line_color,
         selected,
         aci: 0,
-        pattern_length: 0.0,
-        pattern: [0.0; 8],
-        line_weight_px,
+        pattern_length: leader_pat_len,
+        pattern: leader_pat,
+        line_weight_px: leader_lw_px,
         snap_pts,
         tangent_geoms: tangents,
         key_vertices: key_verts,
         aabb: WireModel::UNBOUNDED_AABB,
         plinegen: true,
         vp_scissor: None,
-        fill_tris: vec![],
+        fill_tris: arrow_fill,
     });
+
+    // ── Block content ───────────────────────────────────────────────────────
+    // When content_type == Block, the MultiLeader displays a block reference
+    // at block_content_location with the recorded rotation/scale. Synthesize
+    // an Insert and explode it through the standard tessellator. The block
+    // resolves via block_content_handle (handle → block_record name).
+    if ml.content_type == LeaderContentType::Block && ml.context.has_block_contents {
+        let block_name = match ml.block_content_handle {
+            Some(h) if !h.is_null() => document
+                .block_records
+                .iter()
+                .find(|br| br.handle == h)
+                .map(|br| br.name.clone()),
+            _ => None,
+        };
+        if let Some(block_name) = block_name {
+            let block_color = if selected {
+                line_color
+            } else {
+                color_or_inherit(&ml.block_content_color, entity_color)
+            };
+            let mut synth_ins =
+                acadrust::entities::Insert::new(block_name, ml.context.block_content_location);
+            synth_ins.set_x_scale(ml.block_scale.x);
+            synth_ins.set_y_scale(ml.block_scale.y);
+            synth_ins.set_z_scale(ml.block_scale.z);
+            synth_ins.rotation = ml.block_rotation;
+            synth_ins.common.layer = ml.common.layer.clone();
+            // block_connection_type (BlockExtents vs BasePoint) chooses the
+            // anchor when *creating* the multileader; at render time the
+            // file's stored leader endpoints already encode that choice.
+            let _ = ml.block_connection_type;
+            for sub in synth_ins.explode_from_document(document) {
+                let normalized =
+                    crate::modules::home::modify::explode::normalize_insert_entity(sub);
+                let mut wire = tessellate(
+                    document,
+                    handle,
+                    &normalized,
+                    selected,
+                    block_color,
+                    leader_pat_len,
+                    leader_pat,
+                    leader_lw_px,
+                    world_offset,
+                    1.0,
+                );
+                wire.name = name.clone();
+                wires.push(wire);
+            }
+            // Block attributes attached to the multileader — render each as
+            // its own attribute entity at WCS location like INSERT does.
+            for ba in &ml.block_attributes {
+                let _ = ba; // BlockAttribute carries only the value override
+                            // string; we'd need the AttributeDefinition handle
+                            // to materialise it as ATTRIB geometry. Skipped
+                            // until that wiring exists.
+            }
+        }
+    }
 
     // ── Text strokes / frame / background fill ──────────────────────────────
     // Strip inline format codes, split / word-wrap into lines, then place each
@@ -1458,14 +1567,34 @@ pub fn tessellate_multileader(
         let local_ins_y = (ins.y - oy) as f32;
         let z = (ins.z - oz) as f32;
 
-        // Rotation: prefer text_direction (transforms survive rotations / mirrors
-        // when acadrust updates it) and fall back to text_rotation.
+        // Rotation: prefer text_direction (transforms survive rotations /
+        // mirrors when acadrust updates it) and fall back to text_rotation.
+        // ml.text_angle_type then constrains the final angle:
+        //   - Horizontal:        always 0
+        //   - ParallelToLastLeaderLine: keep stored direction
+        //   - Optimized:        clamp to (-π/2, π/2] (flip upside-down)
+        // text_direction_negative finally adds π so reading goes the other way.
         let td = ctx.text_direction;
-        let rot = if td.x.abs() > 1e-9 || td.y.abs() > 1e-9 {
+        let mut rot = if td.x.abs() > 1e-9 || td.y.abs() > 1e-9 {
             (td.y as f32).atan2(td.x as f32)
         } else {
             ctx.text_rotation as f32
         };
+        match ml.text_angle_type {
+            acadrust::entities::multileader::TextAngleType::Horizontal => rot = 0.0,
+            acadrust::entities::multileader::TextAngleType::Optimized => {
+                let pi = std::f32::consts::PI;
+                if rot > pi / 2.0 {
+                    rot -= pi;
+                } else if rot <= -pi / 2.0 {
+                    rot += pi;
+                }
+            }
+            acadrust::entities::multileader::TextAngleType::ParallelToLastLeaderLine => {}
+        }
+        if ml.text_direction_negative {
+            rot += std::f32::consts::PI;
+        }
         let (cos_r, sin_r) = (rot.cos(), rot.sin());
 
         // Resolve text style via handle when available, falling back to STANDARD.
@@ -1511,15 +1640,41 @@ pub fn tessellate_multileader(
         let line_h = height * ls_factor * (5.0 / 3.0) * font.line_spacing;
         let n_lines = lines.len().max(1) as f32;
 
-        let h_anchor = match ctx.text_attachment_point {
-            TextAttachmentPointType::Left => 0.0_f32,
-            TextAttachmentPointType::Center => 0.5,
-            TextAttachmentPointType::Right => 1.0,
+        // ml.text_alignment overrides the per-context attachment_point when
+        // not Left (which is the default zero). Otherwise we honour the
+        // context's stored attachment_point (Left/Center/Right).
+        use acadrust::entities::multileader::{TextAlignmentType, TextAttachmentDirectionType};
+        let h_anchor = match (ml.text_alignment, ctx.text_attachment_point) {
+            (TextAlignmentType::Center, _) => 0.5_f32,
+            (TextAlignmentType::Right, _) => 1.0,
+            (TextAlignmentType::Left, TextAttachmentPointType::Center) => 0.5,
+            (TextAlignmentType::Left, TextAttachmentPointType::Right) => 1.0,
+            _ => 0.0,
         };
-        // Vertical anchor: use text_left_attachment (matches the leader-to-text
-        // attachment convention for the common case of left-side leaders).
-        let v_offset =
-            v_offset_for_attachment(ctx.text_left_attachment, n_lines, height, line_h);
+        // Pick the vertical-anchor attachment based on text_attachment_direction:
+        //   Horizontal — leader attaches left/right; use ml.text_left_attachment
+        //                (matches the file's stored ctx.text_left_attachment).
+        //   Vertical   — leader attaches top/bottom; use ml.text_top_attachment
+        //                or ml.text_bottom_attachment depending on which side
+        //                the leader is coming from (chosen via the first
+        //                root.direction.y sign).
+        let leader_from_top = ml
+            .context
+            .leader_roots
+            .first()
+            .map(|r| r.direction.y < 0.0)
+            .unwrap_or(true);
+        let vertical_attach = match ml.text_attachment_direction {
+            TextAttachmentDirectionType::Vertical => {
+                if leader_from_top {
+                    ml.text_top_attachment
+                } else {
+                    ml.text_bottom_attachment
+                }
+            }
+            TextAttachmentDirectionType::Horizontal => ctx.text_left_attachment,
+        };
+        let v_offset = v_offset_for_attachment(vertical_attach, n_lines, height, line_h);
 
         let scale = height / 9.0 * width_factor;
         let line_widths: Vec<f32> = lines
