@@ -1,5 +1,3 @@
-use std::f64::consts::TAU;
-
 use acadrust::entities::{Polyline, Polyline2D, Polyline3D};
 use glam::Vec3;
 use truck_modeling::{builder, Edge, Point3, Wire};
@@ -182,38 +180,17 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
                     p1: to_f32(p1_pt),
                     p2: to_f32(p2_pt),
                 });
-            } else {
-                let angle = 4.0 * bulge.atan();
-                let dx = ox1 - ox0;
-                let dy = oy1 - oy0;
-                let d = (dx * dx + dy * dy).sqrt().max(1e-12);
-                let r = (d / 2.0) / (angle / 2.0).sin().abs();
-                let mx = (ox0 + ox1) * 0.5;
-                let my = (oy0 + oy1) * 0.5;
-                let px = -dy / d;
-                let ss = if bulge > 0.0 { 1.0_f64 } else { -1.0_f64 };
-                let h = r - (r * r - d * d / 4.0).max(0.0).sqrt();
-                let ocx = mx + ss * px * (r - h);
-                let ocy = my + ss * (dx / d) * (r - h);
-                let a0 = (oy0 - ocy).atan2(ox0 - ocx);
-                let mut a1 = (oy1 - ocy).atan2(ox1 - ocx);
-                if bulge > 0.0 {
-                    if a1 < a0 {
-                        a1 += TAU;
-                    }
-                } else {
-                    if a1 > a0 {
-                        a1 -= TAU;
-                    }
-                }
-                let (wcx, wcy, wcz) = to_wcs(ocx, ocy);
+            } else if let Some(arc) =
+                crate::entities::common::BulgeArc::from_bulge([ox0, oy0], [ox1, oy1], bulge)
+            {
+                let (wcx, wcy, wcz) = to_wcs(arc.center[0], arc.center[1]);
                 tgs.push(TangentGeom::Circle {
                     center: [wcx as f32, wcy as f32, wcz as f32],
-                    radius: r as f32,
+                    radius: arc.radius as f32,
                 });
                 for j in 1..=16usize {
-                    let a = a0 + (a1 - a0) * (j as f64 / 16.0);
-                    let (wx, wy, wz) = to_wcs(ocx + r * a.cos(), ocy + r * a.sin());
+                    let s = arc.sample(j as f64 / 16.0);
+                    let (wx, wy, wz) = to_wcs(s[0], s[1]);
                     path.push([wx, wy, wz]);
                 }
             }
@@ -260,41 +237,21 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
                 p1: [p0.x as f32, p0.y as f32, p0.z as f32],
                 p2: [p1.x as f32, p1.y as f32, p1.z as f32],
             });
-        } else {
-            let (ox0, oy0) = (v0.location.x, v0.location.y);
-            let (ox1, oy1) = (v1.location.x, v1.location.y);
-            let angle = 4.0 * bulge.atan();
-            let dx = ox1 - ox0;
-            let dy = oy1 - oy0;
-            let d = (dx * dx + dy * dy).sqrt();
-            let r = (d / 2.0) / (angle / 2.0).sin().abs();
-            let mx = (ox0 + ox1) * 0.5;
-            let my = (oy0 + oy1) * 0.5;
-            let len = d.max(1e-12);
-            let px = -dy / len;
-            let py = dx / len;
-            let sagitta_sign = if bulge > 0.0 { 1.0_f64 } else { -1.0_f64 };
-            let h = r - (r * r - d * d / 4.0).max(0.0).sqrt();
-            let ocx = mx + sagitta_sign * px * (r - h);
-            let ocy = my + sagitta_sign * py * (r - h);
-            let mid_a = {
-                let a0 = (oy0 - ocy).atan2(ox0 - ocx);
-                let a1 = (oy1 - ocy).atan2(ox1 - ocx);
-                let (sa, mut ea) = if bulge > 0.0 { (a0, a1) } else { (a1, a0) };
-                if ea < sa {
-                    ea += TAU;
-                }
-                sa + (ea - sa) * 0.5
-            };
-            let (mid_wx, mid_wy, mid_wz) = to_wcs(ocx + r * mid_a.cos(), ocy + r * mid_a.sin());
+        } else if let Some(arc) = crate::entities::common::BulgeArc::from_bulge(
+            [v0.location.x, v0.location.y],
+            [v1.location.x, v1.location.y],
+            bulge,
+        ) {
+            let mid_s = arc.sample(0.5);
+            let (mid_wx, mid_wy, mid_wz) = to_wcs(mid_s[0], mid_s[1]);
             let p_mid = Point3::new(mid_wx, mid_wy, mid_wz);
             let tv0 = builder::vertex(p0);
             let tv1 = builder::vertex(p1);
             edges.push(builder::circle_arc(&tv0, &tv1, p_mid));
-            let (wcx, wcy, wcz) = to_wcs(ocx, ocy);
+            let (wcx, wcy, wcz) = to_wcs(arc.center[0], arc.center[1]);
             tangents.push(TangentGeom::Circle {
                 center: [wcx as f32, wcy as f32, wcz as f32],
-                radius: r as f32,
+                radius: arc.radius as f32,
             });
         }
 

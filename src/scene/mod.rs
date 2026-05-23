@@ -2850,54 +2850,30 @@ impl Scene {
                             let v0 = &verts[i];
                             let v1 = &verts[(i + 1) % count];
                             let bulge = v0.z;
-                            if bulge.abs() < 1e-9 {
-                                boundary.push(to_xy(v0.x, v0.y));
+                            // Tess in f64 to preserve ~1 cm precision at
+                            // UTM-scale WCS (the f32 path used to produce
+                            // visibly wavy hatch arcs at 1e5+ magnitude).
+                            let arc = if bulge.abs() < 1e-9 {
+                                None
                             } else {
-                                // Run the whole bulge → arc tessellation in
-                                // f64. The old f32 path lost ~1 cm of
-                                // precision at UTM-scale WCS coordinates
-                                // (1e5 magnitude × 1 ULP), which showed up
-                                // as visibly wavy hatch-boundary arcs.
-                                let theta = 4.0 * bulge.atan();
-                                let dx = v1.x - v0.x;
-                                let dy = v1.y - v0.y;
-                                let d = (dx * dx + dy * dy).sqrt();
-                                if d < 1e-12 {
-                                    boundary.push(to_xy(v0.x, v0.y));
-                                    continue;
-                                }
-                                let r = (d * 0.5) / (theta * 0.5).sin().abs();
-                                let mx = (v0.x + v1.x) * 0.5;
-                                let my = (v0.y + v1.y) * 0.5;
-                                let px = -dy / d;
-                                let py = dx / d;
-                                let sign = if bulge > 0.0 { 1.0_f64 } else { -1.0_f64 };
-                                let center_offset = r * (theta * 0.5).cos();
-                                let cx = mx + sign * px * center_offset;
-                                let cy = my + sign * py * center_offset;
-                                let a0 = (v0.y - cy).atan2(v0.x - cx);
-                                let a1 = (v1.y - cy).atan2(v1.x - cx);
-                                let mut sweep = a1 - a0;
-                                const TAU: f64 = std::f64::consts::TAU;
-                                if bulge > 0.0 {
-                                    if sweep <= 0.0 {
-                                        sweep += TAU;
-                                    }
-                                } else if sweep >= 0.0 {
-                                    sweep -= TAU;
-                                }
-                                if sweep.abs() < 1e-9 {
-                                    sweep = if bulge > 0.0 { TAU } else { -TAU };
-                                }
-                                let segs = tess_util::arc_segments(
-                                    r,
-                                    sweep.abs(),
-                                    tess_util::fill_chord_tol(r),
-                                );
-                                for j in 0..segs {
-                                    let a = a0 + sweep * (j as f64 / segs as f64);
-                                    boundary.push(to_xy(cx + r * a.cos(), cy + r * a.sin()));
-                                }
+                                crate::entities::common::BulgeArc::from_bulge(
+                                    [v0.x, v0.y],
+                                    [v1.x, v1.y],
+                                    bulge,
+                                )
+                            };
+                            let Some(arc) = arc else {
+                                boundary.push(to_xy(v0.x, v0.y));
+                                continue;
+                            };
+                            let segs = tess_util::arc_segments(
+                                arc.radius,
+                                arc.sweep.abs(),
+                                tess_util::fill_chord_tol(arc.radius),
+                            );
+                            for j in 0..segs {
+                                let s = arc.sample(j as f64 / segs as f64);
+                                boundary.push(to_xy(s[0], s[1]));
                             }
                         }
                         if poly.is_closed {

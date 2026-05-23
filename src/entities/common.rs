@@ -167,6 +167,92 @@ pub fn ro_prop(label: &'static str, field: &'static str, value: impl Into<String
 pub fn parse_f64(value: &str) -> Option<f64> {
     value.trim().parse::<f64>().ok()
 }
+
+/// Bulge → arc geometry for a polyline segment.
+///
+/// DXF/DWG polyline arcs are encoded as a bulge factor on each vertex —
+/// `bulge = tan(theta/4)` where `theta` is the included angle of the arc
+/// from `p0` to `p1`. Sign convention: positive bulge = CCW from p0 to p1,
+/// negative = CW. `|bulge| = 1` is a half-circle.
+///
+/// This struct centralises the (formerly duplicated) math that takes
+/// `(p0, p1, bulge)` and produces the canonical `(center, radius,
+/// start_angle, sweep)` quadruple. Callsites pick the fields they need.
+#[derive(Clone, Copy, Debug)]
+pub struct BulgeArc {
+    pub center: [f64; 2],
+    pub radius: f64,
+    /// Angle from center to p0 (atan2, range -π..π).
+    pub start_angle: f64,
+    /// Angle from center to p1 (atan2, range -π..π).
+    pub end_angle: f64,
+    /// Signed sweep from p0 to p1. Positive ⇒ CCW (bulge > 0),
+    /// negative ⇒ CW (bulge < 0). For exact half-turns the sign of
+    /// `bulge` decides the direction.
+    pub sweep: f64,
+}
+
+impl BulgeArc {
+    /// Build from endpoints + bulge. Returns `None` for degenerate input
+    /// (chord ≈ 0 or |bulge| ≈ 0).
+    pub fn from_bulge(p0: [f64; 2], p1: [f64; 2], bulge: f64) -> Option<Self> {
+        let chord_x = p1[0] - p0[0];
+        let chord_y = p1[1] - p0[1];
+        let chord_len = (chord_x * chord_x + chord_y * chord_y).sqrt();
+        if chord_len < 1e-12 || bulge.abs() < 1e-12 {
+            return None;
+        }
+        let b = bulge;
+        let b2 = b * b;
+        // r = chord · (1 + b²) / (4·|b|)
+        let r = chord_len * (1.0 + b2) / (4.0 * b.abs());
+        // d_perp = signed distance from chord midpoint to arc center
+        //        = r · (1 - b²) / (1 + b²) = r · cos(theta/2)
+        let d_perp = r * (1.0 - b2) / (1.0 + b2);
+        let mx = (p0[0] + p1[0]) * 0.5;
+        let my = (p0[1] + p1[1]) * 0.5;
+        // Left perpendicular to chord (90° CCW).
+        let perp_x = -chord_y / chord_len;
+        let perp_y = chord_x / chord_len;
+        let sign = b.signum();
+        let cx = mx + sign * d_perp * perp_x;
+        let cy = my + sign * d_perp * perp_y;
+        let a0 = (p0[1] - cy).atan2(p0[0] - cx);
+        let a1 = (p1[1] - cy).atan2(p1[0] - cx);
+        // Wrap sweep to match bulge sign: bulge>0 ⇒ positive (CCW),
+        // bulge<0 ⇒ negative (CW). Falls back to ±τ for half-turns.
+        const TAU: f64 = std::f64::consts::TAU;
+        let mut sweep = a1 - a0;
+        if bulge > 0.0 {
+            if sweep <= 0.0 {
+                sweep += TAU;
+            }
+        } else if sweep >= 0.0 {
+            sweep -= TAU;
+        }
+        if sweep.abs() < 1e-9 {
+            sweep = if bulge > 0.0 { TAU } else { -TAU };
+        }
+        Some(Self {
+            center: [cx, cy],
+            radius: r,
+            start_angle: a0,
+            end_angle: a1,
+            sweep,
+        })
+    }
+
+    /// Sample a point on the arc at parameter `t ∈ [0, 1]`. `t=0` ↦ p0,
+    /// `t=1` ↦ p1, walks along the signed sweep direction.
+    pub fn sample(&self, t: f64) -> [f64; 2] {
+        let a = self.start_angle + self.sweep * t;
+        [
+            self.center[0] + self.radius * a.cos(),
+            self.center[1] + self.radius * a.sin(),
+        ]
+    }
+}
+
 /// Compute the filled boundary polygon for one polyline segment.
 /// For straight segments: a rectangle/trapezoid.
 /// For arc segments: an arc band (outer arc + reversed inner arc).

@@ -15,30 +15,10 @@ const TAU: f64 = std::f64::consts::TAU;
 
 /// Midpoint position on an arc segment defined by its bulge.
 fn arc_midpoint(p0: [f64; 2], p1: [f64; 2], bulge: f64) -> [f64; 2] {
-    let angle = 4.0 * bulge.atan();
-    let dx = p1[0] - p0[0];
-    let dy = p1[1] - p0[1];
-    let d = (dx * dx + dy * dy).sqrt();
-    if d < 1e-12 {
-        return [(p0[0] + p1[0]) * 0.5, (p0[1] + p1[1]) * 0.5];
+    match crate::entities::common::BulgeArc::from_bulge(p0, p1, bulge) {
+        Some(arc) => arc.sample(0.5),
+        None => [(p0[0] + p1[0]) * 0.5, (p0[1] + p1[1]) * 0.5],
     }
-    let r = (d / 2.0) / (angle / 2.0).sin().abs();
-    let mx = (p0[0] + p1[0]) * 0.5;
-    let my = (p0[1] + p1[1]) * 0.5;
-    let px = -dy / d;
-    let py = dx / d;
-    let sign = if bulge > 0.0 { 1.0_f64 } else { -1.0_f64 };
-    let h = r - (r * r - d * d / 4.0).max(0.0).sqrt();
-    let cx = mx + sign * px * (r - h);
-    let cy = my + sign * py * (r - h);
-    let a0 = (p0[1] - cy).atan2(p0[0] - cx);
-    let a1 = (p1[1] - cy).atan2(p1[0] - cx);
-    let (sa, mut ea) = if bulge > 0.0 { (a0, a1) } else { (a1, a0) };
-    if ea < sa {
-        ea += TAU;
-    }
-    let mid_a = sa + (ea - sa) * 0.5;
-    [cx + r * mid_a.cos(), cy + r * mid_a.sin()]
 }
 
 /// Compute the DXF bulge for an arc that passes through p0, mid_pt, and p1.
@@ -174,39 +154,17 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
                     p1: [p1_pt[0] as f32, p1_pt[1] as f32, p1_pt[2] as f32],
                     p2: [p2_pt[0] as f32, p2_pt[1] as f32, p2_pt[2] as f32],
                 });
-            } else {
-                let angle = 4.0 * bulge.atan();
-                let dx = ox1 - ox0;
-                let dy = oy1 - oy0;
-                let d = (dx * dx + dy * dy).sqrt().max(1e-12);
-                let r = (d / 2.0) / (angle / 2.0).sin().abs();
-                let mx = (ox0 + ox1) * 0.5;
-                let my = (oy0 + oy1) * 0.5;
-                let px = -dy / d;
-                let py = dx / d;
-                let ss = if bulge > 0.0 { 1.0_f64 } else { -1.0_f64 };
-                let h = r - (r * r - d * d / 4.0).max(0.0).sqrt();
-                let ocx = mx + ss * px * (r - h);
-                let ocy = my + ss * py * (r - h);
-                let a0 = (oy0 - ocy).atan2(ox0 - ocx);
-                let mut a1 = (oy1 - ocy).atan2(ox1 - ocx);
-                if bulge > 0.0 {
-                    if a1 < a0 {
-                        a1 += TAU;
-                    }
-                } else {
-                    if a1 > a0 {
-                        a1 -= TAU;
-                    }
-                }
-                let (wcx, wcy, wcz) = to_wcs(ocx, ocy);
+            } else if let Some(arc) =
+                crate::entities::common::BulgeArc::from_bulge([ox0, oy0], [ox1, oy1], bulge)
+            {
+                let (wcx, wcy, wcz) = to_wcs(arc.center[0], arc.center[1]);
                 tgs.push(TangentGeom::Circle {
                     center: [wcx as f32, wcy as f32, wcz as f32],
-                    radius: r as f32,
+                    radius: arc.radius as f32,
                 });
                 for j in 1..=16usize {
-                    let a = a0 + (a1 - a0) * (j as f64 / 16.0);
-                    let (wx, wy, wz) = to_wcs(ocx + r * a.cos(), ocy + r * a.sin());
+                    let s = arc.sample(j as f64 / 16.0);
+                    let (wx, wy, wz) = to_wcs(s[0], s[1]);
                     path.push([wx, wy, wz]);
                 }
             }
@@ -244,42 +202,20 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
                     p1: to_f32(p_start),
                     p2: to_f32(p_end),
                 });
-            } else {
-                let angle = 4.0 * bulge.atan();
-                let dx = ox1 - ox0;
-                let dy = oy1 - oy0;
-                let d = (dx * dx + dy * dy).sqrt().max(1e-12);
-                let r = (d / 2.0) / (angle / 2.0).sin().abs();
-                let mx = (ox0 + ox1) * 0.5;
-                let my = (oy0 + oy1) * 0.5;
-                let px = -dy / d;
-                let py = dx / d;
-                let ss = if bulge > 0.0 { 1.0_f64 } else { -1.0_f64 };
-                let h = r - (r * r - d * d / 4.0).max(0.0).sqrt();
-                let ocx = mx + ss * px * (r - h);
-                let ocy = my + ss * py * (r - h);
-                let a0 = (oy0 - ocy).atan2(ox0 - ocx);
-                let mut a1 = (oy1 - ocy).atan2(ox1 - ocx);
-                if bulge > 0.0 {
-                    if a1 < a0 {
-                        a1 += TAU;
-                    }
-                } else {
-                    if a1 > a0 {
-                        a1 -= TAU;
-                    }
-                }
+            } else if let Some(arc) =
+                crate::entities::common::BulgeArc::from_bulge([ox0, oy0], [ox1, oy1], bulge)
+            {
                 for j in 1..=16usize {
-                    let a = a0 + (a1 - a0) * (j as f64 / 16.0);
-                    let (wx, wy, wz) = to_wcs(ocx + r * a.cos(), ocy + r * a.sin());
+                    let s = arc.sample(j as f64 / 16.0);
+                    let (wx, wy, wz) = to_wcs(s[0], s[1]);
                     pts.push([wx, wy, wz]);
                 }
                 let (wx1, wy1, wz1) = to_wcs(ox1, oy1);
                 kv.push([wx1, wy1, wz1]);
-                let (wcx, wcy, wcz) = to_wcs(ocx, ocy);
+                let (wcx, wcy, wcz) = to_wcs(arc.center[0], arc.center[1]);
                 tgs.push(TangentGeom::Circle {
                     center: [wcx as f32, wcy as f32, wcz as f32],
-                    radius: r as f32,
+                    radius: arc.radius as f32,
                 });
             }
             if i + 1 < seg_count {
@@ -310,42 +246,21 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
                 p1: [p0.x as f32, p0.y as f32, p0.z as f32],
                 p2: [p1.x as f32, p1.y as f32, p1.z as f32],
             });
-        } else {
-            // Arc centre/midpoint computed in OCS, then transformed to WCS.
-            let (ox0, oy0) = (v0.location.x, v0.location.y);
-            let (ox1, oy1) = (v1.location.x, v1.location.y);
-            let angle = 4.0 * (bulge as f64).atan();
-            let dx = ox1 - ox0;
-            let dy = oy1 - oy0;
-            let d = (dx * dx + dy * dy).sqrt();
-            let r = (d / 2.0) / (angle / 2.0).sin().abs();
-            let mx = (ox0 + ox1) * 0.5;
-            let my = (oy0 + oy1) * 0.5;
-            let len = d.max(1e-12);
-            let px = -dy / len;
-            let py = dx / len;
-            let sagitta_sign = if bulge > 0.0 { 1.0_f64 } else { -1.0_f64 };
-            let h = r - (r * r - d * d / 4.0).max(0.0).sqrt();
-            let ocx = mx + sagitta_sign * px * (r - h);
-            let ocy = my + sagitta_sign * py * (r - h);
-            let mid_a = {
-                let a0 = (oy0 - ocy).atan2(ox0 - ocx);
-                let a1 = (oy1 - ocy).atan2(ox1 - ocx);
-                let (sa, mut ea) = if bulge > 0.0 { (a0, a1) } else { (a1, a0) };
-                if ea < sa {
-                    ea += TAU;
-                }
-                sa + (ea - sa) * 0.5
-            };
-            let (mid_wx, mid_wy, mid_wz) = to_wcs(ocx + r * mid_a.cos(), ocy + r * mid_a.sin());
+        } else if let Some(arc) = crate::entities::common::BulgeArc::from_bulge(
+            [v0.location.x, v0.location.y],
+            [v1.location.x, v1.location.y],
+            bulge as f64,
+        ) {
+            let mid_s = arc.sample(0.5);
+            let (mid_wx, mid_wy, mid_wz) = to_wcs(mid_s[0], mid_s[1]);
             let p_mid = Point3::new(mid_wx, mid_wy, mid_wz);
             let tv0 = builder::vertex(p0);
             let tv1 = builder::vertex(p1);
             edges.push(builder::circle_arc(&tv0, &tv1, p_mid));
-            let (wcx, wcy, wcz) = to_wcs(ocx, ocy);
+            let (wcx, wcy, wcz) = to_wcs(arc.center[0], arc.center[1]);
             tangents.push(TangentGeom::Circle {
                 center: [wcx as f32, wcy as f32, wcz as f32],
-                radius: r as f32,
+                radius: arc.radius as f32,
             });
         }
 

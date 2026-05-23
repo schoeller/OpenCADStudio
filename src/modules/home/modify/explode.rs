@@ -217,47 +217,16 @@ fn bulge_to_arc(
     elevation: f64,
     common_src: &EntityCommon,
 ) -> Option<EntityType> {
-    let chord_x = p1[0] - p0[0];
-    let chord_y = p1[1] - p0[1];
-    let chord_len = (chord_x * chord_x + chord_y * chord_y).sqrt();
-    if chord_len < 1e-12 {
-        return None;
-    }
+    let ba = crate::entities::common::BulgeArc::from_bulge(p0, p1, bulge)?;
 
-    // Included angle = 4 * atan(bulge)
-    let b = bulge;
-    let b2 = b * b;
-
-    // Radius: r = chord * (1 + b²) / (4 * |b|)
-    let r = chord_len * (1.0 + b2) / (4.0 * b.abs());
-
-    // Perpendicular distance from midpoint to center:
-    // d = r * cos(theta/2), where cos(theta/2) = (1 - b²) / (1 + b²)
-    let d = r * (1.0 - b2) / (1.0 + b2);
-
-    // Midpoint
-    let mx = (p0[0] + p1[0]) * 0.5;
-    let my = (p0[1] + p1[1]) * 0.5;
-
-    // Left-perpendicular direction (rotate chord 90° CCW)
-    let perp_x = -chord_y / chord_len;
-    let perp_y = chord_x / chord_len;
-
-    // Positive bulge → center is to the left of chord direction (CCW arc)
-    let sign = b.signum();
-    let cx = mx + sign * d * perp_x;
-    let cy = my + sign * d * perp_y;
-
-    // Angles from center to p0 and p1
-    let a0_rad = (p0[1] - cy).atan2(p0[0] - cx);
-    let a1_rad = (p1[1] - cy).atan2(p1[0] - cx);
-
-    // acadrust arcs are always CCW: positive bulge → CCW from p0 to p1
-    // Negative bulge → CW from p0 to p1 = CCW from p1 to p0
-    let (start_angle, end_angle) = if b > 0.0 {
-        (norm_angle(a0_rad), norm_angle(a1_rad))
+    // acadrust Arc is always CCW from start_angle to end_angle. Negative
+    // bulge means the polyline goes p0→p1 the CW way around the centre,
+    // which is the same circular arc traversed p1→p0 the CCW way — so
+    // swap endpoints when bulge < 0.
+    let (start_angle, end_angle) = if bulge > 0.0 {
+        (norm_angle(ba.start_angle), norm_angle(ba.end_angle))
     } else {
-        (norm_angle(a1_rad), norm_angle(a0_rad))
+        (norm_angle(ba.end_angle), norm_angle(ba.start_angle))
     };
 
     let mut common = common_src.clone();
@@ -265,8 +234,8 @@ fn bulge_to_arc(
 
     let arc = ArcEnt {
         common,
-        center: Vector3::new(cx, cy, elevation),
-        radius: r,
+        center: Vector3::new(ba.center[0], ba.center[1], elevation),
+        radius: ba.radius,
         start_angle,
         end_angle,
         ..ArcEnt::new()
