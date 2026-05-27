@@ -226,7 +226,7 @@ impl CommandLine {
         matches
     }
 
-    pub fn view(&self, show_autocomplete: bool) -> Element<'_, Message> {
+    pub fn view(&self, show_autocomplete: bool, dyn_capturing: bool) -> Element<'_, Message> {
         // Only the most recent entries pushed within the last few
         // seconds show on the overlay. The dropdown button keeps the
         // full backlog reachable when the user actually wants it.
@@ -248,10 +248,17 @@ impl CommandLine {
                 col.push(container(text(&entry.text).size(11).color(color)).padding([1, 8]))
             });
         let prompt = container(text("Command:").size(11).color(PROMPT_COLOR)).padding([5, 8]);
-        let input = text_input("", &self.input)
-            .id(cmd_input_id())
-            .on_input(Message::CommandInput)
-            .on_submit(Message::CommandSubmit)
+        // While dynamic input is capturing keystrokes, the command-line
+        // text field is left without an `on_input` handler so it can't
+        // grab focus or swallow numeric keys — those flow through the
+        // global key subscription into the dynamic-input fields instead.
+        let mut input = text_input("", &self.input).id(cmd_input_id());
+        if !dyn_capturing {
+            input = input
+                .on_input(Message::CommandInput)
+                .on_submit(Message::CommandSubmit);
+        }
+        let input = input
             .style(|_: &Theme, _| text_input::Style {
                 background: Background::Color(INPUT_BG),
                 border: Border {

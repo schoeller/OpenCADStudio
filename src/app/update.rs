@@ -857,15 +857,53 @@ impl OpenCADStudio {
                 // Filter out control characters — only push the typed
                 // glyph(s). `Tab`, etc. arrive as Named keys, not here.
                 if s.chars().all(|c| !c.is_control()) {
-                    self.command_line.input.push_str(&s);
+                    let i = self.active_tab;
+                    // While dynamic input is showing fields, numeric
+                    // glyphs edit the focused field instead of the
+                    // command line. Letters still go to the command line
+                    // so command-option keywords keep working.
+                    let numeric = !s.is_empty()
+                        && s.chars()
+                            .all(|c| c.is_ascii_digit() || matches!(c, '.' | ',' | '-' | '+'));
+                    if numeric && self.dyn_input && !self.tabs[i].dyn_fields.is_empty() {
+                        let a = self.tabs[i].dyn_active.min(self.tabs[i].dyn_fields.len() - 1);
+                        self.tabs[i].dyn_fields[a]
+                            .buffer
+                            .get_or_insert_with(String::new)
+                            .push_str(&s);
+                    } else {
+                        self.command_line.input.push_str(&s);
+                    }
                 }
                 self.command_line.autocomplete_cursor = None;
                 self.focus_cmd_input()
             }
 
             Message::CommandBackspace => {
+                let i = self.active_tab;
+                // Backspace edits the focused dynamic-input field first;
+                // emptying it unlocks the field (back to cursor tracking).
+                if self.dyn_input && !self.tabs[i].dyn_fields.is_empty() {
+                    let a = self.tabs[i].dyn_active.min(self.tabs[i].dyn_fields.len() - 1);
+                    if let Some(buf) = self.tabs[i].dyn_fields[a].buffer.as_mut() {
+                        buf.pop();
+                        if buf.is_empty() {
+                            self.tabs[i].dyn_fields[a].buffer = None;
+                        }
+                        return self.focus_cmd_input();
+                    }
+                }
                 self.command_line.input.pop();
                 self.command_line.autocomplete_cursor = None;
+                self.focus_cmd_input()
+            }
+
+            Message::DynTabNext => {
+                let i = self.active_tab;
+                let n = self.tabs[i].dyn_fields.len();
+                if n > 0 {
+                    self.tabs[i].dyn_active = (self.tabs[i].dyn_active + 1) % n;
+                }
                 self.focus_cmd_input()
             }
 
@@ -922,6 +960,15 @@ impl OpenCADStudio {
                     }
                 }
                 let i = self.active_tab;
+                // With the command line empty, a typed dynamic-input value
+                // commits as a point pick instead of an empty submit.
+                if self.tabs[i].active_cmd.is_some()
+                    && self.command_line.input.trim().is_empty()
+                {
+                    if let Some(task) = self.try_dyn_commit() {
+                        return task;
+                    }
+                }
                 if self.tabs[i].active_cmd.is_some() {
                     let text = self.command_line.input.trim().to_string();
                     self.command_line.input.clear();
@@ -1029,6 +1076,11 @@ impl OpenCADStudio {
             }
 
             Message::CommandFinalize => {
+                // A typed dynamic-input value commits as a point pick
+                // before the plain-Enter (on_enter) path runs.
+                if let Some(task) = self.try_dyn_commit() {
+                    return task;
+                }
                 let i = self.active_tab;
                 if self.tabs[i].active_cmd.is_some() {
                     let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_enter());
@@ -1837,6 +1889,7 @@ impl OpenCADStudio {
                     self.tabs[i].snap_result = None;
                 }
 
+                self.sync_dyn_fields();
                 Task::none()
             }
 
@@ -4960,6 +5013,119 @@ impl OpenCADStudio {
 // ── DimStyle dialog helpers ─────────────────────────────────────────────────
 
 impl OpenCADStudio {
+    /// Rebuild the active tab's dynamic-input field set to match what the
+    /// command is currently asking for. Called on cursor move and after
+    /// command-state changes. The field set only changes shape when the
+    /// command's `dyn_field()` or the presence of a base point changes;
+    /// existing typed buffers survive an unchanged shape.
+    fn sync_dyn_fields(&mut self) {
+        use super::document::{DynComponent, DynFieldEntry};
+        let i = self.active_tab;
+        if !self.dyn_input || self.tabs[i].active_cmd.is_none() {
+            self.tabs[i].dyn_fields.clear();
+            self.tabs[i].dyn_active = 0;
+            return;
+        }
+        let field = self
+            .tabs[i]
+            .active_cmd
+            .as_ref()
+            .map(|c| c.dyn_field())
+            .unwrap_or(crate::command::DynField::Point);
+        let has_base = self.last_point.is_some();
+        let desired: Vec<DynComponent> = match field {
+            crate::command::DynField::Distance => vec![DynComponent::Distance],
+            crate::command::DynField::Angle => vec![DynComponent::Angle],
+            crate::command::DynField::Point if has_base => {
+                vec![DynComponent::Distance, DynComponent::Angle]
+            }
+            crate::command::DynField::Point => vec![DynComponent::X, DynComponent::Y],
+        };
+        let current: Vec<DynComponent> =
+            self.tabs[i].dyn_fields.iter().map(|f| f.component).collect();
+        if current != desired {
+            self.tabs[i].dyn_fields = desired.into_iter().map(DynFieldEntry::new).collect();
+            self.tabs[i].dyn_active = 0;
+        }
+    }
+
+    /// Resolve the world point implied by the current dynamic-input field
+    /// values. Locked fields use their typed buffer; the rest fall back to
+    /// the live cursor-derived value. Returns `None` when the field set
+    /// isn't one we know how to turn into a point.
+    fn dyn_resolve_point(&self) -> Option<glam::Vec3> {
+        use super::document::DynComponent;
+        let i = self.active_tab;
+        let fields = &self.tabs[i].dyn_fields;
+        if fields.is_empty() {
+            return None;
+        }
+        let w = self.tabs[i].last_cursor_world;
+        let base = self.last_point.unwrap_or(glam::Vec3::ZERO);
+        // Buffer value parsed as f32, or the supplied live value.
+        let val = |idx: usize, live: f32| -> f32 {
+            fields[idx]
+                .buffer
+                .as_ref()
+                .and_then(|s| s.trim().replace(',', ".").parse::<f32>().ok())
+                .unwrap_or(live)
+        };
+        let dx = w.x - base.x;
+        let dy = w.y - base.y;
+        let live_d = (dx * dx + dy * dy).sqrt();
+        let live_a = dy.atan2(dx); // radians
+        let comps: Vec<DynComponent> = fields.iter().map(|f| f.component).collect();
+        match comps.as_slice() {
+            [DynComponent::X, DynComponent::Y] => {
+                Some(glam::Vec3::new(val(0, w.x), val(1, w.y), base.z))
+            }
+            [DynComponent::Distance, DynComponent::Angle] => {
+                let d = val(0, live_d);
+                let a = val(1, live_a.to_degrees()).to_radians();
+                Some(glam::Vec3::new(base.x + d * a.cos(), base.y + d * a.sin(), base.z))
+            }
+            [DynComponent::Distance] => {
+                // Keep the cursor's direction, override the magnitude.
+                let dir = glam::Vec3::new(dx, dy, 0.0).normalize_or(glam::Vec3::X);
+                Some(base + dir * val(0, live_d))
+            }
+            [DynComponent::Angle] => {
+                // Keep the cursor's distance, override the angle.
+                let a = val(0, live_a.to_degrees()).to_radians();
+                Some(glam::Vec3::new(
+                    base.x + live_d * a.cos(),
+                    base.y + live_d * a.sin(),
+                    base.z,
+                ))
+            }
+            _ => None,
+        }
+    }
+
+    /// If dynamic input has at least one locked (typed) field, resolve the
+    /// implied point, feed it to the active command as a point pick, reset
+    /// the field buffers, and return the resulting task. Returns `None`
+    /// when there is nothing typed, so the caller falls back to its normal
+    /// Enter handling.
+    fn try_dyn_commit(&mut self) -> Option<Task<Message>> {
+        let i = self.active_tab;
+        if !self.dyn_input
+            || self.tabs[i].active_cmd.is_none()
+            || self.tabs[i].dyn_fields.is_empty()
+            || !self.tabs[i].dyn_fields.iter().any(|f| f.locked())
+        {
+            return None;
+        }
+        let pt = self.dyn_resolve_point()?;
+        self.last_point = Some(pt);
+        let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_point(pt));
+        for f in self.tabs[i].dyn_fields.iter_mut() {
+            f.buffer = None;
+        }
+        self.tabs[i].dyn_active = 0;
+        result.map(|r| self.apply_cmd_result(r))
+    }
+
     /// Populate all edit buffers from the currently selected dim style.
     fn load_dimstyle_bufs(&mut self, tab: usize) {
         let doc = &self.tabs[tab].scene.document;

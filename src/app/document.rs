@@ -11,6 +11,42 @@ use acadrust::{CadDocument, Handle};
 use iced;
 use std::path::PathBuf;
 
+// ── Dynamic input ──────────────────────────────────────────────────────────
+
+/// One quantity shown in the dynamic-input overlay near the cursor.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum DynComponent {
+    /// Absolute X ordinate.
+    X,
+    /// Absolute Y ordinate.
+    Y,
+    /// Linear distance from the last point.
+    Distance,
+    /// Angle from the last point, in degrees.
+    Angle,
+}
+
+/// A single editable dynamic-input field. `buffer == None` means the box
+/// tracks the cursor live; once the user types, the typed text is held in
+/// `buffer` and the box stops following the cursor (it is "locked").
+#[derive(Clone, Debug)]
+pub(super) struct DynFieldEntry {
+    pub(super) component: DynComponent,
+    pub(super) buffer: Option<String>,
+}
+
+impl DynFieldEntry {
+    pub(super) fn new(component: DynComponent) -> Self {
+        Self {
+            component,
+            buffer: None,
+        }
+    }
+    pub(super) fn locked(&self) -> bool {
+        self.buffer.is_some()
+    }
+}
+
 // ── Per-document tab state ─────────────────────────────────────────────────
 
 pub(super) struct DocumentTab {
@@ -31,6 +67,13 @@ pub(super) struct DocumentTab {
     pub(super) visual_style: String,
     pub(super) last_cursor_world: glam::Vec3,
     pub(super) last_cursor_screen: iced::Point,
+    /// Dynamic-input fields shown near the cursor while a command waits
+    /// for a point/distance/angle. Rebuilt whenever the active command's
+    /// `dyn_field()` or the presence of a base point changes. Empty when
+    /// dynamic input is not active.
+    pub(super) dyn_fields: Vec<DynFieldEntry>,
+    /// Index of the field that TAB has focused (the one keystrokes edit).
+    pub(super) dyn_active: usize,
     pub(super) history: HistoryState,
     pub(super) active_layer: String,
     /// Currently active UCS. `None` means WCS (identity transform).
@@ -85,6 +128,8 @@ impl DocumentTab {
             visual_style: "Wireframe 2D".into(),
             last_cursor_world: glam::Vec3::ZERO,
             last_cursor_screen: iced::Point::ORIGIN,
+            dyn_fields: Vec::new(),
+            dyn_active: 0,
             history: HistoryState::default(),
             active_layer: "0".to_string(),
             active_ucs: None,

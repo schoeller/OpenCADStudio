@@ -1,8 +1,8 @@
 use super::document::DocumentTab;
 use super::helpers::grid_plane_from_camera;
 use super::history::history_dropdown_labels;
+use super::document::{DynComponent, DynFieldEntry};
 use super::{Message, OpenCADStudio};
-use crate::command::DynField;
 use crate::scene::grip::{grips_to_screen, grips_to_screen_paper};
 use crate::scene::paper_canvas::PaperCanvas;
 use crate::scene::viewport_pane::{PaperViewportPane, ViewportPane};
@@ -463,46 +463,28 @@ impl OpenCADStudio {
                 })
         };
 
-        // Dynamic input overlay — shown when a command is active and DYN is on.
-        // The label adapts to what the command is currently asking for:
-        // a point shows coordinates (or polar distance+angle once a base
-        // point exists); a radius/length prompt shows a single distance;
-        // an angle prompt shows degrees.
+        // Dynamic input overlay — editable boxes near the cursor, one per
+        // quantity the active command is asking for (X/Y, or polar
+        // distance+angle, or a single distance/angle). TAB moves focus
+        // between boxes; typing locks a box to a fixed value while the
+        // rest keep tracking the cursor. The field set is maintained in
+        // `tab.dyn_fields` by `sync_dyn_fields`.
         let dyn_input_overlay: Option<Element<'_, Message>> =
-            if self.dyn_input && tab.active_cmd.is_some() {
+            if self.dyn_input && tab.active_cmd.is_some() && !tab.dyn_fields.is_empty() {
                 let w = tab.last_cursor_world;
-                let field = tab
-                    .active_cmd
-                    .as_ref()
-                    .map(|c| c.dyn_field())
-                    .unwrap_or(DynField::Point);
-                // World is Z-up: the drawing plane is X/Y, so screen "up"
-                // maps to world Y — use w.y, not w.z (issue #27).
-                let label = match (field, self.last_point) {
-                    (DynField::Distance, Some(base)) => {
-                        let dx = (w.x - base.x) as f64;
-                        let dy = (w.y - base.y) as f64;
-                        format!("d={:.3}", (dx * dx + dy * dy).sqrt())
-                    }
-                    (DynField::Angle, Some(base)) => {
-                        let dx = (w.x - base.x) as f64;
-                        let dy = (w.y - base.y) as f64;
-                        format!("<{:.1}°", dy.atan2(dx).to_degrees().rem_euclid(360.0))
-                    }
-                    (_, Some(base)) => {
-                        // Point with a base: polar distance + angle.
-                        let dx = (w.x - base.x) as f64;
-                        let dy = (w.y - base.y) as f64;
-                        let dist = (dx * dx + dy * dy).sqrt();
-                        let ang = dy.atan2(dx).to_degrees().rem_euclid(360.0);
-                        format!("d={:.3}  <{:.1}°", dist, ang)
-                    }
-                    (_, None) => format!("X:{:.3}  Y:{:.3}", w.x, w.y),
-                };
-                Some(overlay::dynamic_input_overlay(
-                    tab.last_cursor_screen,
-                    label,
-                ))
+                let base = self.last_point;
+                let boxes: Vec<overlay::DynBox> = tab
+                    .dyn_fields
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, f)| overlay::DynBox {
+                        label: dyn_component_label(f.component),
+                        value: dyn_component_value(f, w, base),
+                        active: idx == tab.dyn_active,
+                        locked: f.locked(),
+                    })
+                    .collect();
+                Some(overlay::dynamic_input_overlay(tab.last_cursor_screen, boxes))
             } else {
                 None
             };
@@ -612,7 +594,12 @@ impl OpenCADStudio {
         // Autocomplete shows only when no command is collecting its
         // own input (otherwise typed prefixes are coordinates / values).
         let allow_autocomplete = tab.active_cmd.is_none();
-        let command_line_overlay = iced::widget::container(self.command_line.view(allow_autocomplete))
+        // Dynamic input captures keystrokes when its fields are showing,
+        // so the command-line field must release focus / its on_input.
+        let dyn_capturing =
+            self.dyn_input && tab.active_cmd.is_some() && !tab.dyn_fields.is_empty();
+        let command_line_overlay =
+            iced::widget::container(self.command_line.view(allow_autocomplete, dyn_capturing))
             .width(Fill)
             .height(Fill)
             .align_x(iced::alignment::Horizontal::Center)
@@ -791,7 +778,7 @@ impl OpenCADStudio {
                         Some(Message::WindowResized(sz.width as f32, sz.height as f32))
                     }
                     iced::Event::Keyboard(keyboard::Event::KeyPressed {
-                        key, modifiers, ..
+                        key, modifiers, text, ..
                     }) => {
                         let ctrl = modifiers.control();
                         let shift = modifiers.shift();
@@ -814,6 +801,11 @@ impl OpenCADStudio {
                                 if status == Status::Ignored =>
                             {
                                 Some(Message::CommandBackspace)
+                            }
+                            keyboard::Key::Named(keyboard::key::Named::Tab)
+                                if status == Status::Ignored =>
+                            {
+                                Some(Message::DynTabNext)
                             }
                             keyboard::Key::Named(keyboard::key::Named::ArrowUp) => {
                                 Some(Message::CommandHistoryPrev)
@@ -859,10 +851,15 @@ impl OpenCADStudio {
                             // else consumed — route them into the command
                             // line input so typing always reaches it even
                             // when focus is parked on a button / viewport.
-                            keyboard::Key::Character(c)
-                                if !ctrl && status == Status::Ignored =>
-                            {
-                                Some(Message::CommandAppendChar(c.to_string()))
+                            // Use the event's `text` (not the logical key)
+                            // so numpad digits and other keypad glyphs —
+                            // which don't arrive as `Key::Character` — are
+                            // captured too.
+                            _ if !ctrl && status == Status::Ignored => {
+                                let glyph = text
+                                    .as_deref()
+                                    .filter(|t| !t.is_empty() && t.chars().all(|c| !c.is_control()));
+                                glyph.map(|t| Message::CommandAppendChar(t.to_string()))
                             }
                             _ => None,
                         }
@@ -2030,4 +2027,38 @@ pub(super) fn recent_files_panel<'a>(recents: &'a [std::path::PathBuf]) -> Eleme
             ..Default::default()
         })
         .into()
+}
+
+// ── Dynamic-input field formatting ─────────────────────────────────────────
+
+/// Short prefix shown before a dynamic-input box's value.
+fn dyn_component_label(c: DynComponent) -> String {
+    match c {
+        DynComponent::X => "X".into(),
+        DynComponent::Y => "Y".into(),
+        DynComponent::Distance => "d".into(),
+        DynComponent::Angle => "<".into(),
+    }
+}
+
+/// The string shown inside a dynamic-input box: the typed buffer when the
+/// field is locked, otherwise the live value derived from the cursor
+/// world position (and the base point for polar quantities).
+fn dyn_component_value(
+    f: &DynFieldEntry,
+    w: glam::Vec3,
+    base: Option<glam::Vec3>,
+) -> String {
+    if let Some(b) = &f.buffer {
+        return b.clone();
+    }
+    let b = base.unwrap_or(glam::Vec3::ZERO);
+    let dx = (w.x - b.x) as f64;
+    let dy = (w.y - b.y) as f64;
+    match f.component {
+        DynComponent::X => format!("{:.4}", w.x),
+        DynComponent::Y => format!("{:.4}", w.y),
+        DynComponent::Distance => format!("{:.4}", (dx * dx + dy * dy).sqrt()),
+        DynComponent::Angle => format!("{:.1}", dy.atan2(dx).to_degrees().rem_euclid(360.0)),
+    }
 }

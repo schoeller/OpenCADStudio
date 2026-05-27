@@ -964,10 +964,22 @@ fn draw_ucs_icon(frame: &mut canvas::Frame, vp: Mat4, bounds: iced::Rectangle) {
 ///
 /// `cursor_screen` — cursor position in viewport pixels.
 /// `label` — text to display (e.g. "X: 12.34  Y: 56.78").
-pub fn dynamic_input_overlay<'a>(cursor_screen: Point, label: String) -> Element<'a, Message> {
+/// One labelled box in the dynamic-input overlay (e.g. `d` = distance,
+/// `<` = angle, `X` / `Y` = ordinates).
+#[derive(Clone)]
+pub struct DynBox {
+    pub label: String,
+    pub value: String,
+    /// TAB-focused box — keystrokes edit this one.
+    pub active: bool,
+    /// User has typed a value (the box no longer tracks the cursor).
+    pub locked: bool,
+}
+
+pub fn dynamic_input_overlay<'a>(cursor_screen: Point, boxes: Vec<DynBox>) -> Element<'a, Message> {
     canvas(DynInputCanvas {
         cursor_screen,
-        label,
+        boxes,
     })
     .width(Length::Fill)
     .height(Length::Fill)
@@ -976,7 +988,7 @@ pub fn dynamic_input_overlay<'a>(cursor_screen: Point, label: String) -> Element
 
 struct DynInputCanvas {
     cursor_screen: Point,
-    label: String,
+    boxes: Vec<DynBox>,
 }
 
 impl canvas::Program<Message> for DynInputCanvas {
@@ -1000,68 +1012,79 @@ impl canvas::Program<Message> for DynInputCanvas {
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
+        if self.boxes.is_empty() {
+            return vec![frame.into_geometry()];
+        }
 
-        // Offset the box 14 px right and 20 px below the cursor.
+        // Offset the row 14 px right and 20 px below the cursor.
         const OFFSET_X: f32 = 14.0;
         const OFFSET_Y: f32 = 20.0;
         const PAD: f32 = 4.0;
+        const GAP: f32 = 6.0;
         const FONT_SIZE: f32 = 11.0;
-        const BOX_W: f32 = 160.0;
+        const CHAR_W: f32 = FONT_SIZE * 0.62; // monospace-ish width estimate
         const BOX_H: f32 = FONT_SIZE + PAD * 2.0;
+
+        // Each box is "<label>:<value>"; width tracks the text length.
+        let texts: Vec<String> = self
+            .boxes
+            .iter()
+            .map(|b| format!("{}:{}", b.label, b.value))
+            .collect();
+        let widths: Vec<f32> = texts
+            .iter()
+            .map(|t| (t.len() as f32 * CHAR_W) + PAD * 2.0)
+            .collect();
+        let total_w: f32 = widths.iter().sum::<f32>() + GAP * (self.boxes.len() as f32 - 1.0);
 
         let mut bx = self.cursor_screen.x + OFFSET_X;
         let mut by = self.cursor_screen.y + OFFSET_Y;
-
-        // Keep box inside viewport.
-        if bx + BOX_W > bounds.width {
-            bx = self.cursor_screen.x - BOX_W - 4.0;
+        if bx + total_w > bounds.width {
+            bx = (self.cursor_screen.x - total_w - 4.0).max(0.0);
         }
         if by + BOX_H > bounds.height {
-            by = self.cursor_screen.y - BOX_H - 4.0;
+            by = (self.cursor_screen.y - BOX_H - 4.0).max(0.0);
         }
 
-        let bg = canvas::Path::rectangle(
-            Point { x: bx, y: by },
-            Size {
-                width: BOX_W,
-                height: BOX_H,
-            },
-        );
-        frame.fill(
-            &bg,
-            Color {
-                r: 0.05,
-                g: 0.05,
-                b: 0.12,
-                a: 0.85,
-            },
-        );
-        frame.stroke(
-            &bg,
-            canvas::Stroke::default()
-                .with_color(Color {
-                    r: 0.35,
-                    g: 0.55,
-                    b: 0.90,
-                    a: 0.9,
-                })
-                .with_width(1.0),
-        );
-        frame.fill_text(canvas::Text {
-            content: self.label.clone(),
-            position: Point {
-                x: bx + PAD,
-                y: by + PAD,
-            },
-            color: Color {
-                r: 0.90,
-                g: 0.90,
-                b: 0.90,
-                a: 1.0,
-            },
-            size: iced::Pixels(FONT_SIZE),
-            ..Default::default()
-        });
+        let mut x = bx;
+        for (i, b) in self.boxes.iter().enumerate() {
+            let w = widths[i];
+            let rect = canvas::Path::rectangle(Point { x, y: by }, Size { width: w, height: BOX_H });
+            // Active box: brighter fill + accent border. Locked (typed)
+            // boxes get a warm border so it's clear they hold a fixed
+            // value rather than tracking the cursor.
+            let (fill, border) = if b.active {
+                (
+                    Color { r: 0.12, g: 0.18, b: 0.30, a: 0.92 },
+                    Color { r: 0.45, g: 0.70, b: 1.0, a: 1.0 },
+                )
+            } else if b.locked {
+                (
+                    Color { r: 0.05, g: 0.05, b: 0.12, a: 0.85 },
+                    Color { r: 0.95, g: 0.75, b: 0.30, a: 0.9 },
+                )
+            } else {
+                (
+                    Color { r: 0.05, g: 0.05, b: 0.12, a: 0.85 },
+                    Color { r: 0.35, g: 0.55, b: 0.90, a: 0.9 },
+                )
+            };
+            frame.fill(&rect, fill);
+            frame.stroke(
+                &rect,
+                canvas::Stroke::default()
+                    .with_color(border)
+                    .with_width(if b.active { 1.6 } else { 1.0 }),
+            );
+            frame.fill_text(canvas::Text {
+                content: texts[i].clone(),
+                position: Point { x: x + PAD, y: by + PAD },
+                color: Color { r: 0.92, g: 0.92, b: 0.92, a: 1.0 },
+                size: iced::Pixels(FONT_SIZE),
+                ..Default::default()
+            });
+            x += w + GAP;
+        }
 
         vec![frame.into_geometry()]
     }

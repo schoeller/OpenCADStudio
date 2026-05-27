@@ -355,6 +355,8 @@ pub enum Message {
     /// Pop the trailing character off the command-line input — backspace
     /// counterpart to `CommandAppendChar`.
     CommandBackspace,
+    /// TAB pressed: move focus to the next dynamic-input field (wraps).
+    DynTabNext,
     /// Recall previous command in history (↑ arrow key).
     CommandHistoryPrev,
     /// Recall next command in history (↓ arrow key).
