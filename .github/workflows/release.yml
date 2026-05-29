@@ -118,12 +118,13 @@ jobs:
           $tag = "${{ github.ref_name }}"
           # Ship both the bare .exe (portable, no install) and the
           # .msi (installer with Start Menu shortcut + .dwg / .dxf
-          # file association). Users pick the form they want.
-          Move-Item target\release\OpenCADStudio.exe "OpenCADStudio-$tag-windows-x86_64.exe"
-          Move-Item OpenCADStudio.msi "OpenCADStudio-$tag-windows-x86_64.msi"
+          # file association). The `-portable` / `-installer` suffix
+          # makes the distinction obvious on the release page.
+          Move-Item target\release\OpenCADStudio.exe "OpenCADStudio-$tag-windows-x86_64-portable.exe"
+          Move-Item OpenCADStudio.msi "OpenCADStudio-$tag-windows-x86_64-installer.msi"
           gh release upload $tag `
-            "OpenCADStudio-$tag-windows-x86_64.exe" `
-            "OpenCADStudio-$tag-windows-x86_64.msi" `
+            "OpenCADStudio-$tag-windows-x86_64-portable.exe" `
+            "OpenCADStudio-$tag-windows-x86_64-installer.msi" `
             --clobber --repo ${{ github.repository }}
 
   build-macos:
