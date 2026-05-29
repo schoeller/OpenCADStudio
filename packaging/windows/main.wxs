@@ -72,18 +72,26 @@
             </File>
 
             <!--
-              File association: a single ProgID handles both .dwg and
-              .dxf. ContentType isn't strictly required on Windows but
-              improves "Open with…" suggestions.
+              File associations. Two ProgIDs (one per extension) so the
+              `<Verb Id='open'>` rows don't collide on the same registry
+              primary key — both ProgIDs invoke the same exe with the
+              file path as `argv[1]`.
             -->
             <ProgId
-              Id='OpenCADStudio.Drawing'
-              Description='Drawing'
+              Id='OpenCADStudio.DWG'
+              Description='DWG Drawing'
               Icon='OpenCADStudioEXE'
               IconIndex='0'>
               <Extension Id='dwg' ContentType='image/vnd.dwg'>
                 <Verb Id='open' Command='Open' TargetFile='OpenCADStudioEXE' Argument='"%1"' />
               </Extension>
+            </ProgId>
+
+            <ProgId
+              Id='OpenCADStudio.DXF'
+              Description='DXF Drawing'
+              Icon='OpenCADStudioEXE'
+              IconIndex='0'>
               <Extension Id='dxf' ContentType='image/vnd.dxf'>
                 <Verb Id='open' Command='Open' TargetFile='OpenCADStudioEXE' Argument='"%1"' />
               </Extension>
