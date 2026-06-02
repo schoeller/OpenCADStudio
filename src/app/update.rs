@@ -1950,6 +1950,9 @@ impl OpenCADStudio {
                                 sel.right_last_pos = Some(p);
                                 drop(sel);
                                 self.tabs[i].scene.orbit_active_viewport(dx, dy);
+                                // Bump so the GPU re-uploads the viewport's
+                                // re-culled wire set after the view rotates.
+                                self.tabs[i].scene.camera_generation += 1;
                                 return Task::none();
                             } else if self.tabs[i].scene.current_layout == "Model" {
                                 sel.right_last_pos = Some(p);
@@ -1986,6 +1989,10 @@ impl OpenCADStudio {
                         drop(sel);
                         if self.tabs[i].scene.active_viewport.is_some() {
                             self.tabs[i].scene.pan_active_viewport(dx, dy, bounds);
+                            // Bump so the GPU re-uploads the viewport's re-culled
+                            // wire set — otherwise newly-revealed lines stay
+                            // invisible until MSPACE is exited.
+                            self.tabs[i].scene.camera_generation += 1;
                         } else {
                             // `bounds` is the active tile; pan by its height so
                             // the point under the cursor tracks correctly.
@@ -3169,6 +3176,9 @@ impl OpenCADStudio {
                         glam::Vec2::new(pt.x, pt.y)
                     });
                     self.tabs[i].scene.zoom_active_viewport(s, cursor_paper);
+                    // Bump so the GPU re-uploads the viewport's re-culled wire
+                    // set after zooming inside it.
+                    self.tabs[i].scene.camera_generation += 1;
                 } else {
                     // Model space: zoom about the cursor within the active
                     // tile so the point under it stays put in that pane.

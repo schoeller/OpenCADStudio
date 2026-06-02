@@ -598,7 +598,7 @@ pub struct Scene {
     mesh_cache: RefCell<Option<(u64, Arc<Vec<MeshLodSet>>)>>,
     /// Per-viewport wire cache for paper-space rendering.
     /// Maps vp_handle → (geometry_epoch, Arc<Vec<WireModel>>).
-    viewport_wire_cache: RefCell<HashMap<Handle, ((u64, u32), Arc<Vec<WireModel>>)>>,
+    viewport_wire_cache: RefCell<HashMap<Handle, ((u64, u32, u64), Arc<Vec<WireModel>>)>>,
     /// Cached tessellation of paper-space layout block entities (title block, annotations, etc.).
     /// Separate from `wire_cache` so the GPU sheet viewport doesn't re-tessellate every frame.
     /// Keyed by `(geometry_epoch, camera_generation)` — paper view changes
@@ -1619,6 +1619,31 @@ impl Scene {
         );
         *self.image_cache.borrow_mut() = Some((self.geometry_epoch, Arc::clone(&arc)));
         arc
+    }
+
+    /// Images owned by the active paper layout block only. The full-canvas
+    /// sheet viewport uses this so model-block images don't bleed onto the
+    /// paper sheet (mirrors `paper_canvas_hatches`).
+    pub(super) fn paper_sheet_images(&self) -> Arc<Vec<ImageModel>> {
+        let layout_block = self.current_layout_block_handle();
+        let depth_map = self.draw_depth_map();
+        Arc::new(
+            self.images
+                .iter()
+                .filter_map(|(&handle, model)| {
+                    let entity = self.document.get_entity(handle)?;
+                    let c = entity.common();
+                    if c.invisible
+                        || !self.belongs_to_visible_block(handle, c.owner_handle, layout_block)
+                    {
+                        return None;
+                    }
+                    let mut m = model.clone();
+                    m.draw_depth = depth_map.get(&handle.value()).copied().unwrap_or(0.0);
+                    Some(m)
+                })
+                .collect(),
+        )
     }
 
     pub(super) fn meshes_arc(&self) -> Arc<Vec<MeshLodSet>> {
@@ -6119,7 +6144,27 @@ impl Scene {
         // re-tessellate a 100k-entity drawing every frame; round to an
         // integer pixel.
         let height_key = screen_height_px.max(1.0).round() as u32;
-        let key = (self.geometry_epoch, height_key);
+        // Hash the viewport's own view (pan + zoom + orbit) into the key.
+        // Editing inside the viewport (MSPACE) changes its frustum but does NOT
+        // bump geometry_epoch, so without this the stale frustum-culled subset
+        // is returned and newly-revealed lines stay invisible until the layout
+        // re-tessellates. Quantize to ~1 px / fine steps to ignore jitter.
+        let view_key = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            if let Some(EntityType::Viewport(vp)) = self.document.get_entity(vp_handle) {
+                let vh = vp.view_height.abs().max(1e-6);
+                let q = vh / (screen_height_px.max(1.0) as f64); // model units / px
+                (((vp.view_target.x + vp.view_center.x) / q).round() as i64).hash(&mut h);
+                (((vp.view_target.y + vp.view_center.y) / q).round() as i64).hash(&mut h);
+                ((vh * 1000.0).round() as i64).hash(&mut h);
+                ((vp.view_direction.x * 1000.0).round() as i64).hash(&mut h);
+                ((vp.view_direction.y * 1000.0).round() as i64).hash(&mut h);
+                ((vp.view_direction.z * 1000.0).round() as i64).hash(&mut h);
+            }
+            h.finish()
+        };
+        let key = (self.geometry_epoch, height_key, view_key);
         {
             let cache = self.viewport_wire_cache.borrow();
             if let Some((cached_key, ref arc)) = cache.get(&vp_handle) {

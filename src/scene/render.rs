@@ -650,22 +650,28 @@ impl Scene {
             height: visible_h / canvas.1,
         };
 
-        // The paper sheet instance renders the same hatch / wipeout / image
-        // fills as everything else (wrong-camera fills fall outside its
-        // frustum and are culled), plus a synthetic white fill for the sheet's
-        // printable area — the GPU equivalent of the old PaperCanvas chrome.
-        let hatches = if inst.paper_sheet {
+        // The paper sheet instance renders only the paper layout block's own
+        // fills (plus a synthetic white fill for the printable area) — NOT the
+        // model-block hatches. Those belong inside the floating content
+        // viewports; rendering them on the full-canvas sheet would let them
+        // bleed past the viewport borders whenever model coords overlap the
+        // paper area. Content viewports keep the full set (the model camera +
+        // per-viewport scissor place / clip them correctly).
+        let (hatches, wipeout_hatches) = if inst.paper_sheet {
             let mut v: Vec<HatchModel> = Vec::new();
             if let Some(sheet) = self.paper_sheet_fill() {
                 v.push(sheet);
             }
-            v.extend(self.hatch_models_arc().iter().cloned());
-            Arc::new(v)
+            v.extend(self.paper_canvas_hatches().iter().cloned());
+            (Arc::new(v), self.paper_canvas_wipeouts())
         } else {
-            self.hatch_models_arc()
+            (self.hatch_models_arc(), self.wipeout_models_arc())
         };
-        let wipeout_hatches = self.wipeout_models_arc();
-        let images = self.images_arc();
+        let images = if inst.paper_sheet {
+            self.paper_sheet_images()
+        } else {
+            self.images_arc()
+        };
 
         Some(ViewportData {
             wires: all_wires,
