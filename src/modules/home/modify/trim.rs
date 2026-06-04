@@ -1771,8 +1771,8 @@ fn entity_pts(e: &EntityType) -> Vec<[f32; 3]> {
             for i in 0..seg_count {
                 let v0 = &p.vertices[i];
                 let v1 = &p.vertices[(i + 1) % n];
-                pts.push([v0.location.x as f32, elev, v0.location.y as f32]);
-                pts.push([v1.location.x as f32, elev, v1.location.y as f32]);
+                pts.push([v0.location.x as f32, v0.location.y as f32, elev]);
+                pts.push([v1.location.x as f32, v1.location.y as f32, elev]);
             }
             pts
         }
