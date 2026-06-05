@@ -176,6 +176,13 @@ outright — no re-tessellation, `tess ms` drops to ~0 on the PERF HUD. Zoom
 exactly as before; the cull margin is unchanged, so miss cost is identical
 (no zoom regression).
 
+**Partial (landed): per-frame split.** `build_primitive` ran
+`split_face3d_wires` every frame — an O(N) per-wire handle lookup + clone to
+separate Face3D wires — even on a pan that reused the tessellation. It's now
+memoized by the tile's wire content id, and the non-overlay frame reuses the
+`other` Arc with no clone at all. So a pan reuses tessellation, the split, and
+the GPU upload; only the uniform + scissors update per frame.
+
 **Partial (landed): hover.** `set_hover_highlight` no longer bumps the geometry
 epoch (a full re-tessellation) when the hovered entity is already selected —
 the effective highlight set `selected ∪ {hover}` is then unchanged, so the

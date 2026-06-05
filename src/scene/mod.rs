@@ -752,6 +752,13 @@ pub struct Scene {
     /// never collide with a real [`WIRE_CONTENT_GEN`] id; incremented every
     /// use so the GPU always sees a fresh id and re-uploads.
     pub(crate) wire_force_nonce: std::cell::Cell<u64>,
+    /// Memoized `(face3d, other)` split of the Model-tile wire set, keyed by
+    /// its [`WIRE_CONTENT_GEN`] id. `split_face3d_wires` is an O(N) per-wire
+    /// handle lookup + clone that otherwise re-runs every frame; a pan that
+    /// reuses the tessellation (same id) reuses this split too.
+    #[allow(clippy::type_complexity)]
+    split_cache:
+        RefCell<Option<(u64, Arc<Vec<WireModel>>, Arc<Vec<WireModel>>)>>,
 }
 
 impl Scene {
@@ -813,6 +820,7 @@ impl Scene {
             last_tess_wires: std::cell::Cell::new(0),
             last_model_wire_gen: std::cell::Cell::new(0),
             wire_force_nonce: std::cell::Cell::new(0),
+            split_cache: RefCell::new(None),
         }
     }
 

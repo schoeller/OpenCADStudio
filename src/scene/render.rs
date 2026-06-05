@@ -633,11 +633,34 @@ impl Scene {
                 n | (1u64 << 63)
             }
         };
-        let (face3d_wires, other_wires) = split_face3d_wires(&base_arc, &self.document);
-        let all_wires = if self.interim_wire.is_none() && self.preview_wires.is_empty() {
-            Arc::new(other_wires)
+        // Split Face3D wires from the rest. The split is content-only (keyed
+        // by the tile's wire id), so on a pan-reuse it's memoized rather than
+        // re-walking every wire (handle lookup + clone) each frame. Non-tile
+        // paths have no stable id and split inline as before.
+        let (face3d_wires, other_arc) = match tile_wire_gen {
+            Some(gen) => {
+                let cached = {
+                    let c = self.split_cache.borrow();
+                    c.as_ref().filter(|(g, ..)| *g == gen).map(|(_, f, o)| (f.clone(), o.clone()))
+                };
+                cached.unwrap_or_else(|| {
+                    let (f, o) = split_face3d_wires(&base_arc, &self.document);
+                    let (fa, oa) = (Arc::new(f), Arc::new(o));
+                    *self.split_cache.borrow_mut() = Some((gen, fa.clone(), oa.clone()));
+                    (fa, oa)
+                })
+            }
+            None => {
+                let (f, o) = split_face3d_wires(&base_arc, &self.document);
+                (Arc::new(f), Arc::new(o))
+            }
+        };
+        // Reuse the cached `other` Arc directly when no live preview/interim
+        // wires need appending; otherwise clone once to extend.
+        let all_wires = if !has_overlay {
+            other_arc
         } else {
-            let mut v = other_wires;
+            let mut v = (*other_arc).clone();
             if let Some(iw) = &self.interim_wire {
                 v.push(iw.clone());
             }
@@ -705,7 +728,7 @@ impl Scene {
 
         Some(ViewportData {
             wires: all_wires,
-            face3d_wires: Arc::new(face3d_wires),
+            face3d_wires,
             draw_depths: self.draw_depth_map(),
             hatches,
             wipeout_hatches,
