@@ -277,12 +277,6 @@ fn wire_draw_depth(wire: &WireModel, depth_map: &rustc_hash::FxHashMap<u64, f32>
 }
 
 impl WireGpu {
-    pub fn new(device: &wgpu::Device, wire: &WireModel, draw_depth: f32) -> Self {
-        let mut g = Self::build(device, wire, wire.color, draw_depth);
-        g.vp_scissor = wire.vp_scissor;
-        g.is_3d_mesh_edge = !wire.fill_tris.is_empty();
-        g
-    }
 
     /// Merge a run of WireModels that share scissor + mesh-edge state into one
     /// (or, past the 256 MB GPU limit, a few) instance buffer(s), then stamp
@@ -381,18 +375,5 @@ impl WireGpu {
                 }
             })
             .collect()
-    }
-
-    fn build(device: &wgpu::Device, wire: &WireModel, color: [f32; 4], draw_depth: f32) -> Self {
-        let instances = emit_wire_instances(wire, color, draw_depth);
-        let label = format!("wire.ibuf.{}", wire.name);
-        let instance_buffer = instance_buffer_mapped(device, &label, &instances);
-
-        Self {
-            instance_buffer,
-            instance_count: instances.len() as u32,
-            vp_scissor: None,
-            is_3d_mesh_edge: false,
-        }
     }
 }

@@ -900,13 +900,6 @@ impl Pipeline {
         wires: &[WireModel],
         depth_map: &rustc_hash::FxHashMap<u64, f32>,
     ) {
-        let depth_of = |w: &WireModel| -> f32 {
-            w.name
-                .parse::<u64>()
-                .ok()
-                .and_then(|h| depth_map.get(&h).copied())
-                .unwrap_or(0.0)
-        };
         // Batch the wire pass: instead of one GPU buffer + one draw call per
         // WireModel (tens of thousands on a large drawing), merge maximal runs
         // of *consecutive* wires that share scissor + mesh-edge state into one
@@ -934,13 +927,12 @@ impl Pipeline {
         self.gpu_wires = batches;
 
         // Full-brightness copies of selected wires, drawn on top of everything
-        // in the selection overlay pass so they're always visible. Kept
-        // per-wire — the selection set is small and this overlay is separate.
-        self.gpu_selected_wires = wires
-            .iter()
-            .filter(|w| w.selected)
-            .map(|w| WireGpu::new(device, w, depth_of(w)))
-            .collect();
+        // in the selection overlay pass so they're always visible. The xray
+        // pass applies neither scissor nor mesh-edge skip, so all selected
+        // wires batch into one run (None / false) — select-all over a large
+        // drawing no longer costs one draw call per entity. Order preserved.
+        let selected: Vec<WireModel> = wires.iter().filter(|w| w.selected).cloned().collect();
+        self.gpu_selected_wires = WireGpu::from_run(device, &selected, depth_map, None, false);
     }
 
     /// Recompute pixel scissor rects for viewport-clipped wires from the current view_proj.
