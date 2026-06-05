@@ -114,7 +114,10 @@ No topological stratification was needed after all: `build_defn` stores
 nested INSERTs as by-name references (`LocalSub::Nested`) and never expands
 them at build time, so each defn depends only on the read-only `doc` — the
 builds are embarrassingly parallel. Now a plain rayon `par_iter().collect()`.
-`compute_block_aabbs` stays a serial post-pass (resolves nested refs, cheap).
+`compute_block_aabbs` is also parallelized: its `defn_aabb_recursive` walk is
+read-only over the finished `defns` map and re-walks shared nested defns
+(no memo), so the per-name resolves fan out across rayon (read phase), then a
+serial phase stores each AABB back.
 
 ### 2.2 Incremental wire cache (delta tessellation)
 

@@ -151,11 +151,22 @@ impl BlockCache {
     /// called in. Cycle guard: a self-referential block keeps an empty AABB
     /// (will fail every frustum test → not emitted, which is correct).
     fn compute_block_aabbs(&mut self, names: &[String]) {
-        // Snapshot defn pointers up front — we mutate the map below.
-        let names: Vec<String> = names.to_vec();
-        for name in &names {
-            let mut visited: Vec<String> = Vec::new();
-            let aabb = self.defn_aabb_recursive(name, &mut visited);
+        use rayon::prelude::*;
+        // Phase 1 (parallel, read-only): each defn's union AABB is resolved
+        // by `defn_aabb_recursive`, which only *reads* `self.defns` (the map
+        // is fully built by now). There's no memoization, so a defn shared by
+        // many parents is re-walked per parent — real work on block-heavy
+        // drawings — and the per-name walks are independent, so they fan out.
+        let this: &Self = self;
+        let resolved: Vec<(&String, [f32; 4])> = names
+            .par_iter()
+            .map(|name| {
+                let mut visited: Vec<String> = Vec::new();
+                (name, this.defn_aabb_recursive(name, &mut visited))
+            })
+            .collect();
+        // Phase 2 (serial): store the AABB back into each defn.
+        for (name, aabb) in resolved {
             if let Some(defn_arc) = self.defns.get_mut(name) {
                 let mut defn = (**defn_arc).clone();
                 defn.aabb_local = aabb;
