@@ -46,6 +46,9 @@ fn snap_id(s: SnapType) -> &'static str {
         SnapType::ApparentIntersection => "apparentintersection",
         SnapType::Parallel => "parallel",
         SnapType::Grid => "grid",
+        // Internal plugin object-pick snap — not a user-toggleable OSNAP mode,
+        // so it never enters SNAP_ORDER / the persisted set.
+        SnapType::ObjectPick => "objectpick",
     }
 }
 
