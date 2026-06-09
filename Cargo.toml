@@ -4,9 +4,6 @@ version = "0.5.0"
 edition = "2021"
 build = "build.rs"
 
-[workspace]
-members = ["crates/stormsewer"]
-
 [dependencies]
 # vtkio (pulled in transitively via truck-meshalgo) depends on xz2 → lzma-sys,
 # which by default links the system liblzma dynamically. On macOS that bakes a
@@ -34,9 +31,6 @@ truck-shapeops = "0.4"
 # Fast non-cryptographic hasher. Handle/u64 keys dominate the hot block,
 # hatch, draw-depth and wire caches; the default SipHash is overkill there.
 rustc-hash = "2"
-# Storm-sewer hydrology/hydraulics engine (Rational + Manning + HGL). Local
-# crate; powers the `storm_sewer` ribbon module.
-stormsewer = { path = "crates/stormsewer" }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
