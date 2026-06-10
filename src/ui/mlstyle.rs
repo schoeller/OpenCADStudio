@@ -1,8 +1,8 @@
 //! Multiline Style Manager window — fills the entire OS window.
 
 use crate::app::Message;
-use iced::widget::{column, container, row, scrollable, text, Space};
-use iced::{Background, Color, Element, Fill, Theme};
+use iced::widget::{column, container, row, scrollable, text};
+use iced::{Color, Element, Fill};
 
 const DIM: Color = Color {
     r: 0.55,

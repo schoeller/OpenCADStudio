@@ -341,15 +341,19 @@ impl OpenCADStudio {
 
     // ── Public operations (called by the message handlers) ─────────────────
 
+    // Note: the structural ops below mutate the document live (so the dialog
+    // shows a preview) but do NOT mark the tab dirty, push undo, or rebuild the
+    // drawing. Those side effects are deferred to `style_stage_commit` (Apply);
+    // closing the window without Apply calls `style_stage_discard`, which
+    // restores the snapshot taken when the manager opened.
+
     pub(super) fn style_new(&mut self, kind: StyleKind) {
         let i = self.active_tab;
         let name = self.unique_new_name(kind);
-        self.push_undo_snapshot(i, "STYLE NEW");
         let h = self.tabs[i].scene.document.allocate_handle();
         self.insert_default_style(kind, &name, h);
         self.set_style_selected(kind, name.clone());
         self.load_style_bufs(kind);
-        self.tabs[i].dirty = true;
         self.after_style_change(kind);
         self.command_line
             .push_output(&format!("Style '{name}' created."));
@@ -359,28 +363,24 @@ impl OpenCADStudio {
         let i = self.active_tab;
         let src = self.style_selected(kind);
         let name = self.unique_suffixed_name(kind, &src);
-        self.push_undo_snapshot(i, "STYLE COPY");
         let h = self.tabs[i].scene.document.allocate_handle();
         if !self.clone_style_as(kind, &src, &name, h) {
             return;
         }
         self.set_style_selected(kind, name.clone());
         self.load_style_bufs(kind);
-        self.tabs[i].dirty = true;
         self.after_style_change(kind);
         self.command_line
             .push_output(&format!("Style '{name}' created."));
     }
 
     pub(super) fn style_delete(&mut self, kind: StyleKind) {
-        let i = self.active_tab;
         let name = self.style_selected(kind);
         if name.eq_ignore_ascii_case("Standard") {
             self.command_line
                 .push_error("Cannot delete the Standard style.");
             return;
         }
-        self.push_undo_snapshot(i, "STYLE DEL");
         if !self.remove_style_storage(kind, &name) {
             return;
         }
@@ -391,7 +391,6 @@ impl OpenCADStudio {
             .unwrap_or_else(|| "Standard".to_string());
         self.set_style_selected(kind, first);
         self.load_style_bufs(kind);
-        self.tabs[i].dirty = true;
         self.after_style_change(kind);
         self.command_line
             .push_output(&format!("Style '{name}' deleted."));
@@ -408,7 +407,6 @@ impl OpenCADStudio {
     /// Commit the inline rename. No-op (with feedback) on empty / unchanged /
     /// colliding names, and the Standard style cannot be renamed.
     pub(super) fn style_rename_commit(&mut self, kind: StyleKind) {
-        let i = self.active_tab;
         let Some(old) = self.style_rename.take() else {
             return;
         };
@@ -427,13 +425,11 @@ impl OpenCADStudio {
                 .push_error(&format!("Style '{new}' already exists."));
             return;
         }
-        self.push_undo_snapshot(i, "STYLE RENAME");
         self.rename_style_storage(kind, &old, &new);
         if self.style_selected(kind).eq_ignore_ascii_case(&old) {
             self.set_style_selected(kind, new.clone());
         }
         self.load_style_bufs(kind);
-        self.tabs[i].dirty = true;
         self.after_style_change(kind);
         self.command_line
             .push_output(&format!("Renamed '{old}' → '{new}'."));
@@ -443,6 +439,139 @@ impl OpenCADStudio {
         self.style_rename = None;
         self.style_rename_buf.clear();
     }
+
+    // ── Staging: nothing persists until Apply ──────────────────────────────
+    //
+    // A style manager is a transaction. When it opens we snapshot the style
+    // tables / objects / current pointers; every New / Copy / Delete / Rename /
+    // Set Current / property edit mutates the live document for an in-dialog
+    // preview, but the tab stays clean and the drawing is not rebuilt. Apply
+    // commits (marks dirty, pushes one undo entry, rebuilds); closing the
+    // window without Apply discards by restoring the snapshot.
+
+    /// Snapshot the style-related document state into a transferable record.
+    fn capture_style_state(&self) -> StyleStateSnapshot {
+        let i = self.active_tab;
+        let doc = &self.tabs[i].scene.document;
+        let style_objects = doc
+            .objects
+            .iter()
+            .filter(|(_, o)| {
+                matches!(
+                    o,
+                    ObjectType::TableStyle(_)
+                        | ObjectType::MLineStyle(_)
+                        | ObjectType::MultiLeaderStyle(_)
+                )
+            })
+            .map(|(&h, o)| (h, o.clone()))
+            .collect();
+        StyleStateSnapshot {
+            text_styles: doc.text_styles.clone(),
+            dim_styles: doc.dim_styles.clone(),
+            style_objects,
+            current_text: doc.header.current_text_style_name.clone(),
+            current_dim: doc.header.current_dimstyle_name.clone(),
+            multiline_style: doc.header.multiline_style.clone(),
+            active_table: self.ribbon.active_table_style.clone(),
+            active_mleader: self.ribbon.active_mleader_style.clone(),
+            tab_active_mleader: self.tabs[i].active_mleader_style.clone(),
+        }
+    }
+
+    /// Overwrite the live style state with a snapshot (used by commit's undo
+    /// dance and by discard).
+    fn restore_style_state(&mut self, snap: &StyleStateSnapshot) {
+        let i = self.active_tab;
+        let doc = &mut self.tabs[i].scene.document;
+        doc.text_styles = snap.text_styles.clone();
+        doc.dim_styles = snap.dim_styles.clone();
+        doc.objects.retain(|_, o| {
+            !matches!(
+                o,
+                ObjectType::TableStyle(_)
+                    | ObjectType::MLineStyle(_)
+                    | ObjectType::MultiLeaderStyle(_)
+            )
+        });
+        for (h, o) in &snap.style_objects {
+            doc.objects.insert(*h, o.clone());
+        }
+        doc.header.current_text_style_name = snap.current_text.clone();
+        doc.header.current_dimstyle_name = snap.current_dim.clone();
+        doc.header.multiline_style = snap.multiline_style.clone();
+        self.ribbon.active_table_style = snap.active_table.clone();
+        self.ribbon.active_mleader_style = snap.active_mleader.clone();
+        self.tabs[i].active_mleader_style = snap.tab_active_mleader.clone();
+    }
+
+    /// Begin a staging transaction for a freshly-opened style manager.
+    pub(super) fn style_stage_begin(&mut self) {
+        let dirty_at_open = self.tabs[self.active_tab].dirty;
+        let baseline = self.capture_style_state();
+        self.style_stage = Some(StyleStage {
+            dirty_at_open,
+            baseline,
+        });
+    }
+
+    /// Commit the staged changes (Apply): make them permanent with a single
+    /// undo entry, mark the tab dirty, and rebuild the drawing.
+    pub(super) fn style_stage_commit(&mut self) {
+        let i = self.active_tab;
+        let Some(stage) = self.style_stage.take() else {
+            // No active transaction — still refresh the drawing so a bare Apply
+            // is harmless.
+            self.tabs[i].dirty = true;
+            self.tabs[i].scene.bump_geometry();
+            self.sync_ribbon_styles();
+            return;
+        };
+        // Capture the edited state, rewind to the baseline so the undo entry
+        // restores the pre-edit document, then re-apply the edits on top.
+        let edited = self.capture_style_state();
+        self.restore_style_state(&stage.baseline);
+        self.push_undo_snapshot(i, "STYLE");
+        self.restore_style_state(&edited);
+        self.tabs[i].dirty = true;
+        self.tabs[i].scene.bump_geometry();
+        self.sync_ribbon_styles();
+        // Re-baseline so further edits in the still-open window stage afresh.
+        self.style_stage = Some(StyleStage {
+            dirty_at_open: true,
+            baseline: edited,
+        });
+    }
+
+    /// Discard staged changes (window closed without Apply): restore the
+    /// snapshot taken when the manager opened.
+    pub(super) fn style_stage_discard(&mut self) {
+        let Some(stage) = self.style_stage.take() else {
+            return;
+        };
+        self.restore_style_state(&stage.baseline);
+        self.tabs[self.active_tab].dirty = stage.dirty_at_open;
+        self.sync_ribbon_styles();
+    }
+}
+
+/// Snapshot of every document field a style manager can touch.
+pub(super) struct StyleStateSnapshot {
+    text_styles: acadrust::tables::Table<TextStyle>,
+    dim_styles: acadrust::tables::Table<DimStyle>,
+    style_objects: Vec<(Handle, ObjectType)>,
+    current_text: String,
+    current_dim: String,
+    multiline_style: String,
+    active_table: String,
+    active_mleader: String,
+    tab_active_mleader: String,
+}
+
+/// An in-progress style-manager transaction.
+pub(super) struct StyleStage {
+    dirty_at_open: bool,
+    baseline: StyleStateSnapshot,
 }
 
 // ── Object-store helpers ───────────────────────────────────────────────────

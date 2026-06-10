@@ -2,7 +2,7 @@
 
 use crate::app::Message;
 use iced::widget::{
-    button, checkbox, column, container, pick_list, row, scrollable, text, text_input, Space,
+    button, checkbox, column, container, pick_list, row, scrollable, text, text_input,
 };
 use iced::{Background, Border, Color, Element, Fill, Theme};
 

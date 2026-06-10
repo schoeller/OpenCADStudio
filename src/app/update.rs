@@ -1519,6 +1519,17 @@ impl OpenCADStudio {
                     self.save_dialog_window = None;
                     return Task::none();
                 }
+                // A style manager closed via OS ✕ counts as Cancel: discard any
+                // staged (not-yet-applied) changes by restoring the snapshot
+                // taken when it opened.
+                if self.textstyle_window == Some(id)
+                    || self.dimstyle_window == Some(id)
+                    || self.tablestyle_window == Some(id)
+                    || self.mleaderstyle_window == Some(id)
+                    || self.mlstyle_window == Some(id)
+                {
+                    self.style_stage_discard();
+                }
                 // Each popup window that's launched from a ribbon tool
                 // also turns that tool blue (`activate_tool`); when the
                 // window closes, the matching tool needs to be cleared
@@ -6127,6 +6138,7 @@ impl OpenCADStudio {
                     ..Default::default()
                 });
                 self.textstyle_window = Some(id);
+                self.style_stage_begin();
                 task.map(|_| Message::Noop)
             }
             Message::TextStyleDialogClose => {
@@ -6143,12 +6155,11 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::TextStyleDialogSetCurrent => {
+                // Staged: persists on Apply.
                 let i = self.active_tab;
                 let name = self.textstyle_selected.clone();
                 if self.tabs[i].scene.document.text_styles.get(&name).is_some() {
-                    self.push_undo_snapshot(i, "STYLE SET");
                     self.tabs[i].scene.document.header.current_text_style_name = name.clone();
-                    self.tabs[i].dirty = true;
                     self.sync_ribbon_styles();
                     self.command_line
                         .push_output(&format!("Current text style: {}", name));
@@ -6199,63 +6210,52 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::TextStyleToggle(field) => {
+                // Staged: mutate live for preview, persist on Apply.
                 let i = self.active_tab;
                 let name = self.textstyle_selected.clone();
-                if self.tabs[i].scene.document.text_styles.get(&name).is_some() {
-                    self.push_undo_snapshot(i, "STYLE EDIT");
-                    if let Some(s) = self.tabs[i].scene.document.text_styles.get_mut(&name) {
-                        match field {
-                            "backward" => s.flags.backward = !s.flags.backward,
-                            "upside_down" => s.flags.upside_down = !s.flags.upside_down,
-                            "annotative" => s.annotative = !s.annotative,
-                            _ => {}
-                        }
+                if let Some(s) = self.tabs[i].scene.document.text_styles.get_mut(&name) {
+                    match field {
+                        "backward" => s.flags.backward = !s.flags.backward,
+                        "upside_down" => s.flags.upside_down = !s.flags.upside_down,
+                        "annotative" => s.annotative = !s.annotative,
+                        _ => {}
                     }
-                    self.tabs[i].scene.bump_geometry();
-                    self.tabs[i].dirty = true;
                 }
                 Task::none()
             }
             Message::TextStyleApply => {
                 let i = self.active_tab;
                 let name = self.textstyle_selected.clone();
-                if self.tabs[i].scene.document.text_styles.get(&name).is_some() {
-                    self.push_undo_snapshot(i, "STYLE EDIT");
-                    let font = self.textstyle_font.clone();
-                    let width_str = self.textstyle_width.clone();
-                    let oblique_str = self.textstyle_oblique.clone();
-                    let height_str = self.textstyle_height.clone();
-                    let bigfont = self.textstyle_bigfont.clone();
-                    let ttf = self.textstyle_ttf.clone();
-                    if let Some(s) = self.tabs[i].scene.document.text_styles.get_mut(&name) {
-                        s.font_file = font;
-                        s.big_font_file = bigfont;
-                        s.true_type_font = ttf;
-                        if let Ok(w) = width_str.trim().parse::<f64>() {
-                            s.width_factor = w;
-                        }
-                        if let Ok(a) = oblique_str.trim().parse::<f64>() {
-                            s.oblique_angle = a.to_radians();
-                        }
-                        if let Ok(h) = height_str.trim().parse::<f64>() {
-                            s.height = h.max(0.0);
-                        }
+                let font = self.textstyle_font.clone();
+                let width_str = self.textstyle_width.clone();
+                let oblique_str = self.textstyle_oblique.clone();
+                let height_str = self.textstyle_height.clone();
+                let bigfont = self.textstyle_bigfont.clone();
+                let ttf = self.textstyle_ttf.clone();
+                if let Some(s) = self.tabs[i].scene.document.text_styles.get_mut(&name) {
+                    s.font_file = font;
+                    s.big_font_file = bigfont;
+                    s.true_type_font = ttf;
+                    if let Ok(w) = width_str.trim().parse::<f64>() {
+                        s.width_factor = w;
                     }
-                    self.tabs[i].scene.bump_geometry();
-                    self.tabs[i].dirty = true;
+                    if let Ok(a) = oblique_str.trim().parse::<f64>() {
+                        s.oblique_angle = a.to_radians();
+                    }
+                    if let Ok(h) = height_str.trim().parse::<f64>() {
+                        s.height = h.max(0.0);
+                    }
                 }
+                self.style_stage_commit();
                 Task::none()
             }
             Message::TextStyleFontPick(font_file) => {
+                // Staged: update the buffer + live style; persist on Apply.
                 let i = self.active_tab;
                 self.textstyle_font = font_file.clone();
                 let name = self.textstyle_selected.clone();
-                if self.tabs[i].scene.document.text_styles.get(&name).is_some() {
-                    self.push_undo_snapshot(i, "STYLE FONT");
-                    if let Some(s) = self.tabs[i].scene.document.text_styles.get_mut(&name) {
-                        s.font_file = font_file;
-                    }
-                    self.tabs[i].dirty = true;
+                if let Some(s) = self.tabs[i].scene.document.text_styles.get_mut(&name) {
+                    s.font_file = font_file;
                 }
                 Task::none()
             }
@@ -6288,6 +6288,7 @@ impl OpenCADStudio {
                     ..Default::default()
                 });
                 self.tablestyle_window = Some(id);
+                self.style_stage_begin();
                 task.map(|_| Message::Noop)
             }
             Message::TableStyleDialogClose => {
@@ -6321,7 +6322,6 @@ impl OpenCADStudio {
                 let h: Option<f64> = self.ts_hmargin.trim().parse().ok();
                 let v: Option<f64> = self.ts_vmargin.trim().parse().ok();
                 let desc = self.ts_description.clone();
-                self.push_undo_snapshot(i, "TABLESTYLE EDIT");
                 for obj in self.tabs[i].scene.document.objects.values_mut() {
                     if let ObjectType::TableStyle(s) = obj {
                         if s.name == name {
@@ -6335,7 +6335,7 @@ impl OpenCADStudio {
                         }
                     }
                 }
-                self.tabs[i].dirty = true;
+                self.style_stage_commit();
                 Task::none()
             }
 
@@ -6347,8 +6347,6 @@ impl OpenCADStudio {
                         "Up" => TableFlowDirection::Up,
                         _ => TableFlowDirection::Down,
                     };
-                    self.push_undo_snapshot(i, "TABLESTYLE EDIT");
-                    self.tabs[i].dirty = true;
                 }
                 Task::none()
             }
@@ -6404,9 +6402,6 @@ impl OpenCADStudio {
                             _ => TableBorderType::Single,
                         };
                     }
-                    self.push_undo_snapshot(i, "TABLESTYLE EDIT");
-                    self.tabs[i].dirty = true;
-                    self.tabs[i].scene.bump_geometry();
                 }
                 Task::none()
             }
@@ -6419,9 +6414,6 @@ impl OpenCADStudio {
                     {
                         bd.is_invisible = !bd.is_invisible;
                     }
-                    self.push_undo_snapshot(i, "TABLESTYLE EDIT");
-                    self.tabs[i].dirty = true;
-                    self.tabs[i].scene.bump_geometry();
                 }
                 Task::none()
             }
@@ -6432,9 +6424,6 @@ impl OpenCADStudio {
                     if let Some(c) = Self::ts_cell_of(s, row) {
                         c.fill_enabled = !c.fill_enabled;
                     }
-                    self.push_undo_snapshot(i, "TABLESTYLE EDIT");
-                    self.tabs[i].dirty = true;
-                    self.tabs[i].scene.bump_geometry();
                 }
                 Task::none()
             }
@@ -6456,9 +6445,6 @@ impl OpenCADStudio {
                             _ => CellAlignment::MiddleCenter,
                         };
                     }
-                    self.push_undo_snapshot(i, "TABLESTYLE EDIT");
-                    self.tabs[i].dirty = true;
-                    self.tabs[i].scene.bump_geometry();
                 }
                 Task::none()
             }
@@ -6521,9 +6507,6 @@ impl OpenCADStudio {
                             }
                         }
                     }
-                    self.push_undo_snapshot(i, "TABLESTYLE EDIT");
-                    self.tabs[i].dirty = true;
-                    self.tabs[i].scene.bump_geometry();
                 }
                 Task::none()
             }
@@ -6532,7 +6515,6 @@ impl OpenCADStudio {
                 use acadrust::objects::ObjectType;
                 let i = self.active_tab;
                 let name = self.tablestyle_selected.clone();
-                self.push_undo_snapshot(i, "TABLESTYLE EDIT");
                 for obj in self.tabs[i].scene.document.objects.values_mut() {
                     if let ObjectType::TableStyle(s) = obj {
                         if s.name == name {
@@ -6544,7 +6526,6 @@ impl OpenCADStudio {
                         }
                     }
                 }
-                self.tabs[i].dirty = true;
                 Task::none()
             }
 
@@ -6552,7 +6533,6 @@ impl OpenCADStudio {
                 use acadrust::objects::ObjectType;
                 let i = self.active_tab;
                 let name = self.tablestyle_selected.clone();
-                self.push_undo_snapshot(i, "TABLESTYLE EDIT");
                 for obj in self.tabs[i].scene.document.objects.values_mut() {
                     if let ObjectType::TableStyle(s) = obj {
                         if s.name == name {
@@ -6560,7 +6540,6 @@ impl OpenCADStudio {
                         }
                     }
                 }
-                self.tabs[i].dirty = true;
                 Task::none()
             }
 
@@ -6627,6 +6606,7 @@ impl OpenCADStudio {
                     ..Default::default()
                 });
                 self.mlstyle_window = Some(id);
+                self.style_stage_begin();
                 task.map(|_| Message::Noop)
             }
             Message::MlStyleDialogClose => {
@@ -6651,9 +6631,8 @@ impl OpenCADStudio {
                     .values()
                     .any(|o| matches!(o, ObjectType::MLineStyle(s) if s.name == name));
                 if exists {
-                    self.push_undo_snapshot(i, "MLSTYLE SET");
+                    // Staged: persists on Apply.
                     self.tabs[i].scene.document.header.multiline_style = name.clone();
-                    self.tabs[i].dirty = true;
                     self.command_line
                         .push_output(&format!("Current multiline style: {}", name));
                 }
@@ -6663,7 +6642,12 @@ impl OpenCADStudio {
             // Apply pair as every other style manager. The editor is currently
             // read-only, so there is nothing to apply yet — wire this up when
             // editable MLineStyle properties land.
-            Message::MlStyleApply => Task::none(),
+            Message::MlStyleApply => {
+                // Multiline styles have no editable properties yet; Apply still
+                // commits any staged structural / current-style changes.
+                self.style_stage_commit();
+                Task::none()
+            }
             Message::MlStyleDialogNew => {
                 self.style_new(crate::app::StyleKind::MLine);
                 Task::none()
@@ -6716,6 +6700,7 @@ impl OpenCADStudio {
                     ..Default::default()
                 });
                 self.mleaderstyle_window = Some(id);
+                self.style_stage_begin();
                 task.map(|_| Message::Noop)
             }
             Message::MLeaderStyleDialogClose => {
@@ -6802,9 +6787,6 @@ impl OpenCADStudio {
                         }
                         _ => {}
                     }
-                    self.push_undo_snapshot(i, "MLEADERSTYLE EDIT");
-                    self.tabs[i].dirty = true;
-                    self.tabs[i].scene.bump_geometry();
                 }
                 Task::none()
             }
@@ -6900,9 +6882,6 @@ impl OpenCADStudio {
                         }
                         _ => {}
                     }
-                    self.push_undo_snapshot(i, "MLEADERSTYLE EDIT");
-                    self.tabs[i].dirty = true;
-                    self.tabs[i].scene.bump_geometry();
                 }
                 Task::none()
             }
@@ -6939,9 +6918,6 @@ impl OpenCADStudio {
                         "block_content_handle" => s.block_content_handle = handle,
                         _ => {}
                     }
-                    self.push_undo_snapshot(i, "MLEADERSTYLE EDIT");
-                    self.tabs[i].dirty = true;
-                    self.tabs[i].scene.bump_geometry();
                 }
                 Task::none()
             }
@@ -7026,10 +7002,8 @@ impl OpenCADStudio {
                     if let Some(v) = bsz {
                         s.block_content_scale_z = v;
                     }
-                    self.push_undo_snapshot(i, "MLEADERSTYLE EDIT");
-                    self.tabs[i].dirty = true;
-                    self.tabs[i].scene.bump_geometry();
                 }
+                self.style_stage_commit();
                 Task::none()
             }
 
@@ -7067,6 +7041,7 @@ impl OpenCADStudio {
                     ..Default::default()
                 });
                 self.dimstyle_window = Some(id);
+                self.style_stage_begin();
                 task.map(|_| Message::Noop)
             }
             Message::DimStyleDialogClose => {
@@ -7079,6 +7054,7 @@ impl OpenCADStudio {
             Message::DimStyleDialogApply => {
                 let i = self.active_tab;
                 self.apply_dimstyle_bufs(i);
+                self.style_stage_commit();
                 Task::none()
             }
             Message::DimStyleDialogSelect(name) => {
@@ -7100,11 +7076,10 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::DimStyleDialogSetCurrent => {
+                // Staged: persists on Apply.
                 let i = self.active_tab;
-                self.push_undo_snapshot(i, "DIMSTYLE SETCURRENT");
                 self.tabs[i].scene.document.header.current_dimstyle_name =
                     self.dimstyle_selected.clone();
-                self.tabs[i].dirty = true;
                 self.sync_ribbon_styles();
                 self.command_line.push_output(&format!(
                     "Current dim style set to '{}'.",
@@ -7147,7 +7122,7 @@ impl OpenCADStudio {
                         .map(|b| b.handle)
                         .unwrap_or(acadrust::types::Handle::NULL)
                 };
-                self.push_undo_snapshot(i, "DIMSTYLE EDIT");
+                // Staged: persists on Apply.
                 if let Some(ds) = self.tabs[i].scene.document.dim_styles.get_mut(&name) {
                     match field {
                         "dimblk" => ds.dimblk = handle,
@@ -7160,8 +7135,6 @@ impl OpenCADStudio {
                         _ => {}
                     }
                 }
-                self.tabs[i].dirty = true;
-                self.tabs[i].scene.bump_geometry();
                 Task::none()
             }
         }
@@ -7888,7 +7861,6 @@ impl OpenCADStudio {
 
     /// Write edit buffers back into the selected dim style document entry.
     fn apply_dimstyle_bufs(&mut self, tab: usize) {
-        self.push_undo_snapshot(tab, "DIMSTYLE EDIT");
         let doc = &mut self.tabs[tab].scene.document;
         let Some(ds) = doc.dim_styles.get_mut(&self.dimstyle_selected) else {
             return;
@@ -7979,7 +7951,6 @@ impl OpenCADStudio {
         ds.dimtofl = self.ds_dimtofl;
         ds.dimalt = self.ds_dimalt;
         ds.dimapost = self.ds_dimapost.clone();
-        self.tabs[tab].dirty = true;
         self.command_line
             .push_output(&format!("DimStyle '{}' updated.", self.dimstyle_selected));
     }

@@ -391,6 +391,10 @@ pub(super) struct OpenCADStudio {
     style_rename: Option<String>,
     /// Edit buffer for the inline rename text input.
     style_rename_buf: String,
+    /// Active style-manager transaction. Edits mutate the document live for an
+    /// in-dialog preview but only persist on Apply; closing without Apply
+    /// restores this snapshot. `None` when no style manager is staging.
+    style_stage: Option<style_ops::StyleStage>,
 
     // ── TextStyle Font Browser ────────────────────────────────────────────
     textstyle_selected: String,
@@ -1390,6 +1394,7 @@ impl OpenCADStudio {
             // TextStyle font browser
             style_rename: None,
             style_rename_buf: String::new(),
+            style_stage: None,
             textstyle_selected: "Standard".to_string(),
             textstyle_font: String::new(),
             textstyle_width: "1.0".to_string(),
