@@ -123,10 +123,14 @@ fn tessellate_sat_lods(
     facet_res: f64,
 ) -> Option<MeshLodSet> {
     let configs = LodConfig::all();
+    let xform = body_transform(sat);
     let mut lods: Vec<MeshModel> = Vec::with_capacity(3);
     for lod in configs {
         let scaled = scale_lod(lod, facet_res);
-        if let Some(m) = tessellate_sat(sat, name.clone(), color, scaled) {
+        if let Some(mut m) = tessellate_sat(sat, name.clone(), color, scaled) {
+            if let Some((mat, tr, scale)) = xform {
+                apply_body_transform(&mut m, &mat, &tr, scale);
+            }
             lods.push(m);
         }
     }
@@ -135,6 +139,45 @@ fn tessellate_sat_lods(
     }
     let world_aabb = mesh_aabb(&lods[0]);
     Some(MeshLodSet { lods, world_aabb })
+}
+
+/// Extract the body's placement transform from the SAT document: a row-major
+/// 3×3 affine, a translation, and the uniform scale. ACIS keeps a solid's
+/// geometry in body-local space and records the placement in a `transform`
+/// record (`<3×3> <tx ty tz> <scale> rotate reflect shear`). `None` when the
+/// document has no transform (treated as identity).
+fn body_transform(sat: &SatDocument) -> Option<([f64; 9], [f64; 3], f64)> {
+    let t = sat.records.iter().find(|r| r.entity_type == "transform")?;
+    let mut m = [0.0f64; 9];
+    for (i, slot) in m.iter_mut().enumerate() {
+        *slot = t.token_float(i)?;
+    }
+    let tr = [t.token_float(9)?, t.token_float(10)?, t.token_float(11)?];
+    let scale = t.token_float(12).unwrap_or(1.0);
+    Some((m, tr, scale))
+}
+
+/// Apply a body placement transform to a mesh. ACIS treats points as row
+/// vectors (`p' = scale·(p·M) + T`), so the 3×3 is indexed transposed relative
+/// to a column-vector multiply. Normals get the rotation only, renormalized.
+fn apply_body_transform(mesh: &mut MeshModel, m: &[f64; 9], tr: &[f64; 3], scale: f64) {
+    for v in &mut mesh.verts {
+        let (x, y, z) = (v[0] as f64, v[1] as f64, v[2] as f64);
+        let wx = scale * (x * m[0] + y * m[3] + z * m[6]) + tr[0];
+        let wy = scale * (x * m[1] + y * m[4] + z * m[7]) + tr[1];
+        let wz = scale * (x * m[2] + y * m[5] + z * m[8]) + tr[2];
+        *v = [wx as f32, wy as f32, wz as f32];
+    }
+    for n in &mut mesh.normals {
+        let (x, y, z) = (n[0] as f64, n[1] as f64, n[2] as f64);
+        let nx = x * m[0] + y * m[3] + z * m[6];
+        let ny = x * m[1] + y * m[4] + z * m[7];
+        let nz = x * m[2] + y * m[5] + z * m[8];
+        let len = (nx * nx + ny * ny + nz * nz).sqrt();
+        if len > 1e-9 {
+            *n = [(nx / len) as f32, (ny / len) as f32, (nz / len) as f32];
+        }
+    }
 }
 
 /// Scale a LOD's segment counts by FACETRES (clamped to AutoCAD's
