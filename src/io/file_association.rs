@@ -143,7 +143,7 @@ mod windows_impl {
 
     pub(super) fn set_default() -> Result<String, String> {
         unsafe {
-            let co = CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED);
+            let co = CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED as u32);
             // S_OK (0) / S_FALSE (1) mean we initialised COM and must balance it
             // with CoUninitialize. Any other value: another init already owns the
             // thread's apartment, so we leave it alone.
