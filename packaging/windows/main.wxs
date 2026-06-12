@@ -120,7 +120,6 @@
             <RegistryValue
               Root='HKLM'
               Key='SOFTWARE\Classes\Applications\OpenCADStudio.exe\DefaultIcon'
-              Name=''
               Type='string'
               Value='[APPLICATIONROOTDIRECTORY]OpenCADStudio.exe,0'
               KeyPath='yes' />
@@ -133,7 +132,6 @@
             <RegistryValue
               Root='HKLM'
               Key='SOFTWARE\Classes\Applications\OpenCADStudio.exe\shell\open\command'
-              Name=''
               Type='string'
               Value='"[APPLICATIONROOTDIRECTORY]OpenCADStudio.exe" "%1"' />
             <RegistryValue
