@@ -28,6 +28,16 @@ impl OpenCADStudio {
             return Task::done(Message::OpenPathPicked(Some((path, size))));
         }
 
+        // The Start (welcome) tab has no drawing to act on, so a drawing
+        // command would silently do nothing. Allow only the commands that
+        // make sense there (create / open a document, or quit) and tell the
+        // user otherwise instead of running a no-op. See #96.
+        if self.tabs[i].is_start && !matches!(cmd, "NEW" | "OPEN" | "EXIT" | "QUIT") {
+            self.command_line
+                .push_info("No drawing open. Use NEW or OPEN to start a drawing.");
+            return Task::none();
+        }
+
         if crate::plugin::try_dispatch(self, i, cmd) {
             return Task::none();
         }
