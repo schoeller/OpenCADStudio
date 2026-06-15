@@ -52,13 +52,15 @@ enum Step {
 
 pub struct StretchCommand {
     handles: Vec<Handle>,
+    wire_models: Vec<WireModel>,
     step: Step,
 }
 
 impl StretchCommand {
-    pub fn new(handles: Vec<Handle>) -> Self {
+    pub fn new(handles: Vec<Handle>, wire_models: Vec<WireModel>) -> Self {
         Self {
             handles,
+            wire_models,
             step: Step::WindowCorner1,
         }
     }
@@ -128,7 +130,7 @@ impl CadCommand for StretchCommand {
         CmdResult::Cancel
     }
 
-    fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
+    fn on_preview_wires(&mut self, pt: Vec3) -> Vec<WireModel> {
         match &self.step {
             Step::WindowCorner2(c1) => {
                 // Show crossing-window rectangle preview (dashed green)
@@ -140,31 +142,35 @@ impl CadCommand for StretchCommand {
                     [c1.x, pt.y, pt.z],
                     [c1.x, c1.y, c1.z],
                 ];
-                Some(WireModel::solid(
+                vec![WireModel::solid(
                     "stretch_window".into(),
                     pts,
                     [0.3, 1.0, 0.3, 0.7],
                     false,
-                ))
+                )]
             }
-            Step::Target { base, .. } => Some(WireModel {
-                name: "rubber_band".into(),
-                points: vec![[base.x, base.y, base.z], [pt.x, pt.y, pt.z]],
-                color: WireModel::CYAN,
-                selected: false,
-                pattern_length: 0.0,
-                pattern: [0.0; 8],
-                line_weight_px: 1.0,
-                snap_pts: vec![],
-                tangent_geoms: vec![],
-                aci: 0,
-                key_vertices: vec![],
-                aabb: WireModel::UNBOUNDED_AABB,
-                plinegen: true,
-                vp_scissor: None,
-                fill_tris: vec![],
-            }),
-            _ => None,
+            Step::Target {
+                win_min,
+                win_max,
+                base,
+            } => {
+                let delta = pt - *base;
+                // Live ghost: vertices inside the crossing window follow the
+                // cursor, the rest stay anchored.
+                let mut out: Vec<WireModel> = self
+                    .wire_models
+                    .iter()
+                    .map(|w| w.stretched(*win_min, *win_max, delta))
+                    .collect();
+                out.push(WireModel::solid(
+                    "rubber_band".into(),
+                    vec![[base.x, base.y, base.z], [pt.x, pt.y, pt.z]],
+                    WireModel::CYAN,
+                    false,
+                ));
+                out
+            }
+            _ => vec![],
         }
     }
 }

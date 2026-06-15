@@ -155,6 +155,26 @@ impl WireModel {
         out
     }
 
+    /// Return a clone for a stretch preview: every point whose XY lies inside
+    /// the crossing window `[win_min, win_max]` is translated by `delta`; points
+    /// outside stay put. Exact for line/polyline vertices (the primary stretch
+    /// targets); curve tessellation points may deform where a window edge cuts
+    /// through them, matching the per-vertex nature of the operation.
+    pub fn stretched(&self, win_min: glam::Vec3, win_max: glam::Vec3, delta: glam::Vec3) -> Self {
+        let mut out = self.clone();
+        out.name = format!("preview_{}", self.name);
+        out.color = Self::CYAN;
+        out.selected = false;
+        for p in &mut out.points {
+            if p[0] >= win_min.x && p[0] <= win_max.x && p[1] >= win_min.y && p[1] <= win_max.y {
+                p[0] += delta.x;
+                p[1] += delta.y;
+                p[2] += delta.z;
+            }
+        }
+        out
+    }
+
     /// Return a clone mirrored across the line through `p1`→`p2`.
     pub fn mirrored(&self, p1: glam::Vec3, p2: glam::Vec3) -> Self {
         let ax = p2.x - p1.x;

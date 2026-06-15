@@ -1567,7 +1567,8 @@ impl OpenCADStudio {
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 } else {
                     use crate::modules::home::modify::stretch::StretchCommand;
-                    let new_cmd = StretchCommand::new(handles);
+                    let wires = self.tabs[i].scene.wire_models_for(&handles);
+                    let new_cmd = StretchCommand::new(handles, wires);
                     self.command_line.push_info(&new_cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(new_cmd));
                 }
