@@ -40,39 +40,6 @@ impl std::fmt::Display for RenderModeChoice {
 impl OpenCADStudio {
     pub fn view(&self, window_id: window::Id) -> Element<'_, Message> {
         // ── Floating panel windows ─────────────────────────────────────────
-        if Some(window_id) == self.textstyle_window {
-            let tab = &self.tabs[self.active_tab];
-            let styles: Vec<String> = tab
-                .scene
-                .document
-                .text_styles
-                .iter()
-                .map(|s| s.name.clone())
-                .collect();
-            let (backward, upside_down, annotative) = tab
-                .scene
-                .document
-                .text_styles
-                .get(&self.textstyle_selected)
-                .map(|s| (s.flags.backward, s.flags.upside_down, s.annotative))
-                .unwrap_or((false, false, false));
-            return crate::ui::textstyle::view_window(crate::ui::textstyle::TextStyleView {
-                styles,
-                selected: &self.textstyle_selected,
-                current: &tab.scene.document.header.current_text_style_name,
-                font_buf: &self.textstyle_font,
-                width_buf: &self.textstyle_width,
-                oblique_buf: &self.textstyle_oblique,
-                height_buf: &self.textstyle_height,
-                bigfont_buf: &self.textstyle_bigfont,
-                ttf_buf: &self.textstyle_ttf,
-                backward,
-                upside_down,
-                annotative,
-                rename_active: self.style_rename.as_deref(),
-                rename_buf: &self.style_rename_buf,
-            });
-        }
         if Some(window_id) == self.tablestyle_window {
             use acadrust::objects::ObjectType;
             let tab = &self.tabs[self.active_tab];
@@ -121,42 +88,6 @@ impl OpenCADStudio {
                 self.style_rename.as_deref(),
                 &self.style_rename_buf,
                 self.ts_color_open,
-            );
-        }
-        if Some(window_id) == self.mlstyle_window {
-            use acadrust::objects::ObjectType;
-            let tab = &self.tabs[self.active_tab];
-            let styles: Vec<String> = tab
-                .scene
-                .document
-                .objects
-                .values()
-                .filter_map(|o| {
-                    if let ObjectType::MLineStyle(s) = o {
-                        Some(s.name.clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            let selected_style = tab.scene.document.objects.values().find_map(|o| {
-                if let ObjectType::MLineStyle(s) = o {
-                    if s.name == self.mlstyle_selected {
-                        Some(s)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            });
-            return crate::ui::mlstyle::view_window(
-                styles,
-                &self.mlstyle_selected,
-                selected_style,
-                tab.scene.document.header.multiline_style.clone(),
-                self.style_rename.as_deref(),
-                &self.style_rename_buf,
             );
         }
         if Some(window_id) == self.mleaderstyle_window {
@@ -1542,6 +1473,76 @@ impl OpenCADStudio {
                 780,
                 540,
             ),
+            super::ModalKind::TextStyle => {
+                let tab = &self.tabs[self.active_tab];
+                let styles: Vec<String> = tab
+                    .scene
+                    .document
+                    .text_styles
+                    .iter()
+                    .map(|s| s.name.clone())
+                    .collect();
+                let (backward, upside_down, annotative) = tab
+                    .scene
+                    .document
+                    .text_styles
+                    .get(&self.textstyle_selected)
+                    .map(|s| (s.flags.backward, s.flags.upside_down, s.annotative))
+                    .unwrap_or((false, false, false));
+                sized(
+                    crate::ui::textstyle::view_window(crate::ui::textstyle::TextStyleView {
+                        styles,
+                        selected: &self.textstyle_selected,
+                        current: &tab.scene.document.header.current_text_style_name,
+                        font_buf: &self.textstyle_font,
+                        width_buf: &self.textstyle_width,
+                        oblique_buf: &self.textstyle_oblique,
+                        height_buf: &self.textstyle_height,
+                        bigfont_buf: &self.textstyle_bigfont,
+                        ttf_buf: &self.textstyle_ttf,
+                        backward,
+                        upside_down,
+                        annotative,
+                        rename_active: self.style_rename.as_deref(),
+                        rename_buf: &self.style_rename_buf,
+                    }),
+                    620,
+                    460,
+                )
+            }
+            super::ModalKind::MlStyle => {
+                use acadrust::objects::ObjectType;
+                let tab = &self.tabs[self.active_tab];
+                let styles: Vec<String> = tab
+                    .scene
+                    .document
+                    .objects
+                    .values()
+                    .filter_map(|o| match o {
+                        ObjectType::MLineStyle(s) => Some(s.name.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                let selected_style = tab.scene.document.objects.values().find_map(|o| match o {
+                    ObjectType::MLineStyle(s) if s.name == self.mlstyle_selected => Some(s),
+                    _ => None,
+                });
+                sized(
+                    crate::ui::mlstyle::view_window(
+                        styles,
+                        &self.mlstyle_selected,
+                        selected_style,
+                        tab.scene.document.header.multiline_style.clone(),
+                        self.style_rename.as_deref(),
+                        &self.style_rename_buf,
+                    ),
+                    620,
+                    420,
+                )
+            }
+            super::ModalKind::TableStyle
+            | super::ModalKind::MLeaderStyle
+            | super::ModalKind::DimStyle => return None,
         })
     }
 

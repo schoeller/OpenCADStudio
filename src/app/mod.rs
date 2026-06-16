@@ -601,6 +601,11 @@ pub enum ModalKind {
     PageSetup,
     LayoutManager,
     Plotstyle,
+    TextStyle,
+    TableStyle,
+    MlStyle,
+    MLeaderStyle,
+    DimStyle,
 }
 
 /// Identifies a DimStyle field that can be edited in the dialog.

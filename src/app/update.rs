@@ -6349,25 +6349,13 @@ impl OpenCADStudio {
                         .unwrap_or_else(|| "Standard".to_string())
                 };
                 self.load_textstyle_bufs(i);
-                if let Some(id) = self.textstyle_window {
-                    return window::gain_focus(id);
-                }
-                let (id, task) = window::open(window::Settings {
-                    size: iced::Size::new(620.0, 460.0),
-                    resizable: true,
-                    level: window::Level::AlwaysOnTop,
-                    ..Default::default()
-                });
-                self.textstyle_window = Some(id);
+                self.active_modal = Some(super::ModalKind::TextStyle);
                 self.style_stage_begin();
-                task.map(|_| Message::Noop)
+                Task::none()
             }
             Message::TextStyleDialogClose => {
-                if let Some(id) = self.textstyle_window.take() {
-                    window::close(id)
-                } else {
-                    Task::none()
-                }
+                self.active_modal = None;
+                Task::none()
             }
             Message::TextStyleDialogSelect(name) => {
                 let i = self.active_tab;
@@ -6830,25 +6818,13 @@ impl OpenCADStudio {
                         })
                         .unwrap_or_else(|| "Standard".to_string())
                 };
-                if let Some(id) = self.mlstyle_window {
-                    return window::gain_focus(id);
-                }
-                let (id, task) = window::open(window::Settings {
-                    size: iced::Size::new(620.0, 420.0),
-                    resizable: true,
-                    level: window::Level::AlwaysOnTop,
-                    ..Default::default()
-                });
-                self.mlstyle_window = Some(id);
+                self.active_modal = Some(super::ModalKind::MlStyle);
                 self.style_stage_begin();
-                task.map(|_| Message::Noop)
+                Task::none()
             }
             Message::MlStyleDialogClose => {
-                if let Some(id) = self.mlstyle_window.take() {
-                    window::close(id)
-                } else {
-                    Task::none()
-                }
+                self.active_modal = None;
+                Task::none()
             }
             Message::MlStyleDialogSelect(name) => {
                 self.mlstyle_selected = name;
