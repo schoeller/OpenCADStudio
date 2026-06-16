@@ -7,8 +7,8 @@ use truck_modeling::{
 use crate::command::EntityTransform;
 use crate::entities::common::{ro_prop as ro, square_grip};
 use crate::entities::traits::TruckConvertible;
-use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
-use crate::scene::object::{GripApply, GripDef, PropSection};
+use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::scene::model::object::{GripApply, GripDef, PropSection};
 
 fn to_truck(spl: &Spline) -> TruckEntity {
     let n = spl.control_points.len();
@@ -141,12 +141,12 @@ fn apply_grip(spline: &mut Spline, grip_id: usize, apply: GripApply) {
 }
 
 fn apply_transform(spline: &mut Spline, t: &EntityTransform) {
-    crate::scene::transform::apply_standard_entity_transform(spline, t, |entity, p1, p2| {
+    crate::scene::view::transform::apply_standard_entity_transform(spline, t, |entity, p1, p2| {
         for cp in &mut entity.control_points {
-            crate::scene::transform::reflect_xy_point(&mut cp.x, &mut cp.y, p1, p2);
+            crate::scene::view::transform::reflect_xy_point(&mut cp.x, &mut cp.y, p1, p2);
         }
         for fp in &mut entity.fit_points {
-            crate::scene::transform::reflect_xy_point(&mut fp.x, &mut fp.y, p1, p2);
+            crate::scene::view::transform::reflect_xy_point(&mut fp.x, &mut fp.y, p1, p2);
         }
     });
 }
@@ -164,8 +164,8 @@ impl crate::entities::traits::Grippable for Spline {
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
         apply_grip(self, grip_id, apply);
     }
-    fn grip_menu(&self, _grip_id: usize) -> Vec<crate::scene::object::GripMenuItem> {
-        use crate::scene::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, _grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
+        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
         vec![
             GripMenuItem {
                 label: "Stretch",
@@ -185,8 +185,8 @@ impl crate::entities::traits::Grippable for Spline {
             },
         ]
     }
-    fn apply_grip_menu(&mut self, grip_id: usize, action: crate::scene::object::GripMenuAction) {
-        use crate::scene::object::GripMenuAction as A;
+    fn apply_grip_menu(&mut self, grip_id: usize, action: crate::scene::model::object::GripMenuAction) {
+        use crate::scene::model::object::GripMenuAction as A;
         let n = self.control_points.len();
         let min_cv = (self.degree as usize).saturating_add(1).max(2);
         match action {

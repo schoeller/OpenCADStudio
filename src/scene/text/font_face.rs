@@ -11,8 +11,8 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
-use crate::scene::lff::{self, Glyph};
-use crate::scene::{sysfont, ttf_glyph};
+use crate::scene::text::lff::{self, Glyph};
+use crate::scene::text::{sysfont, ttf_glyph};
 
 /// A glyph borrowed from a static LFF font or owned (cached `Arc`) from a TTF
 /// face. Derefs to [`Glyph`] either way.

@@ -7,7 +7,7 @@
 //                                ------
 //                                 40 B / vertex
 
-use crate::scene::mesh_model::{MeshLodSet, MeshModel};
+use crate::scene::model::mesh_model::{MeshLodSet, MeshModel};
 use iced::wgpu;
 use iced::wgpu::util::DeviceExt;
 

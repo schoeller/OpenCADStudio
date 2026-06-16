@@ -25,7 +25,7 @@ use crate::modules::home::modify::spline_ops::{
     t_to_rel,
 };
 use crate::modules::IconKind;
-use crate::scene::wire_model::WireModel;
+use crate::scene::model::wire_model::WireModel;
 
 // ── Dropdown constants ─────────────────────────────────────────────────────
 

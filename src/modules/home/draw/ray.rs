@@ -9,7 +9,7 @@ use acadrust::types::Vector3;
 use acadrust::EntityType;
 
 use crate::command::{CadCommand, CmdResult};
-use crate::scene::wire_model::WireModel;
+use crate::scene::model::wire_model::WireModel;
 use glam::Vec3;
 
 const DISPLAY_EXTENT: f32 = 1_000_000.0;

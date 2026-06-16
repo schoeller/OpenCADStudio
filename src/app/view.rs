@@ -3,8 +3,8 @@ use super::document::{DynComponent, DynFieldEntry};
 use super::helpers::grid_plane_from_camera;
 use super::history::history_dropdown_labels;
 use super::{Message, OpenCADStudio};
-use crate::scene::grip::{grips_to_screen, grips_to_screen_paper};
-use crate::scene::viewport_pane::ViewportPane;
+use crate::scene::pick::grip::{grips_to_screen, grips_to_screen_paper};
+use crate::scene::view::viewport_pane::ViewportPane;
 use crate::scene::{VIEWCUBE_DRAW_PX, VIEWCUBE_PAD};
 use crate::ui::overlay;
 use iced::widget::{

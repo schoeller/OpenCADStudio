@@ -7,7 +7,7 @@
 //! dedicated inner `Pipeline` (kept in the `MultiPipeline` outer).
 
 use super::render::{CameraState, Primitive};
-use super::Scene;
+use crate::scene::Scene;
 use iced::widget::shader;
 use iced::{mouse, Event, Rectangle};
 

@@ -1,7 +1,7 @@
 use super::helpers::{entity_type_key, entity_type_label, title_case_word};
 use super::{OpenCADStudio, VARIES_LABEL};
 use crate::linetypes;
-use crate::scene::dispatch;
+use crate::scene::view::dispatch;
 use crate::ui;
 use acadrust::{EntityType, Handle};
 
@@ -118,28 +118,28 @@ impl OpenCADStudio {
                             .collect();
 
                         if let Some(geom) = sections.last_mut() {
-                            geom.props.push(crate::scene::object::Property {
+                            geom.props.push(crate::scene::model::object::Property {
                                 label: "Frozen Layers".to_string(),
                                 field: "frozen_layers",
-                                value: crate::scene::object::PropValue::EditText(
+                                value: crate::scene::model::object::PropValue::EditText(
                                     frozen_names.join(", "),
                                 ),
                             });
                             if !ucs_names.is_empty() {
-                                geom.props.push(crate::scene::object::Property {
+                                geom.props.push(crate::scene::model::object::Property {
                                     label: "UCS Name".to_string(),
                                     field: "vp_ucs_name",
-                                    value: crate::scene::object::PropValue::Choice {
+                                    value: crate::scene::model::object::PropValue::Choice {
                                         selected: current_ucs,
                                         options: ucs_names,
                                     },
                                 });
                             }
                             if !view_names.is_empty() {
-                                geom.props.push(crate::scene::object::Property {
+                                geom.props.push(crate::scene::model::object::Property {
                                     label: "Named View".to_string(),
                                     field: "vp_named_view",
-                                    value: crate::scene::object::PropValue::Choice {
+                                    value: crate::scene::model::object::PropValue::Choice {
                                         selected: String::new(),
                                         options: view_names,
                                     },
@@ -167,7 +167,7 @@ impl OpenCADStudio {
                                 if let Some(prop) =
                                     geom.props.iter_mut().find(|p| p.field == "vscale_std")
                                 {
-                                    prop.value = crate::scene::object::PropValue::Choice {
+                                    prop.value = crate::scene::model::object::PropValue::Choice {
                                         selected,
                                         options,
                                     };
@@ -195,10 +195,10 @@ impl OpenCADStudio {
                                     geom.props.iter_mut().find(|p| p.field == "style_name")
                                 {
                                     let current = match &prop.value {
-                                        crate::scene::object::PropValue::EditText(s) => s.clone(),
+                                        crate::scene::model::object::PropValue::EditText(s) => s.clone(),
                                         _ => String::new(),
                                     };
-                                    prop.value = crate::scene::object::PropValue::Choice {
+                                    prop.value = crate::scene::model::object::PropValue::Choice {
                                         selected: current,
                                         options: dim_style_names,
                                     };
@@ -210,10 +210,10 @@ impl OpenCADStudio {
                     if !group_names.is_empty() {
                         let label = group_names.join(", ");
                         if let Some(general) = sections.first_mut() {
-                            general.props.push(crate::scene::object::Property {
+                            general.props.push(crate::scene::model::object::Property {
                                 label: "Group".to_string(),
                                 field: "group",
-                                value: crate::scene::object::PropValue::ReadOnly(label),
+                                value: crate::scene::model::object::PropValue::ReadOnly(label),
                             });
                         }
                     }
@@ -240,7 +240,7 @@ impl OpenCADStudio {
                             .iter()
                             .flat_map(|section| section.props.iter())
                             .filter_map(|prop| match &prop.value {
-                                crate::scene::object::PropValue::Choice { options, .. } => Some((
+                                crate::scene::model::object::PropValue::Choice { options, .. } => Some((
                                     prop.field.to_string(),
                                     iced::widget::combo_box::State::new(options.clone()),
                                 )),
@@ -252,7 +252,7 @@ impl OpenCADStudio {
                         layer_combo: iced::widget::combo_box::State::new(layer_names.clone()),
                         linetype_combo: iced::widget::combo_box::State::new(linetype_items.clone()),
                         hatch_pattern_combo: iced::widget::combo_box::State::new(
-                            crate::scene::hatch_patterns::names(),
+                            crate::scene::model::hatch_patterns::names(),
                         ),
                         lineweight_combo: iced::widget::combo_box::State::new(
                             ui::properties::lw_options(),
@@ -284,7 +284,7 @@ impl OpenCADStudio {
                             .iter()
                             .flat_map(|section| section.props.iter())
                             .filter_map(|prop| match &prop.value {
-                                crate::scene::object::PropValue::Choice { options, .. } => Some((
+                                crate::scene::model::object::PropValue::Choice { options, .. } => Some((
                                     prop.field.to_string(),
                                     iced::widget::combo_box::State::new(options.clone()),
                                 )),
@@ -299,7 +299,7 @@ impl OpenCADStudio {
                         layer_combo: iced::widget::combo_box::State::new(layer_names.clone()),
                         linetype_combo: iced::widget::combo_box::State::new(linetype_items.clone()),
                         hatch_pattern_combo: iced::widget::combo_box::State::new(
-                            crate::scene::hatch_patterns::names(),
+                            crate::scene::model::hatch_patterns::names(),
                         ),
                         lineweight_combo: iced::widget::combo_box::State::new(
                             ui::properties::lw_options(),
@@ -527,13 +527,13 @@ impl OpenCADStudio {
             }
         }
 
-        crate::scene::dispatch::apply_color(&mut entity, self.ribbon.active_color);
-        crate::scene::dispatch::apply_common_prop(
+        crate::scene::view::dispatch::apply_color(&mut entity, self.ribbon.active_color);
+        crate::scene::view::dispatch::apply_common_prop(
             &mut entity,
             "linetype",
             &self.ribbon.active_linetype.clone(),
         );
-        crate::scene::dispatch::apply_line_weight(&mut entity, self.ribbon.active_lineweight);
+        crate::scene::view::dispatch::apply_line_weight(&mut entity, self.ribbon.active_lineweight);
         // CELTSCALE (header.current_entity_linetype_scale): new entities
         // pick up the document's saved per-entity linetype scale. The user
         // can override per entity later via the properties panel.
@@ -741,12 +741,12 @@ pub(super) fn build_selection_groups(
 pub(super) fn aggregate_sections(
     selected: &[(Handle, &EntityType)],
     text_style_names: &[String],
-) -> Vec<crate::scene::object::PropSection> {
+) -> Vec<crate::scene::model::object::PropSection> {
     if selected.is_empty() {
         return vec![];
     }
 
-    let mut all_sections: Vec<Vec<crate::scene::object::PropSection>> = selected
+    let mut all_sections: Vec<Vec<crate::scene::model::object::PropSection>> = selected
         .iter()
         .map(|(handle, entity)| dispatch::properties_sectioned(*handle, entity, text_style_names))
         .collect();
@@ -759,15 +759,15 @@ pub(super) fn aggregate_sections(
 }
 
 fn merge_sections(
-    left: &[crate::scene::object::PropSection],
-    right: &[crate::scene::object::PropSection],
-) -> Vec<crate::scene::object::PropSection> {
+    left: &[crate::scene::model::object::PropSection],
+    right: &[crate::scene::model::object::PropSection],
+) -> Vec<crate::scene::model::object::PropSection> {
     left.iter()
         .filter_map(|section| {
             let rhs = right
                 .iter()
                 .find(|candidate| candidate.title == section.title)?;
-            let props: Vec<crate::scene::object::Property> = section
+            let props: Vec<crate::scene::model::object::Property> = section
                 .props
                 .iter()
                 .filter_map(|prop| {
@@ -775,7 +775,7 @@ fn merge_sections(
                         .props
                         .iter()
                         .find(|candidate| candidate.field == prop.field)?;
-                    Some(crate::scene::object::Property {
+                    Some(crate::scene::model::object::Property {
                         label: prop.label.clone(),
                         field: prop.field,
                         value: merge_prop_value(&prop.value, &other.value),
@@ -785,7 +785,7 @@ fn merge_sections(
             if props.is_empty() {
                 None
             } else {
-                Some(crate::scene::object::PropSection {
+                Some(crate::scene::model::object::PropSection {
                     title: section.title.clone(),
                     props,
                 })
@@ -795,10 +795,10 @@ fn merge_sections(
 }
 
 fn merge_prop_value(
-    left: &crate::scene::object::PropValue,
-    right: &crate::scene::object::PropValue,
-) -> crate::scene::object::PropValue {
-    use crate::scene::object::PropValue;
+    left: &crate::scene::model::object::PropValue,
+    right: &crate::scene::model::object::PropValue,
+) -> crate::scene::model::object::PropValue {
+    use crate::scene::model::object::PropValue;
 
     if left == right {
         return left.clone();

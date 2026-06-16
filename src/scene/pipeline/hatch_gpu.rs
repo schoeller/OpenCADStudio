@@ -5,7 +5,7 @@
 //   binding 1 — BoundaryData      (16384 bytes) boundary polygon vertices
 //   binding 2 — FamilyBatchData   (1296 bytes)  up to 16 line families + 128 dash values
 
-use crate::scene::hatch_model::{HatchModel, HatchPattern, PatFamily, MAX_HATCH_BOUNDARY_VERTS};
+use crate::scene::model::hatch_model::{HatchModel, HatchPattern, PatFamily, MAX_HATCH_BOUNDARY_VERTS};
 use iced::wgpu;
 use iced::wgpu::util::DeviceExt;
 

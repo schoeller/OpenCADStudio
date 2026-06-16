@@ -18,11 +18,11 @@ use acadrust::types::Color as AcadColor;
 use acadrust::{CadDocument, EntityType, Handle};
 use glam::Vec3;
 
-use crate::scene::acad_to_truck::{convert, TruckObject};
-use crate::scene::truck_tess::{
+use crate::scene::convert::acad_to_truck::{convert, TruckObject};
+use crate::scene::convert::truck_tess::{
     tessellate_edge, tessellate_vertex, tessellate_wire, TruckTessResult,
 };
-use crate::scene::wire_model::{SnapHint, WireModel};
+use crate::scene::model::wire_model::{SnapHint, WireModel};
 
 // ── Public entry points ────────────────────────────────────────────────────
 
@@ -604,7 +604,7 @@ pub(crate) fn entity_z(entity: &EntityType) -> f32 {
 // function stays as the dispatcher used by the main `tessellate()` path.
 
 use crate::entities::traits::FallbackTess;
-use crate::scene::tess_util::FallbackGeometry as Geometry;
+use crate::scene::convert::tess_util::FallbackGeometry as Geometry;
 
 fn fallback_geometry(entity: &EntityType, world_offset: [f64; 3]) -> Geometry {
     match entity {

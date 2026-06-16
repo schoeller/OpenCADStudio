@@ -12,7 +12,7 @@
 // This produces larger-than-optimal files but is universally importable by
 // CAD systems that accept AP203.
 
-use crate::scene::mesh_model::MeshModel;
+use crate::scene::model::mesh_model::MeshModel;
 use std::fmt::Write as FmtWrite;
 
 /// Build a STEP AP203 text representation from a slice of mesh models.

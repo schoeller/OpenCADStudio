@@ -13,8 +13,8 @@ use glam::Vec3;
 use truck_modeling::Solid;
 
 use crate::command::{CadCommand, CmdResult};
-use crate::scene::model_solid;
-use crate::scene::wire_model::WireModel;
+use crate::scene::model::model_solid;
+use crate::scene::model::wire_model::WireModel;
 
 /// Which primitive a `PrimitiveCommand` builds.
 #[derive(Clone, Copy, PartialEq, Eq)]

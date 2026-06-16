@@ -5,9 +5,9 @@ use truck_modeling::{builder, Point3};
 use crate::command::EntityTransform;
 use crate::entities::common::{center_grip, edit_prop as edit, parse_f64, square_grip};
 use crate::entities::traits::TruckConvertible;
-use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
-use crate::scene::object::{GripApply, GripDef, PropSection};
-use crate::scene::wire_model::{SnapHint, TangentGeom};
+use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::scene::model::object::{GripApply, GripDef, PropSection};
+use crate::scene::model::wire_model::{SnapHint, TangentGeom};
 
 const TAU: f64 = std::f64::consts::TAU;
 
@@ -21,13 +21,13 @@ fn to_truck(arc: &Arc) -> TruckEntity {
     let normal = (arc.normal.x, arc.normal.y, arc.normal.z);
 
     // Compute OCS basis vectors for this entity's normal.
-    let (ax, ay) = crate::scene::transform::ocs_axes(normal);
+    let (ax, ay) = crate::scene::view::transform::ocs_axes(normal);
 
     let ccw_end = if ea >= sa { ea } else { ea + TAU };
     let mid_a = sa + (ccw_end - sa) * 0.5;
 
     // Arc centre in WCS.
-    let (cwx, cwy, cwz) = crate::scene::transform::ocs_point_to_wcs((cx, cy, cz), normal);
+    let (cwx, cwy, cwz) = crate::scene::view::transform::ocs_point_to_wcs((cx, cy, cz), normal);
 
     // Arc points in WCS: centre_wcs + r*cos(a)*Ax + r*sin(a)*Ay
     let arc_pt = |a: f64| {
@@ -198,8 +198,8 @@ fn apply_grip(arc: &mut Arc, grip_id: usize, apply: GripApply) {
 }
 
 fn apply_transform(arc: &mut Arc, t: &EntityTransform) {
-    crate::scene::transform::apply_standard_entity_transform(arc, t, |entity, p1, p2| {
-        crate::scene::transform::reflect_xy_point(
+    crate::scene::view::transform::apply_standard_entity_transform(arc, t, |entity, p1, p2| {
+        crate::scene::view::transform::reflect_xy_point(
             &mut entity.center.x,
             &mut entity.center.y,
             p1,
@@ -227,8 +227,8 @@ impl crate::entities::traits::Grippable for Arc {
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
         apply_grip(self, grip_id, apply);
     }
-    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::object::GripMenuItem> {
-        use crate::scene::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
+        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
         match grip_id {
             0 => vec![GripMenuItem {
                 label: "Stretch",
@@ -260,7 +260,7 @@ impl crate::entities::traits::Grippable for Arc {
             ],
         }
     }
-    fn apply_grip_menu(&mut self, _grip_id: usize, _action: crate::scene::object::GripMenuAction) {
+    fn apply_grip_menu(&mut self, _grip_id: usize, _action: crate::scene::model::object::GripMenuAction) {
         // Radius / Arc Length / Lengthen all need a follow-up prompt;
         // the actual edit happens in `apply_grip_menu_value`.
     }
@@ -268,9 +268,9 @@ impl crate::entities::traits::Grippable for Arc {
     fn grip_menu_value_prompt(
         &self,
         _grip_id: usize,
-        action: crate::scene::object::GripMenuAction,
+        action: crate::scene::model::object::GripMenuAction,
     ) -> Option<&'static str> {
-        use crate::scene::object::GripMenuAction as A;
+        use crate::scene::model::object::GripMenuAction as A;
         match action {
             A::Radius => Some("New radius"),
             A::ArcLength => Some("New arc length"),
@@ -282,10 +282,10 @@ impl crate::entities::traits::Grippable for Arc {
     fn apply_grip_menu_value(
         &mut self,
         grip_id: usize,
-        action: crate::scene::object::GripMenuAction,
+        action: crate::scene::model::object::GripMenuAction,
         value: f64,
     ) {
-        use crate::scene::object::GripMenuAction as A;
+        use crate::scene::model::object::GripMenuAction as A;
         match action {
             A::Radius if value > 0.0 => self.radius = value,
             A::ArcLength if value > 0.0 && self.radius > 1e-9 => {

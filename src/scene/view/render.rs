@@ -11,10 +11,10 @@ use iced::{Rectangle, Size};
 
 use std::sync::Arc;
 
-use super::pipeline::viewcube::{hover_id, VIEWCUBE_PX};
-use super::pipeline::MultiPipeline;
-use super::tess_util;
-use super::{HatchModel, ImageModel, MeshLodSet, Scene, Uniforms, ViewportInstance, WireModel};
+use crate::scene::pipeline::viewcube::{hover_id, VIEWCUBE_PX};
+use crate::scene::pipeline::MultiPipeline;
+use crate::scene::convert::tess_util;
+use crate::scene::{HatchModel, ImageModel, MeshLodSet, Scene, Uniforms, ViewportInstance, WireModel};
 
 // ── Camera hover state (shader::Program::State) ───────────────────────────
 
@@ -31,85 +31,85 @@ pub struct CameraState {
 /// own inner `Pipeline` instance drawn into its own rectangle.
 #[derive(Debug)]
 pub struct ViewportData {
-    pub(super) wires: Arc<Vec<WireModel>>,
+    pub(in crate::scene) wires: Arc<Vec<WireModel>>,
     /// Live command-preview / interim / grip-drag overlay wires. Kept out of
     /// the main `wires` buffer so a drag re-uploads only this small set each
     /// frame, never the resident base buffer. Drawn on top in the wire pass.
-    pub(super) preview_wires: Arc<Vec<WireModel>>,
+    pub(in crate::scene) preview_wires: Arc<Vec<WireModel>>,
     /// 3DFACE entity wires — separated so they are uploaded to the dedicated
     /// face3d pipeline (fill + batched edges) instead of N individual WireGpu.
-    pub(super) face3d_wires: Arc<Vec<WireModel>>,
+    pub(in crate::scene) face3d_wires: Arc<Vec<WireModel>>,
     /// Per-entity normalized draw-order depth (handle.value() → (0,1)), used
     /// by the wire / face3d pipelines as a clip-z bias. WireModels carry no
     /// depth field (84 construction sites); the bias is looked up by handle
     /// at GPU-upload time from this map instead.
-    pub(super) draw_depths: Arc<rustc_hash::FxHashMap<u64, f32>>,
-    pub(super) hatches: Arc<Vec<HatchModel>>,
+    pub(in crate::scene) draw_depths: Arc<rustc_hash::FxHashMap<u64, f32>>,
+    pub(in crate::scene) hatches: Arc<Vec<HatchModel>>,
     /// Wipeout fills — rendered in a separate pass AFTER wires.
-    pub(super) wipeout_hatches: Arc<Vec<HatchModel>>,
-    pub(super) images: Arc<Vec<ImageModel>>,
-    pub(super) meshes: Arc<Vec<MeshLodSet>>,
-    pub(super) uniforms: Uniforms,
+    pub(in crate::scene) wipeout_hatches: Arc<Vec<HatchModel>>,
+    pub(in crate::scene) images: Arc<Vec<ImageModel>>,
+    pub(in crate::scene) meshes: Arc<Vec<MeshLodSet>>,
+    pub(in crate::scene) uniforms: Uniforms,
     /// Camera rotation matrix derived from the quaternion.
     /// Used by the ViewCube pipeline — no gimbal lock.
-    pub(super) cam_rotation: Mat4,
-    pub(super) hover_region: Option<usize>,
-    pub(super) show_viewcube: bool,
+    pub(in crate::scene) cam_rotation: Mat4,
+    pub(in crate::scene) hover_region: Option<usize>,
+    pub(in crate::scene) show_viewcube: bool,
     /// Header.fill_mode (FILLMODE): when false, hatch / wipeout / face3d-fill
     /// uploads short-circuit so the renderer draws only wireframe.
-    pub(super) fill_mode: bool,
+    pub(in crate::scene) fill_mode: bool,
     /// Per-view "Wireframe vs Solid" toggle. When `true`, 3D face fills
     /// are dropped on the upload path so 3D faces draw as edges only.
     /// Hatch / wipeout uploads are deliberately *not* gated by this flag —
     /// the user toggle should only affect 3D solids, not 2D fills.
-    pub(super) view_wireframe: bool,
+    pub(in crate::scene) view_wireframe: bool,
     /// Whether the active render mode wants 3D mesh fills uploaded. Off
     /// in `Wireframe2D` / `Wireframe3D`; on for every shaded variant. Set
     /// at the same point `view_wireframe` is computed so the two stay in
     /// lock-step for the gating logic in `prepare()`.
-    pub(super) mesh_fill: bool,
+    pub(in crate::scene) mesh_fill: bool,
     /// Whether the active render mode wants 3D mesh / face edges
     /// rendered on top of fills. Most shaded modes turn this off; the
     /// `*WithEdges` variants and the pure wireframes leave it on.
-    pub(super) show_3d_edges: bool,
+    pub(in crate::scene) show_3d_edges: bool,
     /// HiddenLine routes 3D fills through a depth-only prepass so edges
     /// occluded by closer geometry are culled by the LessEqual depth
     /// test on the wire passes that follow.
-    pub(super) hidden_line: bool,
-    pub(super) geometry_epoch: u64,
+    pub(in crate::scene) hidden_line: bool,
+    pub(in crate::scene) geometry_epoch: u64,
     /// Camera generation captured when this Primitive was assembled. Paired
     /// with `geometry_epoch` so the per-frame scissor / LOD recompute runs.
-    pub(super) camera_generation: u64,
+    pub(in crate::scene) camera_generation: u64,
     /// Content id of `wires` (Phase 3.2). Stable across a pure pan that reuses
     /// the Model-tile tessellation, so `prepare` skips re-uploading the
     /// world-space wire buffer when only the camera moved. Non-tile and
     /// preview/interim frames carry a fresh id each time → always re-upload.
-    pub(super) wire_content_id: u64,
+    pub(in crate::scene) wire_content_id: u64,
     /// `selected ∪ hover` handles for the GPU xray overlay. The highlight is no
     /// longer baked into the wire tessellation, so `prepare` rebuilds the
     /// selected-wire batch by filtering `wires` against this set.
-    pub(super) highlight_handles: Arc<rustc_hash::FxHashSet<acadrust::Handle>>,
+    pub(in crate::scene) highlight_handles: Arc<rustc_hash::FxHashSet<acadrust::Handle>>,
     /// Bumped on selection / hover change. Paired with `wire_content_id` to
     /// decide when the xray overlay batch needs rebuilding.
-    pub(super) selection_generation: u64,
+    pub(in crate::scene) selection_generation: u64,
     /// Signature of the *selected set* only (not hover). Gates the static-buffer
     /// re-upload (hatch tint, issue #71) so a hover doesn't re-upload every
     /// hatch / face3d buffer on hatch-heavy drawings.
-    pub(super) selected_sig: u64,
+    pub(in crate::scene) selected_sig: u64,
     /// Screen rectangle this viewport fills, **normalized** to the widget
     /// bounds (each component in 0..1). A single full-widget view is
     /// `(0, 0, 1, 1)`; tiled / floating viewports are sub-rectangles.
     /// Normalized form lets `render()` derive the physical sub-clip from
     /// the surface clip without needing the scale factor.
-    pub(super) screen_rect: Rectangle,
+    pub(in crate::scene) screen_rect: Rectangle,
 }
 
 #[derive(Debug)]
 pub struct Primitive {
     /// One entry per viewport drawn this frame (≥1).
-    pub(super) viewports: Vec<ViewportData>,
+    pub(in crate::scene) viewports: Vec<ViewportData>,
     /// Background color used to clear each viewport's MSAA buffer.
-    pub(super) bg_color: [f32; 4],
+    pub(in crate::scene) bg_color: [f32; 4],
 }
 
 /// Flags the render pipeline consumes, derived from
@@ -428,7 +428,7 @@ fn crop_view_proj(view_proj: glam::Mat4, uo: f32, vo: f32, us: f32, vs: f32) -> 
 
 impl Scene {
     /// Returns (entity_color, pattern_length, pattern, line_weight_px, aci).
-    pub(super) fn render_style(&self, e: &EntityType) -> ([f32; 4], f32, [f32; 8], f32, u8) {
+    pub(in crate::scene) fn render_style(&self, e: &EntityType) -> ([f32; 4], f32, [f32; 8], f32, u8) {
         let (color, pl, pat, lw, aci) = render_style_for(&self.document, e);
         let bg = if self.current_layout == "Model" {
             self.bg_color
@@ -443,7 +443,7 @@ impl Scene {
 
 /// Resolves the effective linetype name for an entity, falling back to the
 /// layer's linetype when the entity's own linetype is "ByLayer".
-pub(super) fn linetype_name_for<'a>(document: &'a CadDocument, e: &'a EntityType) -> &'a str {
+pub(in crate::scene) fn linetype_name_for<'a>(document: &'a CadDocument, e: &'a EntityType) -> &'a str {
     let elt = &e.common().linetype;
     if elt.is_empty() || elt.eq_ignore_ascii_case("bylayer") {
         document
@@ -458,7 +458,7 @@ pub(super) fn linetype_name_for<'a>(document: &'a CadDocument, e: &'a EntityType
 
 /// Returns `(entity_color, pattern_length, pattern, line_weight_px, aci)` for
 /// an entity, resolving ByLayer color and linetype from the document.
-pub(super) fn render_style_for(
+pub(in crate::scene) fn render_style_for(
     document: &CadDocument,
     e: &EntityType,
 ) -> ([f32; 4], f32, [f32; 8], f32, u8) {
@@ -570,7 +570,7 @@ impl Scene {
     /// Model layout → one full-window viewport (more once tiled); paper
     /// layout → one viewport per floating content viewport. Each entry is
     /// rendered into its own screen rectangle by its own inner pipeline.
-    pub(super) fn build_viewports(
+    pub(in crate::scene) fn build_viewports(
         &self,
         bounds: Rectangle,
         model_render_mode: acadrust::entities::ViewportRenderMode,
@@ -805,7 +805,7 @@ impl Scene {
     /// The cube draws in the top-right of the *active model tile* (which fills
     /// the canvas when there is a single tile), so the hover hit-test maps the
     /// cursor into that tile's local space and uses the tile's dimensions.
-    pub(super) fn update_viewcube_state(
+    pub(in crate::scene) fn update_viewcube_state(
         &self,
         state: &mut CameraState,
         bounds: Rectangle,
@@ -828,7 +828,7 @@ impl Scene {
         }
     }
 
-    pub(super) fn viewcube_mouse_interaction(&self, state: &CameraState) -> mouse::Interaction {
+    pub(in crate::scene) fn viewcube_mouse_interaction(&self, state: &CameraState) -> mouse::Interaction {
         if state.hover_region.is_some() {
             mouse::Interaction::Pointer
         } else {

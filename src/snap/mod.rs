@@ -8,7 +8,7 @@ use glam::{Mat4, Vec3};
 use iced::{Point, Rectangle};
 
 use crate::command::TangentObject;
-use crate::scene::wire_model::{SnapHint, TangentGeom, WireModel};
+use crate::scene::model::wire_model::{SnapHint, TangentGeom, WireModel};
 use crate::ui::overlay::CROSSHAIR_ARM;
 
 // ── Snap type ─────────────────────────────────────────────────────────────

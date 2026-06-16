@@ -5,8 +5,8 @@
 // viewport events from main.rs and returns `CmdResult` tokens that tell
 // the host what to do next.
 
-use crate::scene::hatch_model::HatchModel;
-use crate::scene::wire_model::WireModel;
+use crate::scene::model::hatch_model::HatchModel;
+use crate::scene::model::wire_model::WireModel;
 use crate::scene::Scene;
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
@@ -194,7 +194,7 @@ pub enum CmdResult {
     /// Create a Solid3D placeholder entity + associated MeshModel.
     /// `mesh_fn` is called with the entity's handle string to build the mesh.
     CommitSolid3D {
-        mesh_fn: Box<dyn FnOnce(String) -> Option<crate::scene::mesh_model::MeshModel> + Send>,
+        mesh_fn: Box<dyn FnOnce(String) -> Option<crate::scene::model::mesh_model::MeshModel> + Send>,
     },
     /// Extrude the profile entity `handle` by `height` along Z.
     ExtrudeEntity {

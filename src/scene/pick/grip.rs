@@ -4,7 +4,7 @@ use acadrust::Handle;
 use glam::{Mat4, Vec3};
 use iced::{Point, Rectangle};
 
-use super::object::{GripDef, GripShape};
+use crate::scene::model::object::{GripDef, GripShape};
 
 /// Pixel radius for grip hit-detection.
 pub const GRIP_THRESHOLD_PX: f32 = 8.0;

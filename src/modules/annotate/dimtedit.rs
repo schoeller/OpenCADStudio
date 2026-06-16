@@ -9,7 +9,7 @@ use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
-use crate::scene::wire_model::WireModel;
+use crate::scene::model::wire_model::WireModel;
 
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/dim_tedit.svg"));
 

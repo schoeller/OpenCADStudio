@@ -35,7 +35,7 @@
 // InstanceBuffer + Boundary + Family + Dash. Both stages share group
 // 1 with `read_only` access.
 
-use crate::scene::hatch_model::{HatchModel, HatchPattern, PatFamily};
+use crate::scene::model::hatch_model::{HatchModel, HatchPattern, PatFamily};
 use iced::wgpu;
 use iced::wgpu::util::DeviceExt;
 

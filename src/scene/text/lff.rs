@@ -24,32 +24,32 @@ use std::sync::{Mutex, OnceLock};
 /// Every LibreCAD LFF font, keyed by its file stem (lower-case). Registered
 /// under the upper-cased stem and the font's `# Name:` header.
 const FONTS_SRC: &[(&str, &str)] = &[
-    ("cyrillic_ii", include_str!("../../assets/fonts/cyrillic_ii.lff")),
-    ("gothgbt", include_str!("../../assets/fonts/gothgbt.lff")),
-    ("gothgrt", include_str!("../../assets/fonts/gothgrt.lff")),
-    ("gothitt", include_str!("../../assets/fonts/gothitt.lff")),
-    ("greekc", include_str!("../../assets/fonts/greekc.lff")),
-    ("greeks", include_str!("../../assets/fonts/greeks.lff")),
-    ("iso3098", include_str!("../../assets/fonts/iso3098.lff")),
-    ("iso", include_str!("../../assets/fonts/iso.lff")),
-    ("italicc", include_str!("../../assets/fonts/italicc.lff")),
-    ("italict", include_str!("../../assets/fonts/italict.lff")),
-    ("ltypeshp", include_str!("../../assets/fonts/ltypeshp.lff")),
-    ("romanc", include_str!("../../assets/fonts/romanc.lff")),
-    ("romand", include_str!("../../assets/fonts/romand.lff")),
-    ("romans", include_str!("../../assets/fonts/romans.lff")),
-    ("romant", include_str!("../../assets/fonts/romant.lff")),
-    ("scriptc", include_str!("../../assets/fonts/scriptc.lff")),
-    ("scripts", include_str!("../../assets/fonts/scripts.lff")),
-    ("simplex", include_str!("../../assets/fonts/simplex.lff")),
-    ("standard", include_str!("../../assets/fonts/standard.lff")),
-    ("syastro", include_str!("../../assets/fonts/syastro.lff")),
-    ("symap", include_str!("../../assets/fonts/symap.lff")),
-    ("symath", include_str!("../../assets/fonts/symath.lff")),
-    ("symbol", include_str!("../../assets/fonts/symbol.lff")),
-    ("symeteo", include_str!("../../assets/fonts/symeteo.lff")),
-    ("symusic", include_str!("../../assets/fonts/symusic.lff")),
-    ("unicode", include_str!("../../assets/fonts/unicode.lff")),
+    ("cyrillic_ii", include_str!("../../../assets/fonts/cyrillic_ii.lff")),
+    ("gothgbt", include_str!("../../../assets/fonts/gothgbt.lff")),
+    ("gothgrt", include_str!("../../../assets/fonts/gothgrt.lff")),
+    ("gothitt", include_str!("../../../assets/fonts/gothitt.lff")),
+    ("greekc", include_str!("../../../assets/fonts/greekc.lff")),
+    ("greeks", include_str!("../../../assets/fonts/greeks.lff")),
+    ("iso3098", include_str!("../../../assets/fonts/iso3098.lff")),
+    ("iso", include_str!("../../../assets/fonts/iso.lff")),
+    ("italicc", include_str!("../../../assets/fonts/italicc.lff")),
+    ("italict", include_str!("../../../assets/fonts/italict.lff")),
+    ("ltypeshp", include_str!("../../../assets/fonts/ltypeshp.lff")),
+    ("romanc", include_str!("../../../assets/fonts/romanc.lff")),
+    ("romand", include_str!("../../../assets/fonts/romand.lff")),
+    ("romans", include_str!("../../../assets/fonts/romans.lff")),
+    ("romant", include_str!("../../../assets/fonts/romant.lff")),
+    ("scriptc", include_str!("../../../assets/fonts/scriptc.lff")),
+    ("scripts", include_str!("../../../assets/fonts/scripts.lff")),
+    ("simplex", include_str!("../../../assets/fonts/simplex.lff")),
+    ("standard", include_str!("../../../assets/fonts/standard.lff")),
+    ("syastro", include_str!("../../../assets/fonts/syastro.lff")),
+    ("symap", include_str!("../../../assets/fonts/symap.lff")),
+    ("symath", include_str!("../../../assets/fonts/symath.lff")),
+    ("symbol", include_str!("../../../assets/fonts/symbol.lff")),
+    ("symeteo", include_str!("../../../assets/fonts/symeteo.lff")),
+    ("symusic", include_str!("../../../assets/fonts/symusic.lff")),
+    ("unicode", include_str!("../../../assets/fonts/unicode.lff")),
 ];
 
 /// AutoCAD / DXF SHX font names → LFF stem. Names that already match a stem
@@ -357,7 +357,7 @@ pub fn tessellate_text_run(
         return vec![];
     }
 
-    let face = crate::scene::font_face::Face::resolve(font_name);
+    let face = crate::scene::text::font_face::Face::resolve(font_name);
     let scale = height / 9.0;
     let wf = if width_factor < 0.0 {
         width_factor.clamp(-100.0, -0.01)
@@ -407,7 +407,7 @@ pub fn tessellate_text_run(
             return;
         }
         let family = ttf_family.unwrap_or("");
-        if let Some(run) = crate::scene::ttf_glyph::shape_run(family, seg) {
+        if let Some(run) = crate::scene::text::ttf_glyph::shape_run(family, seg) {
             for g in &run.glyphs {
                 emit_glyph(out, &g.strokes, *cursor_x);
             }

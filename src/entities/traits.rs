@@ -1,11 +1,11 @@
 use acadrust::{CadDocument, EntityType};
 
 use crate::command::EntityTransform;
-use crate::scene::acad_to_truck::TruckEntity;
-use crate::scene::object::{
+use crate::scene::convert::acad_to_truck::TruckEntity;
+use crate::scene::model::object::{
     GripApply, GripDef, GripMenuAction, GripMenuItem, PropSection,
 };
-use crate::scene::tess_util::FallbackGeometry;
+use crate::scene::convert::tess_util::FallbackGeometry;
 
 pub trait TruckConvertible {
     fn to_truck(&self, document: &CadDocument) -> Option<TruckEntity>;
@@ -192,13 +192,13 @@ macro_rules! dispatch {
 macro_rules! impl_entity_basics {
     ($T:ty) => {
         impl $crate::entities::traits::Grippable for $T {
-            fn grips(&self) -> Vec<$crate::scene::object::GripDef> {
+            fn grips(&self) -> Vec<$crate::scene::model::object::GripDef> {
                 grips(self)
             }
             fn apply_grip(
                 &mut self,
                 grip_id: usize,
-                apply: $crate::scene::object::GripApply,
+                apply: $crate::scene::model::object::GripApply,
             ) {
                 apply_grip(self, grip_id, apply);
             }
@@ -207,7 +207,7 @@ macro_rules! impl_entity_basics {
             fn geometry_properties(
                 &self,
                 _text_style_names: &[String],
-            ) -> $crate::scene::object::PropSection {
+            ) -> $crate::scene::model::object::PropSection {
                 properties(self)
             }
             fn apply_geom_prop(&mut self, field: &str, value: &str) {
@@ -229,13 +229,13 @@ macro_rules! impl_entity_basics {
 macro_rules! impl_entity_basics_with_text_styles {
     ($T:ty) => {
         impl $crate::entities::traits::Grippable for $T {
-            fn grips(&self) -> Vec<$crate::scene::object::GripDef> {
+            fn grips(&self) -> Vec<$crate::scene::model::object::GripDef> {
                 grips(self)
             }
             fn apply_grip(
                 &mut self,
                 grip_id: usize,
-                apply: $crate::scene::object::GripApply,
+                apply: $crate::scene::model::object::GripApply,
             ) {
                 apply_grip(self, grip_id, apply);
             }
@@ -244,7 +244,7 @@ macro_rules! impl_entity_basics_with_text_styles {
             fn geometry_properties(
                 &self,
                 text_style_names: &[String],
-            ) -> $crate::scene::object::PropSection {
+            ) -> $crate::scene::model::object::PropSection {
                 properties(self, text_style_names)
             }
             fn apply_geom_prop(&mut self, field: &str, value: &str) {

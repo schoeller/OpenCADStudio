@@ -12,10 +12,11 @@ use crate::entities::text_support::{
     MTextRenderOpts, MTextVAnchor, ResolvedTextStyle,
 };
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::acad_to_truck::{TextStroke, TruckEntity, TruckObject};
-use crate::scene::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::wire_model::SnapHint;
-use crate::scene::{lff, transform};
+use crate::scene::convert::acad_to_truck::{TextStroke, TruckEntity, TruckObject};
+use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::scene::model::wire_model::SnapHint;
+use crate::scene::text::lff;
+use crate::scene::view::transform;
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 

@@ -4,8 +4,8 @@ use super::helpers::{
 };
 use super::{Message, OpenCADStudio, POLY_START_DELAY_MS};
 use crate::modules::ModuleEvent;
-use crate::scene::grip::{find_hit_grip, find_hit_grip_paper, GripEdit};
-use crate::scene::object::GripApply;
+use crate::scene::pick::grip::{find_hit_grip, find_hit_grip_paper, GripEdit};
+use crate::scene::model::object::GripApply;
 use crate::scene::{
     self, hover_id, Scene, TileEdgeOrient, VIEWCUBE_DRAW_PX, VIEWCUBE_PAD, VIEWCUBE_PX,
 };
@@ -552,13 +552,13 @@ impl OpenCADStudio {
                 // STL gets the highest-resolution LOD (slot 0) so the
                 // exported geometry isn't downgraded by the view-dependent
                 // mesh LOD ladder used for rendering.
-                let meshes: Vec<crate::scene::mesh_model::MeshModel> = self.tabs[i]
+                let meshes: Vec<crate::scene::model::mesh_model::MeshModel> = self.tabs[i]
                     .scene
                     .meshes
                     .values()
                     .filter_map(|s| s.lods.first().cloned())
                     .collect();
-                let mesh_refs: Vec<&crate::scene::mesh_model::MeshModel> = meshes.iter().collect();
+                let mesh_refs: Vec<&crate::scene::model::mesh_model::MeshModel> = meshes.iter().collect();
                 match crate::io::stl::build_stl(&mesh_refs) {
                     Some(bytes) => match std::fs::write(&path, bytes) {
                         Ok(()) => self
@@ -603,13 +603,13 @@ impl OpenCADStudio {
             Message::StepExportPath(Some(path)) => {
                 let i = self.active_tab;
                 // Export uses LOD 0 (full resolution); see StlExportPath above.
-                let meshes: Vec<crate::scene::mesh_model::MeshModel> = self.tabs[i]
+                let meshes: Vec<crate::scene::model::mesh_model::MeshModel> = self.tabs[i]
                     .scene
                     .meshes
                     .values()
                     .filter_map(|s| s.lods.first().cloned())
                     .collect();
-                let mesh_refs: Vec<&crate::scene::mesh_model::MeshModel> = meshes.iter().collect();
+                let mesh_refs: Vec<&crate::scene::model::mesh_model::MeshModel> = meshes.iter().collect();
                 match crate::io::step::build_step(&mesh_refs) {
                     Some(text) => match std::fs::write(&path, text.as_bytes()) {
                         Ok(()) => self
@@ -1435,7 +1435,7 @@ impl OpenCADStudio {
                         if let Some(e) = self.tabs[i].scene.document.get_entity_mut(h) {
                             e.apply_grip_menu(
                                 gid,
-                                crate::scene::object::GripMenuAction::RemoveLeader,
+                                crate::scene::model::object::GripMenuAction::RemoveLeader,
                             );
                         }
                         self.tabs[i].scene.bump_geometry();
@@ -2121,7 +2121,7 @@ impl OpenCADStudio {
 
                 // Multi-functional grip hover: detect cursor sitting on a
                 // selected entity's grip and, after a dwell, open the
-                // popup menu. See scene::object::GripMenuItem.
+                // popup menu. See scene::model::object::GripMenuItem.
                 self.update_grip_hover(i, p);
 
                 let mut sel = self.tabs[i].scene.selection.borrow_mut();
@@ -2405,7 +2405,7 @@ impl OpenCADStudio {
                     };
                     let view_proj = self.tabs[i].scene.camera.borrow().view_proj(bounds);
                     let all_wires = self.tabs[i].scene.hit_test_wires();
-                    let hovered = scene::hit_test::click_hit(p, &all_wires[..], view_proj, bounds)
+                    let hovered = scene::pick::hit_test::click_hit(p, &all_wires[..], view_proj, bounds)
                         .and_then(|s| Scene::handle_from_wire_name(s));
                     self.tabs[i].scene.set_hover_highlight(hovered);
                 } else {
@@ -2620,7 +2620,7 @@ impl OpenCADStudio {
                         p
                     } else if needs_entity {
                         let hover_handle =
-                            scene::hit_test::click_hit(p, &all_wires[..], view_proj, bounds)
+                            scene::pick::hit_test::click_hit(p, &all_wires[..], view_proj, bounds)
                                 .and_then(|s| Scene::handle_from_wire_name(s))
                                 .unwrap_or(acadrust::Handle::NULL);
                         let mut p = self.tabs[i]
@@ -3185,7 +3185,7 @@ impl OpenCADStudio {
                     {
                         let vp_mat2 = self.tabs[i].scene.camera.borrow().view_proj(bounds);
                         let all_wires2 = self.tabs[i].scene.hit_test_wires();
-                        let hit = scene::hit_test::click_hit(p, &all_wires2[..], vp_mat2, bounds)
+                        let hit = scene::pick::hit_test::click_hit(p, &all_wires2[..], vp_mat2, bounds)
                             .and_then(|s| Scene::handle_from_wire_name(s));
                         if let Some(handle) = hit {
                             // Some commands (e.g. SS_CATCHMENT) need the entity
@@ -3374,7 +3374,7 @@ impl OpenCADStudio {
                                 let crossing = box_crossing;
                                 let all_wires = self.tabs[i].scene.hit_test_wires();
                                 let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
-                                let mut handles: Vec<Handle> = scene::hit_test::box_hit(
+                                let mut handles: Vec<Handle> = scene::pick::hit_test::box_hit(
                                     a,
                                     p,
                                     crossing,
@@ -3385,7 +3385,7 @@ impl OpenCADStudio {
                                 .into_iter()
                                 .filter_map(|s| Scene::handle_from_wire_name(s))
                                 .collect();
-                                handles.extend(scene::hit_test::box_hit_hatch(
+                                handles.extend(scene::pick::hit_test::box_hit_hatch(
                                     a,
                                     p,
                                     crossing,
@@ -3427,7 +3427,7 @@ impl OpenCADStudio {
                             self.tabs[i].scene.selection.borrow_mut().poly_last_crossing = crossing;
                             let all_wires = self.tabs[i].scene.hit_test_wires();
                             let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
-                            let mut handles: Vec<Handle> = scene::hit_test::poly_hit(
+                            let mut handles: Vec<Handle> = scene::pick::hit_test::poly_hit(
                                 &poly_pts,
                                 crossing,
                                 &all_wires[..],
@@ -3437,7 +3437,7 @@ impl OpenCADStudio {
                             .into_iter()
                             .filter_map(|s| Scene::handle_from_wire_name(s))
                             .collect();
-                            handles.extend(scene::hit_test::poly_hit_hatch(
+                            handles.extend(scene::pick::hit_test::poly_hit_hatch(
                                 &poly_pts,
                                 crossing,
                                 &self.tabs[i].scene.visible_hatches_for_click(),
@@ -3481,7 +3481,7 @@ impl OpenCADStudio {
                             // unchanged when off.
                             let mut handled_by_cycling = false;
                             if self.selection_cycling {
-                                let cands: Vec<Handle> = scene::hit_test::click_hits_all(
+                                let cands: Vec<Handle> = scene::pick::hit_test::click_hits_all(
                                     p,
                                     &all_wires[..],
                                     vp_mat,
@@ -3500,10 +3500,10 @@ impl OpenCADStudio {
 
                             if !handled_by_cycling {
                                 let hit =
-                                    scene::hit_test::click_hit(p, &all_wires[..], vp_mat, bounds)
+                                    scene::pick::hit_test::click_hit(p, &all_wires[..], vp_mat, bounds)
                                         .and_then(|s| Scene::handle_from_wire_name(s))
                                         .or_else(|| {
-                                            scene::hit_test::click_hit_hatch(
+                                            scene::pick::hit_test::click_hit_hatch(
                                                 p,
                                                 &self.tabs[i].scene.visible_hatches_for_click(),
                                                 vp_mat,
@@ -3513,7 +3513,7 @@ impl OpenCADStudio {
                                         .or_else(|| {
                                             // Block-internal hatch: resolve to the
                                             // parent Insert (AutoCAD behaviour).
-                                            scene::hit_test::click_hit_insert_hatch(
+                                            scene::pick::hit_test::click_hit_insert_hatch(
                                                 p,
                                                 &self.tabs[i].scene.insert_hatches_for_click(),
                                                 vp_mat,
@@ -3561,7 +3561,7 @@ impl OpenCADStudio {
                             let crossing = box_crossing;
                             let all_wires = self.tabs[i].scene.hit_test_wires();
                             let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
-                            let mut handles: Vec<Handle> = scene::hit_test::box_hit(
+                            let mut handles: Vec<Handle> = scene::pick::hit_test::box_hit(
                                 a,
                                 p,
                                 crossing,
@@ -3572,7 +3572,7 @@ impl OpenCADStudio {
                             .into_iter()
                             .filter_map(|s| Scene::handle_from_wire_name(s))
                             .collect();
-                            handles.extend(scene::hit_test::box_hit_hatch(
+                            handles.extend(scene::pick::hit_test::box_hit_hatch(
                                 a,
                                 p,
                                 crossing,
@@ -3657,7 +3657,7 @@ impl OpenCADStudio {
                         };
                         let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
                         let all_wires = self.tabs[i].scene.hit_test_wires();
-                        let hit = scene::hit_test::click_hit(p, &all_wires[..], vp_mat, bounds)
+                        let hit = scene::pick::hit_test::click_hit(p, &all_wires[..], vp_mat, bounds)
                             .and_then(|s| Scene::handle_from_wire_name(s));
                         if let Some(handle) = hit {
                             // Any text-bearing entity opens its in-place editor
@@ -3712,7 +3712,7 @@ impl OpenCADStudio {
                         let hit_vp: Option<acadrust::Handle> = {
                             let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
                             let all_wires = self.tabs[i].scene.hit_test_wires();
-                            scene::hit_test::click_hit(p, &all_wires[..], vp_mat, bounds)
+                            scene::pick::hit_test::click_hit(p, &all_wires[..], vp_mat, bounds)
                                 .and_then(|s| Scene::handle_from_wire_name(s))
                                 .and_then(|h| {
                                     if let Some(AcadEntityType::Viewport(vp)) =
@@ -3981,7 +3981,7 @@ impl OpenCADStudio {
                     return Task::none();
                 };
                 use crate::entities::traits::EntityTypeOps;
-                use crate::scene::object::GripMenuAction;
+                use crate::scene::model::object::GripMenuAction;
                 if matches!(
                     item.action,
                     GripMenuAction::Stretch
@@ -4643,7 +4643,7 @@ impl OpenCADStudio {
                     self.push_undo_snapshot(i, "CHPROP");
                     for handle in handles {
                         if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                            crate::scene::dispatch::apply_common_prop(entity, "layer", &layer);
+                            crate::scene::view::dispatch::apply_common_prop(entity, "layer", &layer);
                         }
                     }
                     self.tabs[i].dirty = true;
@@ -4669,7 +4669,7 @@ impl OpenCADStudio {
                     self.push_undo_snapshot(i, "CHPROP");
                     for handle in handles {
                         if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                            crate::scene::dispatch::apply_color(entity, color);
+                            crate::scene::view::dispatch::apply_color(entity, color);
                         }
                     }
                     self.tabs[i].dirty = true;
@@ -4706,7 +4706,7 @@ impl OpenCADStudio {
                     self.push_undo_snapshot(i, "CHPROP");
                     for handle in handles {
                         if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                            crate::scene::dispatch::apply_common_prop(entity, "linetype", &lt);
+                            crate::scene::view::dispatch::apply_common_prop(entity, "linetype", &lt);
                         }
                     }
                     self.tabs[i].dirty = true;
@@ -4728,7 +4728,7 @@ impl OpenCADStudio {
                     self.push_undo_snapshot(i, "CHPROP");
                     for handle in handles {
                         if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                            crate::scene::dispatch::apply_line_weight(entity, lw);
+                            crate::scene::view::dispatch::apply_line_weight(entity, lw);
                         }
                     }
                     self.tabs[i].dirty = true;
@@ -4790,7 +4790,7 @@ impl OpenCADStudio {
                     self.push_undo_snapshot(i, "CHPROP");
                     for &handle in &handles {
                         if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                            crate::scene::dispatch::apply_common_prop(entity, "layer", &layer);
+                            crate::scene::view::dispatch::apply_common_prop(entity, "layer", &layer);
                         }
                     }
                     self.invalidate_property_targets(i, &handles);
@@ -4807,7 +4807,7 @@ impl OpenCADStudio {
                     self.push_undo_snapshot(i, "CHPROP");
                     for &handle in &handles {
                         if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                            crate::scene::dispatch::apply_color(entity, color);
+                            crate::scene::view::dispatch::apply_color(entity, color);
                         }
                     }
                     self.invalidate_property_targets(i, &handles);
@@ -4826,7 +4826,7 @@ impl OpenCADStudio {
                     self.push_undo_snapshot(i, "CHPROP");
                     for &handle in &handles {
                         if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                            crate::scene::dispatch::apply_line_weight(entity, lw);
+                            crate::scene::view::dispatch::apply_line_weight(entity, lw);
                         }
                     }
                     self.invalidate_property_targets(i, &handles);
@@ -4843,7 +4843,7 @@ impl OpenCADStudio {
                     self.push_undo_snapshot(i, "CHPROP");
                     for &handle in &handles {
                         if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                            crate::scene::dispatch::apply_common_prop(entity, "linetype", &lt);
+                            crate::scene::view::dispatch::apply_common_prop(entity, "linetype", &lt);
                         }
                     }
                     self.invalidate_property_targets(i, &handles);
@@ -4857,7 +4857,7 @@ impl OpenCADStudio {
                 let i = self.active_tab;
                 let handles = self.property_target_handles(i);
                 if !handles.is_empty() {
-                    use crate::scene::hatch_patterns;
+                    use crate::scene::model::hatch_patterns;
                     if let Some(entry) = hatch_patterns::find(&name) {
                         self.push_undo_snapshot(i, "HATCHEDIT");
                         for &handle in &handles {
@@ -4867,7 +4867,7 @@ impl OpenCADStudio {
                                 dxf.pattern = hatch_patterns::build_dxf_pattern(entry);
                                 dxf.is_solid = matches!(
                                     entry.gpu,
-                                    crate::scene::hatch_model::HatchPattern::Solid
+                                    crate::scene::model::hatch_model::HatchPattern::Solid
                                 );
                             }
                             if let Some(model) = self.tabs[i].scene.hatches.get_mut(&handle) {
@@ -4891,9 +4891,9 @@ impl OpenCADStudio {
                     for &handle in &handles {
                         if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
                             match field {
-                                "invisible" => crate::scene::dispatch::toggle_invisible(entity),
+                                "invisible" => crate::scene::view::dispatch::toggle_invisible(entity),
                                 _ => {
-                                    crate::scene::dispatch::apply_geom_prop(entity, field, "toggle")
+                                    crate::scene::view::dispatch::apply_geom_prop(entity, field, "toggle")
                                 }
                             }
                         }
@@ -4958,7 +4958,7 @@ impl OpenCADStudio {
                         for &handle in &handles {
                             if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle)
                             {
-                                crate::scene::dispatch::apply_geom_prop(entity, field, &value);
+                                crate::scene::view::dispatch::apply_geom_prop(entity, field, &value);
                             }
                         }
                     }
@@ -5014,12 +5014,12 @@ impl OpenCADStudio {
                                 {
                                     match field {
                                         "linetype_scale" | "transparency" => {
-                                            crate::scene::dispatch::apply_common_prop(
+                                            crate::scene::view::dispatch::apply_common_prop(
                                                 entity, field, &val,
                                             );
                                         }
                                         _ => {
-                                            crate::scene::dispatch::apply_geom_prop(
+                                            crate::scene::view::dispatch::apply_geom_prop(
                                                 entity, field, &val,
                                             );
                                         }

@@ -14,7 +14,7 @@ use acadrust::{Circle, EntityType};
 use crate::command::{CadCommand, CmdResult, DynField, TangentObject};
 use crate::modules::home::defaults;
 use crate::modules::IconKind;
-use crate::scene::wire_model::WireModel;
+use crate::scene::model::wire_model::WireModel;
 use glam::Vec3;
 
 const TAU: f32 = std::f32::consts::TAU;

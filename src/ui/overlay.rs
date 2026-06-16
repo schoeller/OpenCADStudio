@@ -6,7 +6,7 @@ use iced::widget::canvas;
 use iced::{Color, Element, Length, Point, Size, Theme};
 
 use crate::app::Message;
-use crate::scene::object::GripShape;
+use crate::scene::model::object::GripShape;
 use crate::scene::SelectionState;
 
 /// Half-size of the crosshair center square in screen pixels (square = SQ*2 × SQ*2).
@@ -421,7 +421,7 @@ impl canvas::Program<Message> for SelectionCanvas {
         // ── Grip markers ──────────────────────────────────────────────────
         for grip in &self.grips {
             let sp = grip.pos;
-            let h = crate::scene::grip::GRIP_HALF_PX;
+            let h = crate::scene::pick::grip::GRIP_HALF_PX;
             let path = match grip.shape {
                 GripShape::Square => canvas::Path::rectangle(
                     Point::new(sp.x - h, sp.y - h),

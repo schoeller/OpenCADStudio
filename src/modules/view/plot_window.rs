@@ -4,7 +4,7 @@
 // window to the layout's PlotSettings (PlotType::Window).
 
 use crate::command::{CadCommand, CmdResult};
-use crate::scene::wire_model::WireModel;
+use crate::scene::model::wire_model::WireModel;
 use glam::Vec3;
 
 pub struct PlotWindowCommand {

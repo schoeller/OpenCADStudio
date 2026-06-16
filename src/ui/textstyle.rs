@@ -256,7 +256,7 @@ pub fn view_window<'a>(v: TextStyleView<'a>) -> Element<'a, Message> {
     });
 
     // ── System TrueType fonts (read from the user's machine via fontdb) ──
-    let ttf_items: Vec<Element<'_, Message>> = crate::scene::sysfont::families()
+    let ttf_items: Vec<Element<'_, Message>> = crate::scene::text::sysfont::families()
         .iter()
         .map(|fam| {
             let is_sel = ttf_buf.eq_ignore_ascii_case(fam);

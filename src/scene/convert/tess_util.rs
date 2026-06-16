@@ -1,5 +1,5 @@
 // Shared helpers used by per-entity tessellation impls in `crate::entities`
-// and the dispatcher in `crate::scene::tessellate`.
+// and the dispatcher in `crate::scene::convert::tessellate`.
 //
 // Anything cross-entity (colour resolution, arc sampling, chord tolerance)
 // lives here. Entity-specific helpers (dim format strings, mleader path
@@ -8,7 +8,7 @@
 use acadrust::types::Color as AcadColor;
 use glam::Vec3;
 
-use crate::scene::wire_model::{SnapHint, TangentGeom, WireModel};
+use crate::scene::model::wire_model::{SnapHint, TangentGeom, WireModel};
 
 /// Output of the fallback per-entity geometry path used by entities not
 /// covered by the truck topology pipeline (Viewport, Insert, Hatch
@@ -80,7 +80,7 @@ pub fn fill_chord_tol(radius: f64) -> f64 {
 /// passes, load-time builds), falls back to [`fill_chord_tol`] so we
 /// never under-sample.
 pub fn wire_chord_tol(radius: f64) -> f64 {
-    match crate::scene::truck_tess::active_curve_tol() {
+    match crate::scene::convert::truck_tess::active_curve_tol() {
         Some(t) => t.min(fill_chord_tol(radius)).max(1e-9),
         None => fill_chord_tol(radius),
     }

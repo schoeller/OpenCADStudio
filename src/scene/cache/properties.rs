@@ -1,6 +1,6 @@
 use acadrust::{EntityType, Handle};
 
-use crate::scene::object::{PropSection, PropValue, Property};
+use crate::scene::model::object::{PropSection, PropValue, Property};
 
 pub fn general_section(entity: &EntityType) -> PropSection {
     let common = entity.common();

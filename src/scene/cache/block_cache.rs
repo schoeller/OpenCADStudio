@@ -21,8 +21,8 @@ use std::sync::Arc;
 use acadrust::types::{Color as AcadColor, LineWeight, Transform, Vector3};
 use acadrust::{CadDocument, EntityType, Handle};
 
-use crate::scene::tessellate;
-use crate::scene::wire_model::{SnapHint, TangentGeom, WireModel};
+use crate::scene::convert::tessellate;
+use crate::scene::model::wire_model::{SnapHint, TangentGeom, WireModel};
 
 const MAX_NESTING_DEPTH: usize = 32;
 /// Skip wires whose world-AABB projects to fewer than this many pixels in
@@ -392,7 +392,7 @@ fn build_nested_ref(
     // (`Batches::finalize`) so the same cached defn can serve renders
     // against different backgrounds without rebuilding.
     let (ins_color, ins_pat_len, ins_pat, ins_lw_px, _) =
-        crate::scene::render::render_style_for(doc, &EntityType::Insert(nested_ins.clone()));
+        crate::scene::view::render::render_style_for(doc, &EntityType::Insert(nested_ins.clone()));
     let _ = bg_color;
 
     NestedRef {
@@ -430,7 +430,7 @@ fn tessellate_sub_local(
     // with the per-render bg, so the cache no longer has to rebuild on
     // BACKGROUND / layout-switch — the dynamic adaptation tracks the
     // live bg at render time.
-    let (sub_color, pat_len, pat, lw_px, aci) = crate::scene::render::render_style_for(doc, sub);
+    let (sub_color, pat_len, pat, lw_px, aci) = crate::scene::view::render::render_style_for(doc, sub);
     let _ = bg_color;
 
     let color_is_byblock = sub.common().color == AcadColor::ByBlock;
@@ -1087,7 +1087,7 @@ impl Batches {
                 // now so each render against a different bg gets the
                 // right pure-black ↔ pure-white flip without rebuilding
                 // the cached defn.
-                let color = crate::scene::render::adapt_to_bg(b.color, bg_color);
+                let color = crate::scene::view::render::adapt_to_bg(b.color, bg_color);
                 WireModel {
                     name: name.to_string(),
                     points: b.points,

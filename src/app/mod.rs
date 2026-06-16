@@ -50,7 +50,7 @@ pub struct GripPopup {
     pub handle: acadrust::Handle,
     pub grip_id: usize,
     pub anchor: iced::Point,
-    pub items: Vec<crate::scene::object::GripMenuItem>,
+    pub items: Vec<crate::scene::model::object::GripMenuItem>,
     pub selected: usize,
 }
 
@@ -62,7 +62,7 @@ pub struct GripPopup {
 pub struct GripPendingValue {
     pub handle: acadrust::Handle,
     pub grip_id: usize,
-    pub action: crate::scene::object::GripMenuAction,
+    pub action: crate::scene::model::object::GripMenuAction,
     pub label: &'static str,
 }
 

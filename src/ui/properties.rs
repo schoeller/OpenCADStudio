@@ -22,7 +22,7 @@ const COMBO_PAD_V: f32 = (ROW_H - FONT_SZ * 1.3 - 2.0) / 2.0; // fills combo to 
 const SWATCH_SZ: f32 = ROW_H * 0.54; // ≈14 px color swatch
 
 use crate::app::Message;
-use crate::scene::object::{PropSection, PropValue};
+use crate::scene::model::object::{PropSection, PropValue};
 
 const VARIES_LABEL: &str = "*VARIES*";
 
@@ -146,7 +146,7 @@ impl Default for PropertiesPanel {
             layer_combo: combo_box::State::new(vec![]),
             lineweight_combo: combo_box::State::new(lw_options()),
             linetype_combo: combo_box::State::new(vec![]),
-            hatch_pattern_combo: combo_box::State::new(crate::scene::hatch_patterns::names()),
+            hatch_pattern_combo: combo_box::State::new(crate::scene::model::hatch_patterns::names()),
             edit_buf: HashMap::default(),
             color_picker_open: false,
             color_palette_open: false,

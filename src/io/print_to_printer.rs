@@ -9,7 +9,7 @@
 
 use crate::io::pdf_export;
 use crate::io::plot_style::PlotStyleTable;
-use crate::scene::hatch_model::HatchModel;
+use crate::scene::model::hatch_model::HatchModel;
 use crate::scene::WireModel;
 
 /// Render `wires` (plus hatch / wipeout fills) to a temp PDF and dispatch it

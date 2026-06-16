@@ -3,8 +3,8 @@ use acadrust::entities::{Ray, XLine};
 use crate::command::EntityTransform;
 use crate::entities::common::{center_grip, edit_prop as edit, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
-use crate::scene::object::{GripApply, GripDef, PropSection};
+use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::scene::model::object::{GripApply, GripDef, PropSection};
 
 /// Display length used when rendering semi-infinite / infinite lines.
 const DISPLAY_EXTENT: f64 = 1_000_000.0;
@@ -126,8 +126,8 @@ impl PropertyEditable for Ray {
 
 impl Transformable for Ray {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
-            crate::scene::transform::reflect_xy_point(
+        crate::scene::view::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
+            crate::scene::view::transform::reflect_xy_point(
                 &mut entity.base_point.x,
                 &mut entity.base_point.y,
                 p1,
@@ -263,8 +263,8 @@ impl PropertyEditable for XLine {
 
 impl Transformable for XLine {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
-            crate::scene::transform::reflect_xy_point(
+        crate::scene::view::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
+            crate::scene::view::transform::reflect_xy_point(
                 &mut entity.base_point.x,
                 &mut entity.base_point.y,
                 p1,

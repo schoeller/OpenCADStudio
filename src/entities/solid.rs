@@ -10,9 +10,9 @@ use glam::Vec3;
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
-use crate::scene::object::{GripApply, GripDef, PropSection};
-use crate::scene::wire_model::SnapHint;
+use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::scene::model::object::{GripApply, GripDef, PropSection};
+use crate::scene::model::wire_model::SnapHint;
 
 fn v3(v: &acadrust::types::Vector3) -> [f64; 3] {
     [v.x, v.y, v.z]
@@ -147,14 +147,14 @@ impl PropertyEditable for Solid {
 
 impl Transformable for Solid {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
+        crate::scene::view::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
             for corner in [
                 &mut entity.first_corner,
                 &mut entity.second_corner,
                 &mut entity.third_corner,
                 &mut entity.fourth_corner,
             ] {
-                crate::scene::transform::reflect_xy_point(&mut corner.x, &mut corner.y, p1, p2);
+                crate::scene::view::transform::reflect_xy_point(&mut corner.x, &mut corner.y, p1, p2);
             }
         });
     }

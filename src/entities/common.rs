@@ -1,6 +1,6 @@
 use std::cell::Cell;
 
-use crate::scene::object::{GripDef, GripShape, PropValue, Property};
+use crate::scene::model::object::{GripDef, GripShape, PropValue, Property};
 
 /// Linear / angular unit format pulled from the document header so the
 /// per-thread properties pipeline can format values consistently without

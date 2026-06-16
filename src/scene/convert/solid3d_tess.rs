@@ -20,7 +20,7 @@ use acadrust::entities::acis::{
 };
 use acadrust::entities::{Body, Region, Solid3D};
 
-use crate::scene::mesh_model::{MeshLodSet, MeshModel};
+use crate::scene::model::mesh_model::{MeshLodSet, MeshModel};
 
 /// Per-LOD sampling density. Higher values = finer mesh = more triangles.
 #[derive(Copy, Clone, Debug)]
@@ -107,7 +107,7 @@ fn tessellate_sat(
                 }
             }
             "spline-surface" => {
-                crate::scene::spline_tess::tess_spline_face(
+                crate::scene::convert::spline_tess::tess_spline_face(
                     sat,
                     &face,
                     lod,
@@ -141,7 +141,7 @@ fn tessellate_acis(
     color: [f32; 4],
     facet_res: f64,
 ) -> Option<MeshLodSet> {
-    if let Some(set) = crate::scene::acis_to_truck::tessellate_sat_truck(sat, name.clone(), color, facet_res) {
+    if let Some(set) = crate::scene::convert::acis_to_truck::tessellate_sat_truck(sat, name.clone(), color, facet_res) {
         if std::env::var_os("OCS_TESS_DEBUG").is_some() {
             let tris = set.lods.first().map(|m| m.indices.len() / 3).unwrap_or(0);
             eprintln!("acis_tess[{name}]: truck ({tris} tris)");

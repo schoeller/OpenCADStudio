@@ -17,7 +17,7 @@ use acadrust::{Arc as CadArc, EntityType};
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::IconKind;
-use crate::scene::wire_model::WireModel;
+use crate::scene::model::wire_model::WireModel;
 use glam::Vec3;
 
 const TAU: f32 = std::f32::consts::TAU;

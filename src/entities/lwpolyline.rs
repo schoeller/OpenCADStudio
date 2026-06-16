@@ -6,9 +6,9 @@ use crate::entities::common::{
     edit_prop as edit, parse_f64, rectangle_grip, ro_prop as ro, square_grip,
 };
 use crate::entities::traits::TruckConvertible;
-use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
-use crate::scene::object::{GripApply, GripDef, PropSection};
-use crate::scene::wire_model::TangentGeom;
+use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::scene::model::object::{GripApply, GripDef, PropSection};
+use crate::scene::model::wire_model::TangentGeom;
 
 const TAU: f64 = std::f64::consts::TAU;
 
@@ -120,7 +120,7 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
 
     // Convert OCS (x, y, elevation) to WCS Point3.
     let to_wcs = |x: f64, y: f64| -> (f64, f64, f64) {
-        crate::scene::transform::ocs_point_to_wcs((x, y, elev), normal)
+        crate::scene::view::transform::ocs_point_to_wcs((x, y, elev), normal)
     };
     let to_pt = |v: &LwVertex| -> Point3 {
         let (wx, wy, wz) = to_wcs(v.location.x, v.location.y);
@@ -418,9 +418,9 @@ fn apply_grip(pline: &mut LwPolyline, grip_id: usize, apply: GripApply) {
 }
 
 fn apply_transform(pline: &mut LwPolyline, t: &EntityTransform) {
-    crate::scene::transform::apply_standard_entity_transform(pline, t, |entity, p1, p2| {
+    crate::scene::view::transform::apply_standard_entity_transform(pline, t, |entity, p1, p2| {
         for v in &mut entity.vertices {
-            crate::scene::transform::reflect_xy_point(&mut v.location.x, &mut v.location.y, p1, p2);
+            crate::scene::view::transform::reflect_xy_point(&mut v.location.x, &mut v.location.y, p1, p2);
             // Bulge encodes which side the arc bows to; a reflection
             // reverses it or every curved segment flips to the wrong side.
             v.bulge = -v.bulge;
@@ -435,14 +435,14 @@ impl TruckConvertible for LwPolyline {
 }
 
 impl crate::entities::traits::Grippable for LwPolyline {
-    fn grips(&self) -> Vec<crate::scene::object::GripDef> {
+    fn grips(&self) -> Vec<crate::scene::model::object::GripDef> {
         grips(self)
     }
-    fn apply_grip(&mut self, grip_id: usize, apply: crate::scene::object::GripApply) {
+    fn apply_grip(&mut self, grip_id: usize, apply: crate::scene::model::object::GripApply) {
         apply_grip(self, grip_id, apply);
     }
-    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::object::GripMenuItem> {
-        use crate::scene::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
+        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
         let n = self.vertices.len();
         if grip_id < n {
             // Vertex grip.
@@ -490,8 +490,8 @@ impl crate::entities::traits::Grippable for LwPolyline {
             convert,
         ]
     }
-    fn apply_grip_menu(&mut self, grip_id: usize, action: crate::scene::object::GripMenuAction) {
-        use crate::scene::object::GripMenuAction as A;
+    fn apply_grip_menu(&mut self, grip_id: usize, action: crate::scene::model::object::GripMenuAction) {
+        use crate::scene::model::object::GripMenuAction as A;
         let n = self.vertices.len();
         match action {
             A::Stretch => {}
@@ -546,7 +546,7 @@ impl crate::entities::traits::PropertyEditable for LwPolyline {
     fn geometry_properties(
         &self,
         _text_style_names: &[String],
-    ) -> crate::scene::object::PropSection {
+    ) -> crate::scene::model::object::PropSection {
         properties(self)
     }
     fn apply_geom_prop(&mut self, field: &str, value: &str) {

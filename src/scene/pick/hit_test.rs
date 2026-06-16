@@ -10,9 +10,9 @@ use acadrust::Handle;
 use glam::{Mat4, Vec3};
 use iced::{Point, Rectangle};
 
-use super::hatch_model::HatchModel;
-use super::mesh_model::MeshModel;
-use super::wire_model::WireModel;
+use crate::scene::model::hatch_model::HatchModel;
+use crate::scene::model::mesh_model::MeshModel;
+use crate::scene::model::wire_model::WireModel;
 
 /// Pixel radius used for single-click wire detection.
 const CLICK_THRESHOLD_PX: f32 = 8.0;

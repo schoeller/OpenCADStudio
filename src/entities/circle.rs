@@ -7,9 +7,9 @@ use crate::entities::common::{
     center_grip, edit_prop as edit, parse_f64, ro_prop as ro, square_grip,
 };
 use crate::entities::traits::TruckConvertible;
-use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
-use crate::scene::object::{GripApply, GripDef, PropSection};
-use crate::scene::wire_model::{SnapHint, TangentGeom};
+use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::scene::model::object::{GripApply, GripDef, PropSection};
+use crate::scene::model::wire_model::{SnapHint, TangentGeom};
 
 fn to_truck(circle: &Circle) -> TruckEntity {
     let cx = circle.center.x;
@@ -18,8 +18,8 @@ fn to_truck(circle: &Circle) -> TruckEntity {
     let r = circle.radius;
     let normal = (circle.normal.x, circle.normal.y, circle.normal.z);
 
-    let (ax, ay) = crate::scene::transform::ocs_axes(normal);
-    let (cwx, cwy, cwz) = crate::scene::transform::ocs_point_to_wcs((cx, cy, cz), normal);
+    let (ax, ay) = crate::scene::view::transform::ocs_axes(normal);
+    let (cwx, cwy, cwz) = crate::scene::view::transform::ocs_point_to_wcs((cx, cy, cz), normal);
 
     // Circle points in WCS: centre_wcs ± r * Ax  and  centre_wcs ± r * Ay
     let pt = |da: (f64, f64, f64), db: (f64, f64, f64), s: f64| {
@@ -182,8 +182,8 @@ fn apply_grip(circle: &mut Circle, grip_id: usize, apply: GripApply) {
 }
 
 fn apply_transform(circle: &mut Circle, t: &EntityTransform) {
-    crate::scene::transform::apply_standard_entity_transform(circle, t, |entity, p1, p2| {
-        crate::scene::transform::reflect_xy_point(
+    crate::scene::view::transform::apply_standard_entity_transform(circle, t, |entity, p1, p2| {
+        crate::scene::view::transform::reflect_xy_point(
             &mut entity.center.x,
             &mut entity.center.y,
             p1,

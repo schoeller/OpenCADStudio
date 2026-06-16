@@ -7,10 +7,10 @@ use crate::entities::text_support::{
     resolve_dxf_special_chars, resolve_text_style, text_local_bounds,
 };
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::acad_to_truck::{TextStroke, TruckEntity, TruckObject};
-use crate::scene::lff;
-use crate::scene::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::wire_model::SnapHint;
+use crate::scene::convert::acad_to_truck::{TextStroke, TruckEntity, TruckObject};
+use crate::scene::text::lff;
+use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::scene::model::wire_model::SnapHint;
 
 fn text_halign_str(a: &acadrust::entities::TextHorizontalAlignment) -> &'static str {
     use acadrust::entities::TextHorizontalAlignment::*;
@@ -50,7 +50,7 @@ fn sync_text_alignment_point(t: &mut Text) {
 
 fn to_truck(t: &Text, document: &acadrust::CadDocument) -> TruckEntity {
     let normal = (t.normal.x, t.normal.y, t.normal.z);
-    let (wsx, wsy, wsz) = crate::scene::transform::ocs_point_to_wcs(
+    let (wsx, wsy, wsz) = crate::scene::view::transform::ocs_point_to_wcs(
         (
             t.insertion_point.x,
             t.insertion_point.y,
@@ -287,15 +287,15 @@ fn apply_grip(t: &mut Text, _grip_id: usize, apply: GripApply) {
 }
 
 fn apply_transform(t: &mut Text, tr: &EntityTransform) {
-    crate::scene::transform::apply_standard_entity_transform(t, tr, |entity, p1, p2| {
-        crate::scene::transform::reflect_xy_point(
+    crate::scene::view::transform::apply_standard_entity_transform(t, tr, |entity, p1, p2| {
+        crate::scene::view::transform::reflect_xy_point(
             &mut entity.insertion_point.x,
             &mut entity.insertion_point.y,
             p1,
             p2,
         );
         if let Some(ref mut a) = entity.alignment_point {
-            crate::scene::transform::reflect_xy_point(&mut a.x, &mut a.y, p1, p2);
+            crate::scene::view::transform::reflect_xy_point(&mut a.x, &mut a.y, p1, p2);
         }
         let dx = (p2.x - p1.x) as f64;
         let dy = (p2.y - p1.y) as f64;
@@ -320,8 +320,8 @@ impl Grippable for Text {
         apply_grip(self, grip_id, apply);
     }
 
-    fn grip_menu(&self, _grip_id: usize) -> Vec<crate::scene::object::GripMenuItem> {
-        use crate::scene::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, _grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
+        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
         vec![
             GripMenuItem {
                 label: "Stretch",
@@ -338,7 +338,7 @@ impl Grippable for Text {
         ]
     }
 
-    fn apply_grip_menu(&mut self, _grip_id: usize, _action: crate::scene::object::GripMenuAction) {
+    fn apply_grip_menu(&mut self, _grip_id: usize, _action: crate::scene::model::object::GripMenuAction) {
         // Move-with-Text falls through to Stretch (single grip moves
         // the whole text); Rotate needs a follow-up angle handled by
         // `apply_grip_menu_value`.
@@ -347,9 +347,9 @@ impl Grippable for Text {
     fn grip_menu_value_prompt(
         &self,
         _grip_id: usize,
-        action: crate::scene::object::GripMenuAction,
+        action: crate::scene::model::object::GripMenuAction,
     ) -> Option<&'static str> {
-        use crate::scene::object::GripMenuAction as A;
+        use crate::scene::model::object::GripMenuAction as A;
         match action {
             A::RotateText => Some("Rotation (deg)"),
             _ => None,
@@ -359,10 +359,10 @@ impl Grippable for Text {
     fn apply_grip_menu_value(
         &mut self,
         _grip_id: usize,
-        action: crate::scene::object::GripMenuAction,
+        action: crate::scene::model::object::GripMenuAction,
         value: f64,
     ) {
-        use crate::scene::object::GripMenuAction as A;
+        use crate::scene::model::object::GripMenuAction as A;
         if matches!(action, A::RotateText) {
             self.rotation = value.to_radians();
         }

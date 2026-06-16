@@ -5,7 +5,7 @@ use crate::entities::common::{
     center_grip, edit_prop as edit, parse_f64, ro_prop as ro, square_grip,
 };
 
-use crate::scene::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 
 // ── Standard scale options ────────────────────────────────────────────────
 
@@ -533,8 +533,8 @@ fn apply_grip(vp: &mut Viewport, grip_id: usize, apply: GripApply) {
 }
 
 fn apply_transform(vp: &mut Viewport, t: &EntityTransform) {
-    crate::scene::transform::apply_standard_entity_transform(vp, t, |entity, p1, p2| {
-        crate::scene::transform::reflect_xy_point(
+    crate::scene::view::transform::apply_standard_entity_transform(vp, t, |entity, p1, p2| {
+        crate::scene::view::transform::reflect_xy_point(
             &mut entity.center.x,
             &mut entity.center.y,
             p1,
@@ -549,7 +549,7 @@ impl crate::entities::traits::FallbackTess for Viewport {
     fn fallback_geometry(
         &self,
         world_offset: [f64; 3],
-    ) -> crate::scene::tess_util::FallbackGeometry {
+    ) -> crate::scene::convert::tess_util::FallbackGeometry {
         let [ox, oy, oz] = world_offset;
         let cx = (self.center.x - ox) as f32;
         let cy = (self.center.y - oy) as f32;

@@ -31,9 +31,9 @@ use crate::entities::common::{
     center_grip, edit_prop as edit, ro_prop as ro, square_grip, triangle_grip,
 };
 use crate::entities::traits::TruckConvertible;
-use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
-use crate::scene::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::wire_model::{SnapHint, TangentGeom};
+use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::scene::model::wire_model::{SnapHint, TangentGeom};
 
 // ── TruckConvertible ────────────────────────────────────────────────────────
 
@@ -840,7 +840,7 @@ fn parse_attachment(s: &str) -> TextAttachmentType {
 // ── Transform ──────────────────────────────────────────────────────────────
 
 fn apply_transform(ml: &mut MultiLeader, t: &EntityTransform) {
-    crate::scene::transform::apply_standard_entity_transform(ml, t, |entity, p1, p2| {
+    crate::scene::view::transform::apply_standard_entity_transform(ml, t, |entity, p1, p2| {
         // Reflect every point on the leader (line points, connection points,
         // break-point endpoints) AND every direction vector that drives the
         // text orientation. Without the direction reflection text would keep
@@ -848,16 +848,16 @@ fn apply_transform(ml: &mut MultiLeader, t: &EntityTransform) {
         for root in &mut entity.context.leader_roots {
             for line in &mut root.lines {
                 for p in &mut line.points {
-                    crate::scene::transform::reflect_xy_point(&mut p.x, &mut p.y, p1, p2);
+                    crate::scene::view::transform::reflect_xy_point(&mut p.x, &mut p.y, p1, p2);
                 }
                 for bp in &mut line.break_points {
-                    crate::scene::transform::reflect_xy_point(
+                    crate::scene::view::transform::reflect_xy_point(
                         &mut bp.start_point.x,
                         &mut bp.start_point.y,
                         p1,
                         p2,
                     );
-                    crate::scene::transform::reflect_xy_point(
+                    crate::scene::view::transform::reflect_xy_point(
                         &mut bp.end_point.x,
                         &mut bp.end_point.y,
                         p1,
@@ -865,7 +865,7 @@ fn apply_transform(ml: &mut MultiLeader, t: &EntityTransform) {
                     );
                 }
             }
-            crate::scene::transform::reflect_xy_point(
+            crate::scene::view::transform::reflect_xy_point(
                 &mut root.connection_point.x,
                 &mut root.connection_point.y,
                 p1,
@@ -873,13 +873,13 @@ fn apply_transform(ml: &mut MultiLeader, t: &EntityTransform) {
             );
             reflect_xy_direction(&mut root.direction.x, &mut root.direction.y, p1, p2);
             for bp in &mut root.break_points {
-                crate::scene::transform::reflect_xy_point(
+                crate::scene::view::transform::reflect_xy_point(
                     &mut bp.start_point.x,
                     &mut bp.start_point.y,
                     p1,
                     p2,
                 );
-                crate::scene::transform::reflect_xy_point(
+                crate::scene::view::transform::reflect_xy_point(
                     &mut bp.end_point.x,
                     &mut bp.end_point.y,
                     p1,
@@ -887,7 +887,7 @@ fn apply_transform(ml: &mut MultiLeader, t: &EntityTransform) {
                 );
             }
         }
-        crate::scene::transform::reflect_xy_point(
+        crate::scene::view::transform::reflect_xy_point(
             &mut entity.context.text_location.x,
             &mut entity.context.text_location.y,
             p1,
@@ -916,7 +916,7 @@ fn reflect_xy_direction(dx: &mut f64, dy: &mut f64, p1: Vec3, p2: Vec3) {
     let p2_rel = Vec3::new(p2.x - p1.x, p2.y - p1.y, 0.0);
     let mut tip_x = *dx;
     let mut tip_y = *dy;
-    crate::scene::transform::reflect_xy_point(&mut tip_x, &mut tip_y, zero, p2_rel);
+    crate::scene::view::transform::reflect_xy_point(&mut tip_x, &mut tip_y, zero, p2_rel);
     *dx = tip_x;
     *dy = tip_y;
 }
@@ -936,8 +936,8 @@ impl crate::entities::traits::Grippable for MultiLeader {
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
         apply_grip(self, grip_id, apply);
     }
-    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::object::GripMenuItem> {
-        use crate::scene::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
+        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
         let n_vertices: usize = self
             .context
             .leader_roots
@@ -984,8 +984,8 @@ impl crate::entities::traits::Grippable for MultiLeader {
             ]
         }
     }
-    fn apply_grip_menu(&mut self, grip_id: usize, action: crate::scene::object::GripMenuAction) {
-        use crate::scene::object::GripMenuAction as A;
+    fn apply_grip_menu(&mut self, grip_id: usize, action: crate::scene::model::object::GripMenuAction) {
+        use crate::scene::model::object::GripMenuAction as A;
         // Locate the (root, line) and vertex position owning this grip id.
         let mut idx = 0usize;
         let mut loc: Option<(usize, usize, acadrust::types::Vector3)> = None;
@@ -1063,7 +1063,7 @@ pub trait MultiLeaderTess {
         world_offset: [f64; 3],
         anno_scale: f32,
         world_per_pixel: Option<f32>,
-    ) -> Vec<crate::scene::wire_model::WireModel>;
+    ) -> Vec<crate::scene::model::wire_model::WireModel>;
 }
 
 impl MultiLeaderTess for MultiLeader {
@@ -1077,11 +1077,11 @@ impl MultiLeaderTess for MultiLeader {
         world_offset: [f64; 3],
         anno_scale: f32,
         world_per_pixel: Option<f32>,
-    ) -> Vec<crate::scene::wire_model::WireModel> {
-        use crate::scene::tessellate::{
+    ) -> Vec<crate::scene::model::wire_model::WireModel> {
+        use crate::scene::convert::tessellate::{
             append_arrow, arrow_from_block, color_or_inherit, tessellate, ArrowKind, DimGeom,
         };
-        use crate::scene::wire_model::{SnapHint, TangentGeom, WireModel};
+        use crate::scene::model::wire_model::{SnapHint, TangentGeom, WireModel};
         use glam::Vec3;
         let ml = self;
         // line_color falls back to the entity colour when the MultiLeader's own
@@ -1110,7 +1110,7 @@ impl MultiLeaderTess for MultiLeader {
                     .map(|lt| lt.name.clone());
                 match name {
                     Some(n) => {
-                        crate::scene::render::resolve_pattern(&document.line_types, &n, lt_scale)
+                        crate::scene::view::render::resolve_pattern(&document.line_types, &n, lt_scale)
                     }
                     None => (0.0, [0.0; 8]),
                 }

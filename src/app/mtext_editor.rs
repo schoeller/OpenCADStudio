@@ -323,8 +323,8 @@ pub fn visible_spans(raw: &str) -> Vec<(usize, usize)> {
 
 // ── App-side editor driver ──────────────────────────────────────────────────
 
-use crate::scene::tessellate;
-use crate::scene::wire_model::WireModel;
+use crate::scene::convert::tessellate;
+use crate::scene::model::wire_model::WireModel;
 use iced::widget::text_editor::{Action, Edit};
 use std::sync::Arc;
 

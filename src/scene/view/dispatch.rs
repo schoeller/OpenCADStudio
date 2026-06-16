@@ -5,8 +5,8 @@ use acadrust::{EntityType, Handle};
 
 use crate::command::EntityTransform;
 use crate::entities::traits::EntityTypeOps;
-use crate::scene::object::{GripDef, PropSection};
-use crate::scene::properties;
+use crate::scene::model::object::{GripDef, PropSection};
+use crate::scene::cache::properties;
 
 pub fn grips(entity: &EntityType) -> Vec<GripDef> {
     EntityTypeOps::grips(entity)
@@ -71,7 +71,7 @@ pub fn apply_geom_prop(entity: &mut EntityType, field: &str, value: &str) {
     EntityTypeOps::apply_geom_prop(entity, field, value);
 }
 
-pub fn apply_grip(entity: &mut EntityType, grip_id: usize, apply: crate::scene::object::GripApply) {
+pub fn apply_grip(entity: &mut EntityType, grip_id: usize, apply: crate::scene::model::object::GripApply) {
     EntityTypeOps::apply_grip(entity, grip_id, apply);
 }
 

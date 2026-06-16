@@ -4,7 +4,7 @@
 // Quads are split into two triangles.
 // Only the first object/group is imported (no multi-object support needed).
 
-use crate::scene::mesh_model::MeshModel;
+use crate::scene::model::mesh_model::MeshModel;
 
 /// Parse OBJ text into a MeshModel.
 /// Returns `None` if the file has no usable geometry.

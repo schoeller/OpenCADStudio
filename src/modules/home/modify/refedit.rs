@@ -128,7 +128,7 @@ impl CadCommand for RefCloseCommand {
 /// Order: scale → rotate (around origin) → translate.
 pub fn apply_insert_transform(entity: &mut EntityType, session: &RefEditSession) {
     use crate::command::EntityTransform;
-    use crate::scene::dispatch;
+    use crate::scene::view::dispatch;
 
     let origin = Vec3::ZERO;
 
@@ -170,7 +170,7 @@ pub fn apply_insert_transform(entity: &mut EntityType, session: &RefEditSession)
 /// Order: un-translate → un-rotate → un-scale.
 pub fn apply_insert_inverse_transform(entity: &mut EntityType, session: &RefEditSession) {
     use crate::command::EntityTransform;
-    use crate::scene::dispatch;
+    use crate::scene::view::dispatch;
 
     let origin = Vec3::ZERO;
 

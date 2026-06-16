@@ -5,9 +5,9 @@ use truck_modeling::{builder, BSplineCurve, Curve, Edge, KnotVec, Point3, Wire};
 use crate::command::EntityTransform;
 use crate::entities::common::{center_grip, edit_prop as edit, ro_prop as ro, square_grip};
 use crate::entities::traits::TruckConvertible;
-use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
-use crate::scene::object::{GripApply, GripDef, PropSection};
-use crate::scene::wire_model::SnapHint;
+use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::scene::model::object::{GripApply, GripDef, PropSection};
+use crate::scene::model::wire_model::SnapHint;
 
 const TAU: f64 = std::f64::consts::TAU;
 
@@ -218,14 +218,14 @@ fn apply_grip(ell: &mut Ellipse, grip_id: usize, apply: GripApply) {
 }
 
 fn apply_transform(ell: &mut Ellipse, t: &EntityTransform) {
-    crate::scene::transform::apply_standard_entity_transform(ell, t, |entity, p1, p2| {
-        crate::scene::transform::reflect_xy_point(
+    crate::scene::view::transform::apply_standard_entity_transform(ell, t, |entity, p1, p2| {
+        crate::scene::view::transform::reflect_xy_point(
             &mut entity.center.x,
             &mut entity.center.y,
             p1,
             p2,
         );
-        crate::scene::transform::reflect_xy_point(
+        crate::scene::view::transform::reflect_xy_point(
             &mut entity.major_axis.x,
             &mut entity.major_axis.y,
             p1,

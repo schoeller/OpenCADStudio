@@ -5,7 +5,7 @@
 //   binding 1 — sampler           (bilinear filtering)
 //   binding 2 — ImageParams       (opacity uniform, 16 bytes)
 
-use crate::scene::image_model::ImageModel;
+use crate::scene::model::image_model::ImageModel;
 use iced::wgpu;
 use iced::wgpu::util::DeviceExt;
 

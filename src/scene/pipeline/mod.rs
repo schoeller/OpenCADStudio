@@ -19,10 +19,10 @@ pub use uniforms::Uniforms;
 pub use viewcube::ViewCubePipeline;
 pub use wire_gpu::WireGpu;
 
-use crate::scene::hatch_model::HatchModel;
-use crate::scene::image_model::ImageModel;
-use crate::scene::mesh_model::MeshLodSet;
-use crate::scene::wire_model::WireModel;
+use crate::scene::model::hatch_model::HatchModel;
+use crate::scene::model::image_model::ImageModel;
+use crate::scene::model::mesh_model::MeshLodSet;
+use crate::scene::model::wire_model::WireModel;
 
 /// MSAA sample count for the main drawing pipelines.
 const MSAA_SAMPLES: u32 = 4;

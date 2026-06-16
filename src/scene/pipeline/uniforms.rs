@@ -1,4 +1,4 @@
-use crate::scene::camera::Camera;
+use crate::scene::view::camera::Camera;
 use iced::Rectangle;
 
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]

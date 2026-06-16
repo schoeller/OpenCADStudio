@@ -26,8 +26,8 @@ use acadrust::entities::acis::{
     SatConeSurface, SatDocument, SatFace, SatPlaneSurface, SatSphereSurface, SatTorusSurface,
 };
 
-use crate::scene::mesh_model::{MeshLodSet, MeshModel};
-use crate::scene::solid3d_tess::{
+use crate::scene::model::mesh_model::{MeshLodSet, MeshModel};
+use crate::scene::convert::solid3d_tess::{
     apply_body_transform, body_transform, collect_face_polygon, cone_axis_span, mesh_aabb,
 };
 
@@ -302,7 +302,7 @@ fn torus_faces(torus: &SatTorusSurface) -> Vec<Face> {
 /// Append meshes for every `spline-surface` face, reusing the truck
 /// BSplineSurface grid sampler in `spline_tess`.
 fn append_spline_faces(sat: &SatDocument, mesh: &mut MeshModel) {
-    use crate::scene::solid3d_tess::LodConfig;
+    use crate::scene::convert::solid3d_tess::LodConfig;
     for face in sat.faces() {
         let Some(surf_rec) = sat.resolve(face.surface()) else {
             continue;
@@ -313,7 +313,7 @@ fn append_spline_faces(sat: &SatDocument, mesh: &mut MeshModel) {
         let mut verts: Vec<[f32; 3]> = Vec::new();
         let mut normals: Vec<[f32; 3]> = Vec::new();
         let mut indices: Vec<u32> = Vec::new();
-        crate::scene::spline_tess::tess_spline_face(
+        crate::scene::convert::spline_tess::tess_spline_face(
             sat,
             &face,
             LodConfig::HIGH,

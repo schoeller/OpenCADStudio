@@ -11,7 +11,7 @@ use acadrust::EntityType;
 use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
-use crate::scene::wire_model::WireModel;
+use crate::scene::model::wire_model::WireModel;
 
 pub struct MlineCommand {
     points: Vec<Vec3>,

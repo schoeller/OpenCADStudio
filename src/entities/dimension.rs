@@ -10,26 +10,26 @@ use crate::entities::common::{
     center_grip, edit_prop as edit, parse_f64, ro_prop as ro, square_grip,
 };
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable};
-use crate::scene::object::{GripApply, GripDef, PropSection};
+use crate::scene::model::object::{GripApply, GripDef, PropSection};
 
-fn base_props(base: &DimensionBase) -> Vec<crate::scene::object::Property> {
+fn base_props(base: &DimensionBase) -> Vec<crate::scene::model::object::Property> {
     vec![
-        crate::scene::object::Property {
+        crate::scene::model::object::Property {
             label: "Text".into(),
             field: "text",
-            value: crate::scene::object::PropValue::EditText(base.text.clone()),
+            value: crate::scene::model::object::PropValue::EditText(base.text.clone()),
         },
-        crate::scene::object::Property {
+        crate::scene::model::object::Property {
             label: "User Text".into(),
             field: "user_text",
-            value: crate::scene::object::PropValue::EditText(
+            value: crate::scene::model::object::PropValue::EditText(
                 base.user_text.clone().unwrap_or_default(),
             ),
         },
-        crate::scene::object::Property {
+        crate::scene::model::object::Property {
             label: "Style".into(),
             field: "style_name",
-            value: crate::scene::object::PropValue::EditText(base.style_name.clone()),
+            value: crate::scene::model::object::PropValue::EditText(base.style_name.clone()),
         },
         edit("Text X", "text_x", base.text_middle_point.x),
         edit("Text Y", "text_y", base.text_middle_point.y),
@@ -135,7 +135,7 @@ fn linear_like_props(
     first: acadrust::types::Vector3,
     second: acadrust::types::Vector3,
     definition: acadrust::types::Vector3,
-) -> Vec<crate::scene::object::Property> {
+) -> Vec<crate::scene::model::object::Property> {
     vec![
         edit("First X", "first_x", first.x),
         edit("First Y", "first_y", first.y),
@@ -152,7 +152,7 @@ fn linear_like_props(
 fn radius_like_props(
     center: acadrust::types::Vector3,
     point: acadrust::types::Vector3,
-) -> Vec<crate::scene::object::Property> {
+) -> Vec<crate::scene::model::object::Property> {
     vec![
         edit("Center X", "center_x", center.x),
         edit("Center Y", "center_y", center.y),
@@ -168,7 +168,7 @@ fn angular_props(
     first: acadrust::types::Vector3,
     second: acadrust::types::Vector3,
     definition: acadrust::types::Vector3,
-) -> Vec<crate::scene::object::Property> {
+) -> Vec<crate::scene::model::object::Property> {
     vec![
         edit("Vertex X", "vertex_x", vertex.x),
         edit("Vertex Y", "vertex_y", vertex.y),
@@ -555,7 +555,7 @@ fn scale_point(p: &mut acadrust::types::Vector3, center: Vec3, factor: f32) {
 }
 
 fn mirror_point(p: &mut acadrust::types::Vector3, p1: Vec3, p2: Vec3) {
-    crate::scene::transform::reflect_xy_point(&mut p.x, &mut p.y, p1, p2);
+    crate::scene::view::transform::reflect_xy_point(&mut p.x, &mut p.y, p1, p2);
 }
 
 impl PropertyEditable for Dimension {
@@ -713,8 +713,8 @@ impl Grippable for Dimension {
         self.base_mut().actual_measurement = self.measurement();
     }
 
-    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::object::GripMenuItem> {
-        use crate::scene::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
+        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
         let (dim_line_grip, text_grip) = match self {
             Dimension::Linear(_) | Dimension::Aligned(_) => (2, 3),
             Dimension::Radius(_) | Dimension::Diameter(_) => (1, 2),
@@ -775,8 +775,8 @@ impl Grippable for Dimension {
         }
     }
 
-    fn apply_grip_menu(&mut self, grip_id: usize, action: crate::scene::object::GripMenuAction) {
-        use crate::scene::object::GripMenuAction as A;
+    fn apply_grip_menu(&mut self, grip_id: usize, action: crate::scene::model::object::GripMenuAction) {
+        use crate::scene::model::object::GripMenuAction as A;
         let (_dim_line_grip, text_grip) = match self {
             Dimension::Linear(_) | Dimension::Aligned(_) => (2, 3),
             Dimension::Radius(_) | Dimension::Diameter(_) => (1, 2),
@@ -827,18 +827,18 @@ impl Grippable for Dimension {
 // definition. Shared dim machinery (`ArrowKind`, `DimGeom`, `append_arrow`,
 // arrow blocks, colour resolution, `add_segment` / `add_polyline`,
 // `normalized_or`, `entity_z`, `offset_snap_pts`) lives in
-// `scene::tessellate` and is reused by Leader / MultiLeader too.
+// `scene::convert::tessellate` and is reused by Leader / MultiLeader too.
 
 use acadrust::entities::{MText, Text};
 use acadrust::tables::DimStyle;
 use acadrust::types::{Color as AcadColor, Vector3};
 use acadrust::{CadDocument, EntityType, Handle};
 
-use crate::scene::tess_util::aci_to_rgba;
-use crate::scene::tessellate::{
+use crate::scene::convert::tess_util::aci_to_rgba;
+use crate::scene::convert::tessellate::{
     add_polyline, add_segment, append_arrow, arrow_from_block, normalized_or, ArrowKind, DimGeom,
 };
-use crate::scene::wire_model::{SnapHint, WireModel};
+use crate::scene::model::wire_model::{SnapHint, WireModel};
 
 pub trait DimensionTess {
     fn tessellate(
@@ -1338,7 +1338,7 @@ fn resolve_pattern_by_handle(
         .find(|lt| lt.handle == handle)
         .map(|lt| lt.name.clone());
     match name {
-        Some(n) => crate::scene::render::resolve_pattern(&doc.line_types, &n, scale),
+        Some(n) => crate::scene::view::render::resolve_pattern(&doc.line_types, &n, scale),
         None => (0.0, [0.0; 8]),
     }
 }

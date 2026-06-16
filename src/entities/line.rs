@@ -6,18 +6,18 @@ use crate::entities::common::{
     center_grip, edit_prop as edit, parse_f64, ro_prop as ro, square_grip,
 };
 use crate::entities::traits::TruckConvertible;
-use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
-use crate::scene::object::{GripApply, GripDef, PropSection};
-use crate::scene::wire_model::TangentGeom;
+use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::scene::model::object::{GripApply, GripDef, PropSection};
+use crate::scene::model::wire_model::TangentGeom;
 
 fn to_truck(line: &Line) -> TruckEntity {
     let normal = (line.normal.x, line.normal.y, line.normal.z);
-    let (sx, sy, sz) = crate::scene::transform::ocs_point_to_wcs(
+    let (sx, sy, sz) = crate::scene::view::transform::ocs_point_to_wcs(
         (line.start.x, line.start.y, line.start.z),
         normal,
     );
     let (ex, ey, ez) =
-        crate::scene::transform::ocs_point_to_wcs((line.end.x, line.end.y, line.end.z), normal);
+        crate::scene::view::transform::ocs_point_to_wcs((line.end.x, line.end.y, line.end.z), normal);
     let p0 = Point3::new(sx, sy, sz);
     let p1 = Point3::new(ex, ey, ez);
     let kv: Vec<[f64; 3]> = vec![[p0.x, p0.y, p0.z], [p1.x, p1.y, p1.z]];
@@ -134,13 +134,13 @@ fn apply_transform(line: &mut Line, t: &EntityTransform) {
             ));
         }
         EntityTransform::Rotate { center, angle_rad } => {
-            crate::scene::transform::apply_standard_transform(line, *center, *angle_rad);
+            crate::scene::view::transform::apply_standard_transform(line, *center, *angle_rad);
         }
         EntityTransform::Scale { center, factor } => {
-            crate::scene::transform::apply_standard_scale(line, *center, *factor);
+            crate::scene::view::transform::apply_standard_scale(line, *center, *factor);
         }
         EntityTransform::Mirror { p1, p2 } => {
-            crate::scene::transform::mirror_xy_line(line, *p1, *p2);
+            crate::scene::view::transform::mirror_xy_line(line, *p1, *p2);
         }
     }
 }
@@ -158,8 +158,8 @@ impl crate::entities::traits::Grippable for Line {
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
         apply_grip(self, grip_id, apply);
     }
-    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::object::GripMenuItem> {
-        use crate::scene::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
+        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
         if grip_id == 2 {
             vec![GripMenuItem {
                 label: "Stretch",
@@ -178,7 +178,7 @@ impl crate::entities::traits::Grippable for Line {
             ]
         }
     }
-    fn apply_grip_menu(&mut self, _grip_id: usize, _action: crate::scene::object::GripMenuAction) {
+    fn apply_grip_menu(&mut self, _grip_id: usize, _action: crate::scene::model::object::GripMenuAction) {
         // Lengthen needs a follow-up distance — handled by
         // `apply_grip_menu_value`.
     }
@@ -186,9 +186,9 @@ impl crate::entities::traits::Grippable for Line {
     fn grip_menu_value_prompt(
         &self,
         _grip_id: usize,
-        action: crate::scene::object::GripMenuAction,
+        action: crate::scene::model::object::GripMenuAction,
     ) -> Option<&'static str> {
-        use crate::scene::object::GripMenuAction as A;
+        use crate::scene::model::object::GripMenuAction as A;
         match action {
             A::Lengthen => Some("Distance"),
             _ => None,
@@ -198,10 +198,10 @@ impl crate::entities::traits::Grippable for Line {
     fn apply_grip_menu_value(
         &mut self,
         grip_id: usize,
-        action: crate::scene::object::GripMenuAction,
+        action: crate::scene::model::object::GripMenuAction,
         value: f64,
     ) {
-        use crate::scene::object::GripMenuAction as A;
+        use crate::scene::model::object::GripMenuAction as A;
         if !matches!(action, A::Lengthen) {
             return;
         }

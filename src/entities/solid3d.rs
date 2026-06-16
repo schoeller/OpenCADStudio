@@ -11,7 +11,7 @@ use glam::Vec3;
 
 use crate::entities::common::{center_grip, ro_prop as ro};
 use crate::entities::traits::{Grippable, PropertyEditable};
-use crate::scene::object::{GripApply, GripDef, PropSection};
+use crate::scene::model::object::{GripApply, GripDef, PropSection};
 
 // ── shared helpers ────────────────────────────────────────────────────────────
 
@@ -260,8 +260,8 @@ impl PropertyEditable for Body {
 // to repeat a three-arm `match entity` block at every callsite — the
 // helpers below collapse those to a single call.
 
-use crate::scene::mesh_model::MeshLodSet;
-use crate::scene::solid3d_tess;
+use crate::scene::model::mesh_model::MeshLodSet;
+use crate::scene::convert::solid3d_tess;
 use acadrust::{types::Vector3, EntityType};
 
 /// `point_of_reference` of an ACIS-backed volume entity, if applicable.

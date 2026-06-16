@@ -18,7 +18,7 @@
 // render pass send the 3D side through a depth-only pipeline for
 // HiddenLine while keeping the 2D side fully visible.
 
-use crate::scene::wire_model::WireModel;
+use crate::scene::model::wire_model::WireModel;
 use iced::wgpu;
 use iced::wgpu::util::DeviceExt;
 

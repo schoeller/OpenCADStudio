@@ -4,9 +4,9 @@ use glam::Vec3;
 use crate::command::EntityTransform;
 use crate::entities::common::{center_grip, edit_prop as edit, parse_f64, ro_prop as ro};
 use crate::entities::traits::{FallbackTess, Grippable, PropertyEditable, Transformable};
-use crate::scene::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::tess_util::{arc_segments, arc_signed_span, wire_chord_tol, FallbackGeometry};
-use crate::scene::wire_model::SnapHint;
+use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::scene::convert::tess_util::{arc_segments, arc_signed_span, wire_chord_tol, FallbackGeometry};
+use crate::scene::model::wire_model::SnapHint;
 
 fn properties(h: &Hatch) -> PropSection {
     let pattern_type = match h.pattern_type {
@@ -89,7 +89,7 @@ fn apply_geom_prop(h: &mut Hatch, field: &str, value: &str) {
 }
 
 fn apply_transform(h: &mut Hatch, t: &EntityTransform) {
-    crate::scene::transform::apply_standard_entity_transform(h, t, |entity, p1, p2| {
+    crate::scene::view::transform::apply_standard_entity_transform(h, t, |entity, p1, p2| {
         // Delegate the mirror to acadrust's transform_hatch (via the Entity
         // trait): it flips the boundary-arc direction flags, re-mirrors the
         // stored angles and preserves the stored sweep — including the
@@ -97,7 +97,7 @@ fn apply_transform(h: &mut Hatch, t: &EntityTransform) {
         // hand-rolled angle-swap here was only valid for ccw boundary arcs on
         // an axis-aligned mirror line and went stale the moment those
         // conventions were fixed upstream.
-        let t = crate::scene::transform::reflection_about_xy_line(p1, p2);
+        let t = crate::scene::view::transform::reflection_about_xy_line(p1, p2);
         acadrust::entities::Entity::apply_transform(entity, &t);
     });
 }
@@ -282,8 +282,8 @@ impl Grippable for Hatch {
         }
     }
 
-    fn grip_menu(&self, _grip_id: usize) -> Vec<crate::scene::object::GripMenuItem> {
-        use crate::scene::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, _grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
+        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
         vec![
             GripMenuItem {
                 label: "Stretch",
@@ -304,7 +304,7 @@ impl Grippable for Hatch {
         ]
     }
 
-    fn apply_grip_menu(&mut self, _grip_id: usize, _action: crate::scene::object::GripMenuAction) {
+    fn apply_grip_menu(&mut self, _grip_id: usize, _action: crate::scene::model::object::GripMenuAction) {
         // Origin / Angle / Scale need a follow-up value — handled by
         // `apply_grip_menu_value`.
     }
@@ -312,9 +312,9 @@ impl Grippable for Hatch {
     fn grip_menu_value_prompt(
         &self,
         _grip_id: usize,
-        action: crate::scene::object::GripMenuAction,
+        action: crate::scene::model::object::GripMenuAction,
     ) -> Option<&'static str> {
-        use crate::scene::object::GripMenuAction as A;
+        use crate::scene::model::object::GripMenuAction as A;
         match action {
             A::HatchAngle => Some("Angle (deg)"),
             A::HatchScale => Some("Scale"),
@@ -325,10 +325,10 @@ impl Grippable for Hatch {
     fn apply_grip_menu_value(
         &mut self,
         _grip_id: usize,
-        action: crate::scene::object::GripMenuAction,
+        action: crate::scene::model::object::GripMenuAction,
         value: f64,
     ) {
-        use crate::scene::object::GripMenuAction as A;
+        use crate::scene::model::object::GripMenuAction as A;
         match action {
             A::HatchAngle => {
                 self.pattern_angle = value.to_radians();
@@ -350,7 +350,7 @@ impl FallbackTess for Hatch {
         // Convert a 2D OCS hatch boundary point to WCS, then subtract world_offset.
         let to_wcs = |x: f64, y: f64| -> [f32; 3] {
             let (wx, wy, wz) =
-                crate::scene::transform::ocs_point_to_wcs((x, y, self.elevation), normal);
+                crate::scene::view::transform::ocs_point_to_wcs((x, y, self.elevation), normal);
             [(wx - ox) as f32, (wy - oy) as f32, (wz - oz) as f32]
         };
         let mut pts: Vec<[f32; 3]> = Vec::new();

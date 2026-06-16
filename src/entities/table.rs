@@ -7,10 +7,10 @@ use crate::entities::text_support::{
     layout_mtext, MTextRenderOpts, MTextVAnchor, ResolvedTextStyle,
 };
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
-use crate::scene::object::{GripApply, GripDef, PropSection};
-use crate::scene::transform;
-use crate::scene::wire_model::SnapHint;
+use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::scene::model::object::{GripApply, GripDef, PropSection};
+use crate::scene::view::transform;
+use crate::scene::model::wire_model::SnapHint;
 
 fn v3(v: &acadrust::types::Vector3) -> Vec3 {
     Vec3::new(v.x as f32, v.y as f32, v.z as f32)
@@ -335,9 +335,9 @@ pub fn tessellate_table(
     entity_color: [f32; 4],
     line_weight_px: f32,
     world_offset: [f64; 3],
-) -> Vec<crate::scene::wire_model::WireModel> {
-    use crate::scene::tess_util::aci_to_rgba;
-    use crate::scene::wire_model::WireModel;
+) -> Vec<crate::scene::model::wire_model::WireModel> {
+    use crate::scene::convert::tess_util::aci_to_rgba;
+    use crate::scene::model::wire_model::WireModel;
     use acadrust::types::Color;
     use rustc_hash::FxHashMap as HashMap;
 

@@ -15,7 +15,7 @@ use acadrust::objects::BlockVisibilityParameter;
 use acadrust::types::Vector3;
 use acadrust::{EntityType, Handle};
 
-use crate::scene::object::{GripDef, GripShape};
+use crate::scene::model::object::{GripDef, GripShape};
 
 use super::OpenCADStudio;
 

@@ -20,7 +20,7 @@ use truck_modeling::base::{BoundedCurve, Cut};
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
-use crate::scene::wire_model::WireModel;
+use crate::scene::model::wire_model::WireModel;
 
 // ── Ribbon definition ──────────────────────────────────────────────────────
 

@@ -10,7 +10,7 @@ use acadrust::{Ellipse, EntityType};
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::IconKind;
-use crate::scene::wire_model::WireModel;
+use crate::scene::model::wire_model::WireModel;
 use glam::Vec3;
 
 fn parse_f32(text: &str) -> Option<f32> {

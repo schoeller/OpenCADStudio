@@ -1,7 +1,7 @@
 use crate::command::CadCommand;
 use crate::linetypes;
 use crate::modules::home::modify::refedit::RefEditSession;
-use crate::scene::grip::GripEdit;
+use crate::scene::pick::grip::GripEdit;
 use crate::scene::GripDef;
 use crate::scene::Scene;
 use crate::snap::SnapResult;

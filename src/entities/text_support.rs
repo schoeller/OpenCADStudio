@@ -1,9 +1,9 @@
 use acadrust::types::aci_table::aci_to_rgb;
 use acadrust::{CadDocument, EntityType};
 
-use crate::scene::acad_to_truck::TextStroke;
-use crate::scene::font_face::Face;
-use crate::scene::lff;
+use crate::scene::convert::acad_to_truck::TextStroke;
+use crate::scene::text::font_face::Face;
+use crate::scene::text::lff;
 
 pub struct ResolvedTextStyle {
     pub font_name: String,

@@ -10,9 +10,9 @@ use glam::Vec3;
 use crate::command::EntityTransform;
 use crate::entities::common::{center_grip, edit_prop as edit, ro_prop as ro, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
-use crate::scene::object::{GripApply, GripDef, PropSection};
-use crate::scene::wire_model::SnapHint;
+use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::scene::model::object::{GripApply, GripDef, PropSection};
+use crate::scene::model::wire_model::SnapHint;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -224,7 +224,7 @@ impl PropertyEditable for Underlay {
 
 impl Transformable for Underlay {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        use crate::scene::transform::reflect_xy_point;
+        use crate::scene::view::transform::reflect_xy_point;
         match t {
             EntityTransform::Translate(d) => {
                 self.insertion_point.x += d.x as f64;

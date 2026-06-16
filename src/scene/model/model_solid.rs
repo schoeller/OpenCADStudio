@@ -8,7 +8,7 @@
 
 use truck_modeling::{builder, Point3, Rad, Solid, Vector3, Wire};
 
-use crate::scene::mesh_model::{MeshLodSet, MeshModel};
+use crate::scene::model::mesh_model::{MeshLodSet, MeshModel};
 
 const FULL: f64 = 7.0; // > 2π → builder closes the revolution
 
@@ -99,7 +99,7 @@ pub fn torus_solid(center: [f64; 3], major: f64, minor: f64) -> Solid {
 /// fallback draws these as a wireframe over the shaded mesh, and hit-testing
 /// uses their points).
 pub fn edge_wires(solid: &Solid) -> Vec<acadrust::entities::Wire> {
-    use crate::scene::truck_tess::{tessellate_edge, TruckTessResult};
+    use crate::scene::convert::truck_tess::{tessellate_edge, TruckTessResult};
     use acadrust::types::Vector3;
     let mut wires = Vec::new();
     for shell in solid.boundaries() {
@@ -151,7 +151,7 @@ pub fn boolean(op: Bool, a: &Solid, b: &Solid) -> Option<Solid> {
 /// Tessellate a truck `Solid` into a single-LOD `MeshLodSet` (world-space,
 /// before world_offset is applied by the caller).
 pub fn mesh_from_solid(solid: &Solid, color: [f32; 4]) -> Option<MeshLodSet> {
-    use crate::scene::truck_tess::{tessellate_solid, TruckTessResult};
+    use crate::scene::convert::truck_tess::{tessellate_solid, TruckTessResult};
     match tessellate_solid(solid, [0.0; 3]) {
         TruckTessResult::Mesh {
             verts,

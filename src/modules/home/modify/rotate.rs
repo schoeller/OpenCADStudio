@@ -12,7 +12,7 @@ use glam::Vec3;
 use crate::command::{CadCommand, CmdResult, DynField, EntityTransform};
 use crate::modules::home::defaults;
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
-use crate::scene::wire_model::WireModel;
+use crate::scene::model::wire_model::WireModel;
 
 // ── Ribbon definition ──────────────────────────────────────────────────────
 

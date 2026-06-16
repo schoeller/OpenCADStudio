@@ -5,9 +5,9 @@ use glam::Vec3;
 use crate::command::EntityTransform;
 use crate::entities::common::{center_grip, edit_prop as edit, ro_prop as ro, square_grip};
 use crate::entities::traits::TruckConvertible;
-use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
-use crate::scene::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::wire_model::TangentGeom;
+use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::scene::model::wire_model::TangentGeom;
 
 // ── TruckConvertible (used for snap/grip key-vertices) ─────────────────────
 
@@ -428,17 +428,17 @@ fn apply_geom_prop(leader: &mut Leader, field: &str, value: &str) {
 // ── Transform ──────────────────────────────────────────────────────────────
 
 fn apply_transform(leader: &mut Leader, t: &EntityTransform) {
-    crate::scene::transform::apply_standard_entity_transform(leader, t, |entity, p1, p2| {
+    crate::scene::view::transform::apply_standard_entity_transform(leader, t, |entity, p1, p2| {
         for v in &mut entity.vertices {
-            crate::scene::transform::reflect_xy_point(&mut v.x, &mut v.y, p1, p2);
+            crate::scene::view::transform::reflect_xy_point(&mut v.x, &mut v.y, p1, p2);
         }
-        crate::scene::transform::reflect_xy_point(
+        crate::scene::view::transform::reflect_xy_point(
             &mut entity.block_offset.x,
             &mut entity.block_offset.y,
             p1,
             p2,
         );
-        crate::scene::transform::reflect_xy_point(
+        crate::scene::view::transform::reflect_xy_point(
             &mut entity.annotation_offset.x,
             &mut entity.annotation_offset.y,
             p1,
@@ -465,8 +465,8 @@ impl crate::entities::traits::Grippable for Leader {
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
         apply_grip(self, grip_id, apply);
     }
-    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::object::GripMenuItem> {
-        use crate::scene::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
+        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
         let n = self.vertices.len();
         if grip_id == 0 {
             // Arrow head — stretch only.
@@ -497,8 +497,8 @@ impl crate::entities::traits::Grippable for Leader {
             }]
         }
     }
-    fn apply_grip_menu(&mut self, grip_id: usize, action: crate::scene::object::GripMenuAction) {
-        use crate::scene::object::GripMenuAction as A;
+    fn apply_grip_menu(&mut self, grip_id: usize, action: crate::scene::model::object::GripMenuAction) {
+        use crate::scene::model::object::GripMenuAction as A;
         let n = self.vertices.len();
         match action {
             A::AddVertex if grip_id < n => {
@@ -540,7 +540,7 @@ impl crate::entities::traits::Transformable for Leader {
 
 /// Per-entity tessellation entry for `Leader`. Lives here so all leader
 /// tess code stays alongside the entity definition. Cross-entity dim
-/// machinery (arrow shapes, `DimGeom`) lives in `scene::tessellate` and
+/// machinery (arrow shapes, `DimGeom`) lives in `scene::convert::tessellate` and
 /// is reused via the dim arrow emitter so the leader matches the active
 /// DIMSTYLE.
 pub trait LeaderTess {
@@ -553,7 +553,7 @@ pub trait LeaderTess {
         line_weight_px: f32,
         world_offset: [f64; 3],
         anno_scale: f32,
-    ) -> crate::scene::wire_model::WireModel;
+    ) -> crate::scene::model::wire_model::WireModel;
 }
 
 impl LeaderTess for Leader {
@@ -566,9 +566,9 @@ impl LeaderTess for Leader {
         line_weight_px: f32,
         world_offset: [f64; 3],
         anno_scale: f32,
-    ) -> crate::scene::wire_model::WireModel {
-        use crate::scene::tessellate::{append_arrow, arrow_from_block, ArrowKind, DimGeom};
-        use crate::scene::wire_model::WireModel;
+    ) -> crate::scene::model::wire_model::WireModel {
+        use crate::scene::convert::tessellate::{append_arrow, arrow_from_block, ArrowKind, DimGeom};
+        use crate::scene::model::wire_model::WireModel;
         let color = if selected {
             WireModel::SELECTED
         } else {

@@ -16,8 +16,8 @@
 // boundary). Counters — the hole in "O" or "A" — come through as separate
 // closed contours; the wire renderer simply draws every contour.
 
-use crate::scene::lff::Glyph;
-use crate::scene::sysfont;
+use crate::scene::text::lff::Glyph;
+use crate::scene::text::sysfont;
 use rustc_hash::FxHashMap as HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 

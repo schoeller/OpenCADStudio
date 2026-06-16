@@ -10,7 +10,7 @@
 use acadrust::entities::acis::{SatDocument, SatFace, SatRecord, SatToken};
 use truck_modeling::{BSplineSurface, KnotVec, ParametricSurface, ParametricSurface3D, Point3};
 
-use crate::scene::solid3d_tess::LodConfig;
+use crate::scene::convert::solid3d_tess::LodConfig;
 
 /// Tessellate one `spline-surface` face by sampling its B-spline surface.
 /// Appends triangles to the shared mesh buffers; a no-op when the surface

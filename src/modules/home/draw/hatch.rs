@@ -11,8 +11,8 @@
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::IconKind;
-use crate::scene::hatch_model::{HatchModel, HatchPattern, PatFamily};
-use crate::scene::wire_model::WireModel;
+use crate::scene::model::hatch_model::{HatchModel, HatchPattern, PatFamily};
+use crate::scene::model::wire_model::WireModel;
 use glam::Vec3;
 
 // ── Icons ──────────────────────────────────────────────────────────────────
@@ -92,7 +92,7 @@ impl HatchCommand {
     fn make_hatch(&self, boundary: Vec<[f32; 2]>) -> HatchModel {
         // Default: ANSI31 from catalog; fallback to a single 45° family.
         let pat_name = "ANSI31";
-        let families = crate::scene::hatch_patterns::find(pat_name)
+        let families = crate::scene::model::hatch_patterns::find(pat_name)
             .and_then(|e| {
                 if let HatchPattern::Pattern(f) = &e.gpu {
                     Some(f.clone())

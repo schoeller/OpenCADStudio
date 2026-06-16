@@ -11,7 +11,7 @@
 
 use std::io::Write;
 
-use crate::scene::mesh_model::MeshModel;
+use crate::scene::model::mesh_model::MeshModel;
 
 /// Build a binary STL byte buffer from a slice of mesh models.
 /// Returns `None` if there are no triangles to export.

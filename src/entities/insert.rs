@@ -6,9 +6,11 @@ use glam::Vec3;
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, parse_f64, ro_prop as ro, square_grip};
 
-use crate::scene::object::{GripApply, GripDef, PropSection};
-use crate::scene::wire_model::WireModel;
-use crate::scene::{block_cache, render, tessellate};
+use crate::scene::model::object::{GripApply, GripDef, PropSection};
+use crate::scene::model::wire_model::WireModel;
+use crate::scene::cache::block_cache;
+use crate::scene::convert::tessellate;
+use crate::scene::view::render;
 
 fn grips(ins: &Insert) -> Vec<GripDef> {
     let p = glam::DVec3::new(ins.insert_point.x, ins.insert_point.y, ins.insert_point.z);
@@ -63,7 +65,7 @@ fn apply_grip(ins: &mut Insert, _grip_id: usize, apply: GripApply) {
 }
 
 fn apply_transform(ins: &mut Insert, t: &EntityTransform) {
-    crate::scene::transform::apply_standard_entity_transform(ins, t, |entity, p1, p2| {
+    crate::scene::view::transform::apply_standard_entity_transform(ins, t, |entity, p1, p2| {
         let dx = (p2.x - p1.x) as f64;
         let dy = (p2.y - p1.y) as f64;
         let len = (dx * dx + dy * dy).sqrt();
@@ -98,7 +100,7 @@ impl crate::entities::traits::FallbackTess for Insert {
     fn fallback_geometry(
         &self,
         world_offset: [f64; 3],
-    ) -> crate::scene::tess_util::FallbackGeometry {
+    ) -> crate::scene::convert::tess_util::FallbackGeometry {
         let [ox, oy, oz] = world_offset;
         let ip = Vec3::new(
             (self.insert_point.x - ox) as f32,
@@ -114,7 +116,7 @@ impl crate::entities::traits::FallbackTess for Insert {
         ];
         (
             pts,
-            vec![(ip, crate::scene::wire_model::SnapHint::Insertion)],
+            vec![(ip, crate::scene::model::wire_model::SnapHint::Insertion)],
             vec![],
             vec![],
         )

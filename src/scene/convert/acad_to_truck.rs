@@ -5,7 +5,7 @@ use glam::Vec3;
 use truck_modeling::{Edge, Solid, Vertex, Wire};
 
 use crate::entities::traits::EntityTypeOps;
-use crate::scene::wire_model::{SnapHint, TangentGeom};
+use crate::scene::model::wire_model::{SnapHint, TangentGeom};
 
 /// One group of glyph strokes with its world-space origin stored in f64.
 /// Strokes are in glyph-local space (origin = [0,0]) so that the large

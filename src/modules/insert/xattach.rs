@@ -16,7 +16,7 @@ use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
-use crate::scene::wire_model::WireModel;
+use crate::scene::model::wire_model::WireModel;
 use crate::scene::Scene;
 
 pub fn tool() -> ToolDef {

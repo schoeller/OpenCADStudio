@@ -9,7 +9,7 @@ use truck_modeling::Solid;
 
 use super::Message;
 use crate::modules::model::boolean_cmd::BoolOp;
-use crate::scene::model_solid::{self, Bool};
+use crate::scene::model::model_solid::{self, Bool};
 
 impl super::OpenCADStudio {
     /// Commit a Model-tab solid: add its acadrust entity to the document, then

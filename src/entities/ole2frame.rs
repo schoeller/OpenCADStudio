@@ -4,9 +4,9 @@ use glam::Vec3;
 use crate::command::EntityTransform;
 use crate::entities::common::{center_grip, edit_prop as edit, ro_prop as ro, square_grip};
 use crate::entities::traits::TruckConvertible;
-use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
-use crate::scene::object::{GripApply, GripDef, PropSection};
-use crate::scene::wire_model::SnapHint;
+use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::scene::model::object::{GripApply, GripDef, PropSection};
+use crate::scene::model::wire_model::SnapHint;
 
 fn to_truck(ole: &Ole2Frame) -> TruckEntity {
     let x0 = ole.upper_left_corner.x;
@@ -184,7 +184,7 @@ impl crate::entities::traits::FallbackTess for Ole2Frame {
     fn fallback_geometry(
         &self,
         world_offset: [f64; 3],
-    ) -> crate::scene::tess_util::FallbackGeometry {
+    ) -> crate::scene::convert::tess_util::FallbackGeometry {
         // OLE objects carry a bounding rectangle in model space.
         // Render a simple X-through-rectangle placeholder.
         let [ox, oy, oz] = world_offset;

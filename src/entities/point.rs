@@ -5,9 +5,9 @@ use truck_modeling::{builder, Point3};
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, parse_f64, square_grip};
 use crate::entities::traits::TruckConvertible;
-use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
-use crate::scene::object::{GripApply, GripDef, PropSection};
-use crate::scene::wire_model::SnapHint;
+use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::scene::model::object::{GripApply, GripDef, PropSection};
+use crate::scene::model::wire_model::SnapHint;
 
 /// Resolve PDSIZE (negative = % of viewport, 0 = 5% default, positive = world).
 /// We don't know the viewport height at tessellation time, so percentages and
@@ -93,7 +93,7 @@ fn point_glyph(cx: f64, cy: f64, z: f64, pdmode: i16, pdsize: f64) -> Vec<[f64; 
 
 fn to_truck(pt: &Point, document: &acadrust::CadDocument) -> TruckEntity {
     let normal = (pt.normal.x, pt.normal.y, pt.normal.z);
-    let (wx, wy, wz) = crate::scene::transform::ocs_point_to_wcs(
+    let (wx, wy, wz) = crate::scene::view::transform::ocs_point_to_wcs(
         (pt.location.x, pt.location.y, pt.location.z),
         normal,
     );
@@ -175,8 +175,8 @@ fn apply_grip(pt: &mut Point, _grip_id: usize, apply: GripApply) {
 }
 
 fn apply_transform(pt: &mut Point, t: &EntityTransform) {
-    crate::scene::transform::apply_standard_entity_transform(pt, t, |entity, p1, p2| {
-        crate::scene::transform::reflect_xy_point(
+    crate::scene::view::transform::apply_standard_entity_transform(pt, t, |entity, p1, p2| {
+        crate::scene::view::transform::reflect_xy_point(
             &mut entity.location.x,
             &mut entity.location.y,
             p1,

@@ -22,7 +22,7 @@
 //                                          ------
 //                                           76 B / instance
 
-use crate::scene::wire_model::WireModel;
+use crate::scene::model::wire_model::WireModel;
 use iced::wgpu;
 use rayon::prelude::*;
 

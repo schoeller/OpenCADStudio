@@ -15,7 +15,7 @@ use acadrust::objects::{ObjectType, SpatialFilter};
 use acadrust::types::{Handle, Vector3};
 use acadrust::CadDocument;
 
-use crate::scene::wire_model::WireModel;
+use crate::scene::model::wire_model::WireModel;
 
 const NAN3: [f32; 3] = [f32::NAN, f32::NAN, f32::NAN];
 
@@ -113,7 +113,7 @@ pub fn clip_wires(wires: &mut Vec<WireModel>, poly: &[[f32; 2]]) {
 /// Clip a hatch fill boundary to `poly`.
 ///
 /// `boundary` is a hatch's NaN-separated loops in f32 offsets from
-/// `world_origin` (the [`HatchModel`](crate::scene::hatch_model::HatchModel)
+/// `world_origin` (the [`HatchModel`](crate::scene::model::hatch_model::HatchModel)
 /// representation); `poly` is the clip ring in the same world space the hatch
 /// occupies. Each loop is intersected with the clip polygon independently —
 /// the even-odd island structure is preserved because intersecting every loop

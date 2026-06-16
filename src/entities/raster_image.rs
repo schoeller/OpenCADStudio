@@ -3,8 +3,8 @@ use acadrust::entities::{RasterImage, Wipeout};
 use crate::command::EntityTransform;
 use crate::entities::common::{center_grip, edit_prop as edit, ro_prop as ro, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
-use crate::scene::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 
 // ── Shared geometry helpers ───────────────────────────────────────────────────
 
@@ -235,8 +235,8 @@ impl PropertyEditable for RasterImage {
 
 impl Transformable for RasterImage {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
-            crate::scene::transform::reflect_xy_point(
+        crate::scene::view::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
+            crate::scene::view::transform::reflect_xy_point(
                 &mut entity.insertion_point.x,
                 &mut entity.insertion_point.y,
                 p1,
@@ -496,8 +496,8 @@ impl PropertyEditable for Wipeout {
 
 impl Transformable for Wipeout {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
-            crate::scene::transform::reflect_xy_point(
+        crate::scene::view::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
+            crate::scene::view::transform::reflect_xy_point(
                 &mut entity.insertion_point.x,
                 &mut entity.insertion_point.y,
                 p1,

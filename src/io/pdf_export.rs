@@ -9,7 +9,7 @@
 // drawing origin at the paper origin.
 
 use crate::io::plot_style::PlotStyleTable;
-use crate::scene::hatch_model::{HatchModel, HatchPattern};
+use crate::scene::model::hatch_model::{HatchModel, HatchPattern};
 use crate::scene::WireModel;
 use printpdf::{
     Color, Line, LineCapStyle, LineJoinStyle, LinePoint, Mm, Op, PaintMode, PdfDocument, PdfPage,

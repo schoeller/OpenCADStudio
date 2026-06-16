@@ -523,8 +523,8 @@ impl OpenCADStudio {
                     for h in &dest {
                         if let Some(e) = self.tabs[i].scene.document.get_entity_mut(*h) {
                             e.as_entity_mut().set_layer(layer.clone());
-                            crate::scene::dispatch::apply_color(e, color);
-                            crate::scene::dispatch::apply_line_weight(e, lw);
+                            crate::scene::view::dispatch::apply_color(e, color);
+                            crate::scene::view::dispatch::apply_line_weight(e, lw);
                             e.common_mut().linetype = linetype.clone();
                             e.common_mut().linetype_scale = lt_scale;
                         }
@@ -553,7 +553,7 @@ impl OpenCADStudio {
                         .clone()
                         .into_iter()
                         .map(|mut entity| {
-                            crate::scene::dispatch::apply_transform(&mut entity, &translate);
+                            crate::scene::view::dispatch::apply_transform(&mut entity, &translate);
                             entity.common_mut().handle = acadrust::Handle::NULL;
                             self.tabs[i].scene.add_entity(entity)
                         })
@@ -1170,8 +1170,8 @@ impl OpenCADStudio {
             } => {
                 use crate::entities::traits::EntityTypeOps;
                 use crate::modules::insert::solid3d_cmds::empty_solid3d;
-                use crate::scene::acad_to_truck::TruckObject;
-                use crate::scene::truck_tess;
+                use crate::scene::convert::acad_to_truck::TruckObject;
+                use crate::scene::convert::truck_tess;
                 use truck_modeling::builder;
                 use truck_modeling::Vector3 as TruckVec3;
 
@@ -1192,7 +1192,7 @@ impl OpenCADStudio {
                                         verts,
                                         normals,
                                         indices,
-                                    } => Some(crate::scene::mesh_model::MeshModel {
+                                    } => Some(crate::scene::model::mesh_model::MeshModel {
                                         name: String::new(),
                                         verts,
                                         normals,
@@ -1236,8 +1236,8 @@ impl OpenCADStudio {
             } => {
                 use crate::entities::traits::EntityTypeOps;
                 use crate::modules::insert::solid3d_cmds::empty_solid3d;
-                use crate::scene::acad_to_truck::TruckObject;
-                use crate::scene::truck_tess;
+                use crate::scene::convert::acad_to_truck::TruckObject;
+                use crate::scene::convert::truck_tess;
                 use truck_modeling::builder;
                 use truck_modeling::{Point3, Rad, Vector3 as TruckVec3};
 
@@ -1270,7 +1270,7 @@ impl OpenCADStudio {
                                 verts,
                                 normals,
                                 indices,
-                            } => Some(crate::scene::mesh_model::MeshModel {
+                            } => Some(crate::scene::model::mesh_model::MeshModel {
                                 name: String::new(),
                                 verts,
                                 normals,
@@ -1311,8 +1311,8 @@ impl OpenCADStudio {
             } => {
                 use crate::entities::traits::EntityTypeOps;
                 use crate::modules::insert::solid3d_cmds::empty_solid3d;
-                use crate::scene::acad_to_truck::TruckObject;
-                use crate::scene::truck_tess;
+                use crate::scene::convert::acad_to_truck::TruckObject;
+                use crate::scene::convert::truck_tess;
                 use truck_modeling::builder;
                 use truck_modeling::Vector3 as TruckVec3;
 
@@ -1355,7 +1355,7 @@ impl OpenCADStudio {
                                         verts,
                                         normals,
                                         indices,
-                                    } => Some(crate::scene::mesh_model::MeshModel {
+                                    } => Some(crate::scene::model::mesh_model::MeshModel {
                                         name: String::new(),
                                         verts,
                                         normals,
@@ -1372,7 +1372,7 @@ impl OpenCADStudio {
                                         verts,
                                         normals,
                                         indices,
-                                    } => Some(crate::scene::mesh_model::MeshModel {
+                                    } => Some(crate::scene::model::mesh_model::MeshModel {
                                         name: String::new(),
                                         verts,
                                         normals,
@@ -1404,7 +1404,7 @@ impl OpenCADStudio {
                                         verts,
                                         normals,
                                         indices,
-                                    } => Some(crate::scene::mesh_model::MeshModel {
+                                    } => Some(crate::scene::model::mesh_model::MeshModel {
                                         name: String::new(),
                                         verts,
                                         normals,
@@ -1421,7 +1421,7 @@ impl OpenCADStudio {
                                         verts,
                                         normals,
                                         indices,
-                                    } => Some(crate::scene::mesh_model::MeshModel {
+                                    } => Some(crate::scene::model::mesh_model::MeshModel {
                                         name: String::new(),
                                         verts,
                                         normals,
@@ -1460,8 +1460,8 @@ impl OpenCADStudio {
             CmdResult::LoftEntities { handles, color } => {
                 use crate::entities::traits::EntityTypeOps;
                 use crate::modules::insert::solid3d_cmds::empty_solid3d;
-                use crate::scene::acad_to_truck::TruckObject;
-                use crate::scene::truck_tess;
+                use crate::scene::convert::acad_to_truck::TruckObject;
+                use crate::scene::convert::truck_tess;
                 use truck_modeling::builder;
 
                 // Collect wires from each profile.
@@ -1482,7 +1482,7 @@ impl OpenCADStudio {
                 }
 
                 let woff = self.tabs[i].scene.world_offset;
-                let result: Option<crate::scene::mesh_model::MeshModel> = (|| {
+                let result: Option<crate::scene::model::mesh_model::MeshModel> = (|| {
                     if wires.len() < 2 {
                         return None;
                     }
@@ -1511,7 +1511,7 @@ impl OpenCADStudio {
                             verts,
                             normals,
                             indices,
-                        } => Some(crate::scene::mesh_model::MeshModel {
+                        } => Some(crate::scene::model::mesh_model::MeshModel {
                             name: String::new(),
                             verts,
                             normals,
@@ -1552,8 +1552,8 @@ impl OpenCADStudio {
                 if let Some(mut model) = self.tabs[i].scene.hatches.get(&handle).cloned() {
                     // Update model fields
                     if !name.is_empty() {
-                        use crate::scene::hatch_model::HatchPattern;
-                        use crate::scene::hatch_patterns;
+                        use crate::scene::model::hatch_model::HatchPattern;
+                        use crate::scene::model::hatch_patterns;
                         model.name = name.clone();
                         if name.to_uppercase() == "SOLID" {
                             model.pattern = HatchPattern::Solid;

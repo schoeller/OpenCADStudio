@@ -4,10 +4,11 @@ use glam::Vec3;
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, ro_prop as ro, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::acad_to_truck::{TextStroke, TruckEntity, TruckObject};
-use crate::scene::object::{GripApply, GripDef, PropSection};
-use crate::scene::wire_model::SnapHint;
-use crate::scene::{lff, transform};
+use crate::scene::convert::acad_to_truck::{TextStroke, TruckEntity, TruckObject};
+use crate::scene::model::object::{GripApply, GripDef, PropSection};
+use crate::scene::model::wire_model::SnapHint;
+use crate::scene::text::lff;
+use crate::scene::view::transform;
 
 // ── GDT text parser ───────────────────────────────────────────────────────────
 

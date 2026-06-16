@@ -4,9 +4,9 @@ use truck_modeling::{builder, Edge, Point3, Wire};
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, ro_prop as ro, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
-use crate::scene::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::wire_model::TangentGeom;
+use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::scene::model::wire_model::TangentGeom;
 
 // ── Polyline (old-style 3D heavy polyline) ────────────────────────────────────
 
@@ -69,8 +69,8 @@ impl Grippable for Polyline {
         }
     }
 
-    fn grip_menu(&self, _grip_id: usize) -> Vec<crate::scene::object::GripMenuItem> {
-        use crate::scene::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, _grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
+        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
         vec![
             GripMenuItem {
                 label: "Stretch",
@@ -87,8 +87,8 @@ impl Grippable for Polyline {
         ]
     }
 
-    fn apply_grip_menu(&mut self, grip_id: usize, action: crate::scene::object::GripMenuAction) {
-        use crate::scene::object::GripMenuAction as A;
+    fn apply_grip_menu(&mut self, grip_id: usize, action: crate::scene::model::object::GripMenuAction) {
+        use crate::scene::model::object::GripMenuAction as A;
         let n = self.vertices.len();
         match action {
             A::AddVertex if grip_id < n => {
@@ -148,9 +148,9 @@ impl PropertyEditable for Polyline {
 
 impl Transformable for Polyline {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
+        crate::scene::view::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
             for v in &mut entity.vertices {
-                crate::scene::transform::reflect_xy_point(
+                crate::scene::view::transform::reflect_xy_point(
                     &mut v.location.x,
                     &mut v.location.y,
                     p1,
@@ -184,7 +184,7 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
     let mut key_verts: Vec<[f64; 3]> = Vec::new();
 
     let to_wcs = |x: f64, y: f64| -> (f64, f64, f64) {
-        crate::scene::transform::ocs_point_to_wcs((x, y, elev), normal)
+        crate::scene::view::transform::ocs_point_to_wcs((x, y, elev), normal)
     };
     let to_pt = |v: &acadrust::entities::Vertex2D| -> Point3 {
         let (wx, wy, wz) = to_wcs(v.location.x, v.location.y);
@@ -338,8 +338,8 @@ impl Grippable for Polyline2D {
         }
     }
 
-    fn grip_menu(&self, _grip_id: usize) -> Vec<crate::scene::object::GripMenuItem> {
-        use crate::scene::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, _grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
+        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
         vec![
             GripMenuItem {
                 label: "Stretch",
@@ -356,8 +356,8 @@ impl Grippable for Polyline2D {
         ]
     }
 
-    fn apply_grip_menu(&mut self, grip_id: usize, action: crate::scene::object::GripMenuAction) {
-        use crate::scene::object::GripMenuAction as A;
+    fn apply_grip_menu(&mut self, grip_id: usize, action: crate::scene::model::object::GripMenuAction) {
+        use crate::scene::model::object::GripMenuAction as A;
         let n = self.vertices.len();
         let elev = self.elevation;
         match action {
@@ -467,9 +467,9 @@ impl PropertyEditable for Polyline2D {
 
 impl Transformable for Polyline2D {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
+        crate::scene::view::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
             for v in &mut entity.vertices {
-                crate::scene::transform::reflect_xy_point(
+                crate::scene::view::transform::reflect_xy_point(
                     &mut v.location.x,
                     &mut v.location.y,
                     p1,
@@ -556,8 +556,8 @@ impl Grippable for Polyline3D {
         }
     }
 
-    fn grip_menu(&self, _grip_id: usize) -> Vec<crate::scene::object::GripMenuItem> {
-        use crate::scene::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, _grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
+        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
         vec![
             GripMenuItem {
                 label: "Stretch",
@@ -574,8 +574,8 @@ impl Grippable for Polyline3D {
         ]
     }
 
-    fn apply_grip_menu(&mut self, grip_id: usize, action: crate::scene::object::GripMenuAction) {
-        use crate::scene::object::GripMenuAction as A;
+    fn apply_grip_menu(&mut self, grip_id: usize, action: crate::scene::model::object::GripMenuAction) {
+        use crate::scene::model::object::GripMenuAction as A;
         let n = self.vertices.len();
         match action {
             A::AddVertex if grip_id < n => {
@@ -669,9 +669,9 @@ impl PropertyEditable for Polyline3D {
 
 impl Transformable for Polyline3D {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
+        crate::scene::view::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
             for v in &mut entity.vertices {
-                crate::scene::transform::reflect_xy_point(
+                crate::scene::view::transform::reflect_xy_point(
                     &mut v.position.x,
                     &mut v.position.y,
                     p1,

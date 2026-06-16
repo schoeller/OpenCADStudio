@@ -8,8 +8,8 @@
 
 use crate::entities::text_support::resolve_dxf_special_chars;
 use crate::linetypes::{ComplexLt, LtSegment};
-use crate::scene::lff;
-use crate::scene::wire_model::WireModel;
+use crate::scene::text::lff;
+use crate::scene::model::wire_model::WireModel;
 
 // ── Public entry point ────────────────────────────────────────────────────
 

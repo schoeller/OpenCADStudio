@@ -19,7 +19,7 @@ use glam::Vec3;
 use crate::command::{CadCommand, CmdResult, EntityTransform};
 use crate::modules::home::defaults;
 use crate::modules::IconKind;
-use crate::scene::wire_model::WireModel;
+use crate::scene::model::wire_model::WireModel;
 
 // ── Dropdown constants ─────────────────────────────────────────────────────
 
@@ -395,7 +395,7 @@ use std::f32::consts::TAU as FTAU;
 /// chord and ignored the extrusion, so arc-segment paths came out mirrored.
 fn lw_dense_pts(p: &acadrust::entities::LwPolyline) -> Vec<Vec3> {
     use crate::entities::common::BulgeArc;
-    use crate::scene::transform::ocs_point_to_wcs;
+    use crate::scene::view::transform::ocs_point_to_wcs;
 
     let verts = &p.vertices;
     if verts.is_empty() {
@@ -547,7 +547,7 @@ impl ArrayPathCommand {
                 // (normal = -Z) are traced on the same side the renderer draws,
                 // matching `entities::arc::to_truck`. Sampling the raw centre +
                 // angle ignores the extrusion and lands on the mirrored arc.
-                use crate::scene::transform::{ocs_axes, ocs_point_to_wcs};
+                use crate::scene::view::transform::{ocs_axes, ocs_point_to_wcs};
                 let normal = (a.normal.x, a.normal.y, a.normal.z);
                 let (ax, ay) = ocs_axes(normal);
                 let (cx, cy, cz) =
@@ -570,7 +570,7 @@ impl ArrayPathCommand {
                     .collect()
             }
             EntityType::Circle(c) => {
-                use crate::scene::transform::{ocs_axes, ocs_point_to_wcs};
+                use crate::scene::view::transform::{ocs_axes, ocs_point_to_wcs};
                 let normal = (c.normal.x, c.normal.y, c.normal.z);
                 let (ax, ay) = ocs_axes(normal);
                 let (cx, cy, cz) =
