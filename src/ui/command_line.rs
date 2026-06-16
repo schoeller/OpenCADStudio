@@ -73,13 +73,21 @@ impl CommandLine {
     }
 
     pub fn submit(&mut self) -> Option<String> {
-        let cmd = self.input.trim().to_uppercase();
-        if cmd.is_empty() {
+        let raw = self.input.trim().to_string();
+        if raw.is_empty() {
             return None;
         }
+        // Uppercase only the command verb (the first token); keep arguments
+        // verbatim so case-sensitive values survive — file paths on
+        // case-sensitive filesystems, identifiers, plugin command arguments.
+        // Dispatch matches verbs in uppercase and each sub-command handler
+        // re-uppercases its own keywords, so only free-form args are affected.
+        let cmd = match raw.split_once(char::is_whitespace) {
+            Some((verb, rest)) => format!("{} {}", verb.to_uppercase(), rest),
+            None => raw.to_uppercase(),
+        };
         // Record in recall list (avoid duplicates at the top).
-        let raw = self.input.trim().to_string();
-        if self.cmd_recall.last().map(|s| s.as_str()) != Some(&raw) {
+        if self.cmd_recall.last().map(|s| s.as_str()) != Some(raw.as_str()) {
             self.cmd_recall.push(raw);
             if self.cmd_recall.len() > 50 {
                 self.cmd_recall.remove(0);
