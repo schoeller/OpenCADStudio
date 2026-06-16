@@ -5,6 +5,20 @@ A CAD application for 2D drafting and 3D modeling, built with Rust. Reads and wr
 <img width="1920" height="940" alt="resim" src="https://github.com/user-attachments/assets/10635ad0-454b-4c87-935f-1a3a46f24ccb" />
 <img width="1920" height="940" alt="resim2" src="https://github.com/user-attachments/assets/2a037a09-e8e8-498c-8ed3-58ecb8ae958d" />
 
+## Try it in the browser
+
+A WebAssembly build runs directly in the browser — no install:
+
+**https://hakanseven12.github.io/OpenCADStudio/**
+
+It covers the core 2D workflow (open / draw / edit / save DWG & DXF, plus all
+the manager and style dialogs), with a few limitations versus the desktop app:
+
+- **No 3D modeling** — solid primitives, booleans and ACIS import are disabled.
+- **Hatches don't render** (WebGL2 lacks the vertex-stage storage the hatch shader needs).
+- **Fonts**: only the bundled stroke fonts; system/TrueType fonts and missing-glyph fallback aren't available.
+- **Single-threaded**, so large drawings are slower than on the desktop.
+
 ## Features
 
 ### File Formats
