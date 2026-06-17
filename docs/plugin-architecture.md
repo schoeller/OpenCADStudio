@@ -178,6 +178,7 @@ Plugins use `HostSession`, not `OpenCADStudio`:
 | Category | Methods |
 |----------|---------|
 | Document | `document()`, `document_mut()`, `entities()`, `entities_mut()`, `add_entity()`, `bump_geometry()` |
+| XDATA | `read_record(handle, app)`, `write_record(handle, record)`, `remove_record(handle, app)` — keyed by entity handle; `write_record` registers the APPID so the file stays standard |
 | Tab state | `plugin_state()`, `plugin_state_mut()`, `ensure_plugin_state()` keyed by `manifest.id` |
 | Command line | `push_info`, `push_output`, `push_error`, `set_active_command` |
 | Undo / dirty | `push_undo`, `set_dirty` |
@@ -231,7 +232,7 @@ Domain persistence lives on entities. Document schemas in `PLUGIN.md`:
 | `STORMSEWER_PIPE` | `opencad.storm_sewer` | Pipe link between structures |
 | `STORMSEWER_CATCHMENT` | `opencad.storm_sewer` | Catchment boundary + hydrology |
 
-Host may add `xdata::read_record` / `write_record` helpers later; plugins use `acadrust` XDATA APIs today.
+`HostSession` provides `read_record` / `write_record` / `remove_record` helpers (keyed by entity handle) over the `acadrust` XDATA API; `write_record` also registers the application in the APPID table so the data survives a DWG/DXF round-trip. Plugins may still use the raw `acadrust` XDATA APIs directly.
 
 ---
 
@@ -258,6 +259,7 @@ This mirrors QGIS: the application ships core menus; plugins add tabs/tools with
 - [x] Plugin manager UI (list installed, versions) — `PLUGINS` / `PLUGINMANAGER` command, or the Start-page "Plugins" button
 - [x] Enable/disable plugins from the manager — a disabled plugin drops its ribbon tab and command dispatch; persisted in `settings.txt` (`disabled_plugins=`)
 - [x] `ModuleEvent::PluginFileDialog` — a plugin tool requests a native file picker; the host opens it and dispatches `"<command> <path>"` back to the plugin with original case preserved (bypasses the command-line upper-casing)
+- [x] XDATA convenience on `HostSession` — `read_record` / `write_record` / `remove_record`; `write_record` registers the APPID so plugin data round-trips through DWG/DXF
 
 ### Phase 2 — Dynamic loading (desktop)
 

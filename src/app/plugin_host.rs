@@ -2,6 +2,8 @@
 
 use std::any::{Any, TypeId};
 
+use acadrust::tables::AppId;
+use acadrust::xdata::ExtendedDataRecord;
 use acadrust::{CadDocument, EntityType, Handle};
 
 use super::OpenCADStudio;
@@ -44,6 +46,78 @@ impl<'a> HostSession<'a> {
 
     pub fn bump_geometry(&mut self) {
         self.app.tabs[self.tab].scene.bump_geometry();
+    }
+
+    // ── XDATA convenience ──────────────────────────────────────────────────
+    // Plugins persist domain data as XDATA on plain entities so it round-trips
+    // through DWG/DXF. These wrap the `acadrust::xdata` API keyed by entity
+    // handle and keep the APPID table in sync.
+
+    /// Read the XDATA record for `app_name` attached to entity `handle`, if any.
+    pub fn read_record(&self, handle: Handle, app_name: &str) -> Option<&ExtendedDataRecord> {
+        self.document()
+            .get_entity(handle)?
+            .common()
+            .extended_data
+            .get_record(app_name)
+    }
+
+    /// Attach `record` to entity `handle`, replacing any existing record for the
+    /// same application. Registers the application in the APPID table when
+    /// missing so the file stays valid for other CAD apps. Returns `false` when
+    /// the entity does not exist.
+    pub fn write_record(&mut self, handle: Handle, record: ExtendedDataRecord) -> bool {
+        let app = record.application_name.clone();
+        self.ensure_app_id(&app);
+        let Some(entity) = self.document_mut().get_entity_mut(handle) else {
+            return false;
+        };
+        let xd = &mut entity.common_mut().extended_data;
+        // Drop any existing record for this app, then append the new one.
+        let kept: Vec<_> = xd
+            .records()
+            .iter()
+            .filter(|r| r.application_name != app)
+            .cloned()
+            .collect();
+        xd.clear();
+        for r in kept {
+            xd.add_record(r);
+        }
+        xd.add_record(record);
+        true
+    }
+
+    /// Remove the XDATA record for `app_name` from entity `handle`. Returns
+    /// `true` when a record was actually removed.
+    pub fn remove_record(&mut self, handle: Handle, app_name: &str) -> bool {
+        let Some(entity) = self.document_mut().get_entity_mut(handle) else {
+            return false;
+        };
+        let xd = &mut entity.common_mut().extended_data;
+        let kept: Vec<_> = xd
+            .records()
+            .iter()
+            .filter(|r| r.application_name != app_name)
+            .cloned()
+            .collect();
+        if kept.len() == xd.records().len() {
+            return false;
+        }
+        xd.clear();
+        for r in kept {
+            xd.add_record(r);
+        }
+        true
+    }
+
+    /// Register `name` in the APPID table if it is not already present, so XDATA
+    /// written under it survives a DWG/DXF round-trip.
+    fn ensure_app_id(&mut self, name: &str) {
+        let doc = self.document_mut();
+        if !doc.app_ids.contains(name) {
+            let _ = doc.app_ids.add(AppId::new(name));
+        }
     }
 
     pub fn push_undo(&mut self, label: &str) {
@@ -90,5 +164,42 @@ impl<'a> HostSession<'a> {
         init: impl FnOnce() -> T,
     ) -> &mut T {
         self.app.tabs[self.tab].ensure_plugin_state(plugin_id, init)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use acadrust::entities::Point;
+    use acadrust::xdata::XDataValue;
+
+    #[test]
+    fn xdata_record_round_trips_and_registers_appid() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        let h = host.add_entity(EntityType::Point(Point::new()));
+
+        let mut rec = ExtendedDataRecord::new("DEMO_SURVEY");
+        rec.add_value(XDataValue::String("PNT-1".to_string()));
+        rec.add_value(XDataValue::Integer32(42));
+        assert!(host.write_record(h, rec));
+
+        let got = host.read_record(h, "DEMO_SURVEY").expect("record missing");
+        assert_eq!(got.values.len(), 2);
+        // APPID registered so the XDATA survives a DWG/DXF round-trip.
+        assert!(host.document().app_ids.contains("DEMO_SURVEY"));
+
+        // A second write replaces rather than duplicates the record.
+        let mut rec2 = ExtendedDataRecord::new("DEMO_SURVEY");
+        rec2.add_value(XDataValue::String("PNT-2".to_string()));
+        assert!(host.write_record(h, rec2));
+        let got = host.read_record(h, "DEMO_SURVEY").unwrap();
+        assert_eq!(got.values.len(), 1);
+
+        // Removal reports whether anything was dropped.
+        assert!(host.remove_record(h, "DEMO_SURVEY"));
+        assert!(host.read_record(h, "DEMO_SURVEY").is_none());
+        assert!(!host.remove_record(h, "DEMO_SURVEY"));
     }
 }
