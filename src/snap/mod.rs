@@ -88,10 +88,8 @@ pub struct Snapper {
     pub enabled: HashSet<SnapType>,
     /// World-space grid spacing.
     pub grid_spacing: f32,
-    /// Pixel-radius threshold for tracking / polar / extension pickup.
-    pub snap_radius_px: f32,
-    /// Pixel-radius threshold for object snapping (OSNAP). Kept smaller than
-    /// `snap_radius_px` so it is easy to click just outside a snap point.
+    /// Pixel-radius snap aperture, shared by OSNAP, tracking, polar and
+    /// extension so the catch distance is the same everywhere.
     pub osnap_radius_px: f32,
     /// Object Snap Tracking on/off (F11).
     pub otrack_enabled: bool,
@@ -119,7 +117,6 @@ impl Default for Snapper {
             snap_enabled: false,
             enabled,
             grid_spacing: 1.0,
-            snap_radius_px: CROSSHAIR_ARM,
             osnap_radius_px: CROSSHAIR_ARM * 0.25,
             otrack_enabled: false,
             tracking_points: Vec::new(),
@@ -266,7 +263,8 @@ impl Snapper {
         }
 
         let cursor_screen = world_to_screen(cursor_world, view_proj, bounds);
-        let r = self.snap_radius_px;
+        // Use the same aperture as OSNAP so the catch distance is uniform.
+        let r = self.osnap_radius_px;
         let screen_dist = |w: Vec3| {
             let s = world_to_screen(w, view_proj, bounds);
             ((s.x - cursor_screen.x).powi(2) + (s.y - cursor_screen.y).powi(2)).sqrt()
@@ -413,7 +411,6 @@ impl Snapper {
                 s
             },
             grid_spacing: self.grid_spacing,
-            snap_radius_px: self.snap_radius_px,
             osnap_radius_px: self.osnap_radius_px,
             otrack_enabled: false,
             tracking_points: Vec::new(),

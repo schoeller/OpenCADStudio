@@ -2319,7 +2319,7 @@ impl OpenCADStudio {
                                 self.polar_increment_deg,
                                 vp_mat,
                                 bounds,
-                                self.snapper.snap_radius_px,
+                                self.snapper.osnap_radius_px,
                             );
                         }
                     }
@@ -2528,7 +2528,7 @@ impl OpenCADStudio {
                                         self.polar_increment_deg,
                                         view_proj,
                                         bounds,
-                                        self.snapper.snap_radius_px,
+                                        self.snapper.osnap_radius_px,
                                     );
                                 }
                             }
@@ -3125,7 +3125,7 @@ impl OpenCADStudio {
                                     self.polar_increment_deg,
                                     vp_mat,
                                     bounds,
-                                    self.snapper.snap_radius_px,
+                                    self.snapper.osnap_radius_px,
                                 );
                             }
                         }
