@@ -1050,7 +1050,9 @@ impl OpenCADStudio {
         // Former pop-up windows render as overlays here, so they work on both
         // the native (single main window) and web builds.
         let base: Element<'_, Message> = match self.modal_content() {
-            Some(content) => crate::ui::modal::modal(composed, content, Message::CloseModal),
+            Some(content) => {
+                crate::ui::modal::modal(composed, content, Message::CloseModal, self.modal_offset)
+            }
             None => composed.into(),
         };
         // The colour picker is a nested modal: it stacks over whichever dialog
@@ -1064,10 +1066,42 @@ impl OpenCADStudio {
                 .width(iced::Length::Fixed(420.0))
                 .height(iced::Length::Fixed(470.0)),
                 Message::CloseColorPicker,
+                iced::Vector::ZERO,
             )
         } else {
             base
         }
+    }
+
+    /// Outer pixel size (content + title-bar/padding chrome) of the active
+    /// modal, used to clamp drag so it cannot be pushed off-screen. Mirrors the
+    /// `sized(..)` dimensions in [`Self::modal_content`]; keep the two in sync.
+    /// `None` has no active modal. About (content-sized) uses a safe estimate.
+    pub(crate) fn modal_outer_size(&self) -> Option<(f32, f32)> {
+        use super::ModalKind::*;
+        // Title bar (~26) + spacing (6) + frame padding (10·2) → ~52 vertical;
+        // frame padding → ~20 horizontal.
+        const EXTRA_W: f32 = 20.0;
+        const EXTRA_H: f32 = 52.0;
+        let (w, h) = match self.active_modal? {
+            About => (440, 360),
+            Shortcuts => (720, 520),
+            PluginManager => (520, 460),
+            UpdateNotice => (560, 460),
+            Layers => (900, 360),
+            PageSetup => (520, 460),
+            LayoutManager => (640, 320),
+            Plotstyle => (780, 540),
+            TextStyle => (860, 480),
+            MlStyle => (620, 420),
+            TableStyle => (620, 420),
+            MLeaderStyle => (560, 560),
+            DimStyle => (720, 560),
+            AssocPrompt => (440, 210),
+            Unsaved => (420, 160),
+            SaveDialog => (560, 480),
+        };
+        Some((w as f32 + EXTRA_W, h as f32 + EXTRA_H))
     }
 
     /// Build the currently-open modal dialog's content (Plan B), or `None`.

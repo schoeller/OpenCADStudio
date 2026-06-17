@@ -89,6 +89,10 @@ impl OpenCADStudio {
             _ => {}
         }
         self.active_modal = None;
+        // Recentre the next dialog and drop any in-progress drag.
+        self.modal_offset = iced::Vector::ZERO;
+        self.modal_drag_last = None;
+        self.modal_dragging = false;
     }
 
     pub fn update(&mut self, msg: Message) -> Task<Message> {
@@ -5374,6 +5378,38 @@ impl OpenCADStudio {
 
             Message::CloseModal => {
                 self.close_active_modal();
+                Task::none()
+            }
+            Message::ModalGrab => {
+                // Start a drag; the first ModalDragMove seeds the reference.
+                self.modal_dragging = true;
+                self.modal_drag_last = None;
+                Task::none()
+            }
+            Message::ModalDragMove(p) => {
+                if self.modal_dragging {
+                    if let Some(last) = self.modal_drag_last {
+                        self.modal_offset.x += p.x - last.x;
+                        self.modal_offset.y += p.y - last.y;
+                        // Clamp so the dialog stops at the window edge instead
+                        // of being squeezed (the off-centre padding shrinks the
+                        // dialog once it overlaps a border).
+                        if let Some((cw, ch)) = self.modal_outer_size() {
+                            let ww = self.vp_size.0 + 440.0;
+                            let wh = self.vp_size.1;
+                            let max_x = ((ww - cw) * 0.5).max(0.0);
+                            let max_y = ((wh - ch) * 0.5).max(0.0);
+                            self.modal_offset.x = self.modal_offset.x.clamp(-max_x, max_x);
+                            self.modal_offset.y = self.modal_offset.y.clamp(-max_y, max_y);
+                        }
+                    }
+                    self.modal_drag_last = Some(p);
+                }
+                Task::none()
+            }
+            Message::ModalDragRelease => {
+                self.modal_dragging = false;
+                self.modal_drag_last = None;
                 Task::none()
             }
 

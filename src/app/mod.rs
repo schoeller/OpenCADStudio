@@ -285,6 +285,14 @@ pub(super) struct OpenCADStudio {
     /// The open in-canvas modal dialog, if any (Plan B: shared overlay instead
     /// of OS windows).
     active_modal: Option<ModalKind>,
+    /// Pixel offset of the active modal from screen-centre (drag-to-move).
+    /// Reset to zero whenever a modal closes so each dialog opens centred.
+    modal_offset: iced::Vector,
+    /// Cursor position from the previous drag-move while the modal title bar is
+    /// held; `None` before the first move of a drag.
+    modal_drag_last: Option<Point>,
+    /// True while the modal title bar is held (a drag is in progress).
+    modal_dragging: bool,
     /// New-release notification window — opened on startup when the
     /// GitHub releases API reports a newer version than this build.
     /// First-launch "make Open CAD Studio the default for .dwg/.dxf?" prompt
@@ -999,6 +1007,12 @@ pub enum Message {
     AboutOpen,
     /// Close whatever in-canvas modal dialog is open (Plan B).
     CloseModal,
+    /// Title-bar pressed: begin dragging the active modal.
+    ModalGrab,
+    /// Cursor moved while dragging the modal title bar.
+    ModalDragMove(Point),
+    /// Title-bar released: stop dragging.
+    ModalDragRelease,
     AboutCopyInfo,
     // ── Plugin Manager window ───────────────────────────────────────────
     PluginManagerOpen,
@@ -1411,6 +1425,9 @@ impl OpenCADStudio {
             main_window: None,
             color_pick_target: None,
             active_modal: None,
+            modal_offset: iced::Vector::ZERO,
+            modal_drag_last: None,
+            modal_dragging: false,
             default_assoc_prompted: false,
             update_notice_version: None,
             update_notice_body: None,
