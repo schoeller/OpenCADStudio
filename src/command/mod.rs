@@ -11,7 +11,7 @@ use crate::scene::Scene;
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
 
-/// Domain object resolved under the cursor for C3D-style ObjectPick snapping.
+/// Domain object resolved under the cursor for ObjectPick snapping.
 #[derive(Clone, Copy, Debug)]
 pub struct ObjectPickHit {
     pub handle: Handle,
@@ -473,7 +473,7 @@ pub trait CadCommand: Send {
         None
     }
 
-    /// Hover label for C3D-style object acquisition (e.g. "Inlet" under cursor).
+    /// Hover label for object acquisition (e.g. "Inlet" under cursor).
     fn set_acquisition_hint(&mut self, _hint: Option<&str>) {}
 
     /// Called after `CmdResult::ReplaceEntity` is applied to the document.

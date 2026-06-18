@@ -2780,7 +2780,7 @@ impl OpenCADStudio {
                     let wo_f = glam::Vec3::new(wo_local[0] as f32, wo_local[1] as f32, wo_local[2] as f32);
                     let effective_wcs = effective + wo_f;
 
-                    // C3D-style orange object snap (plugin commands implement resolve_object_pick).
+                    // Orange object snap (plugin commands implement resolve_object_pick).
                     if needs_structure {
                         use crate::snap::{SnapResult, SnapType};
                         let pick = self.tabs[i].active_cmd.as_ref().and_then(|c| {

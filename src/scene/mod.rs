@@ -145,8 +145,8 @@ pub fn build_derived_caches(doc: &CadDocument) -> DerivedCaches {
     // Header `$EXTMIN`/`$EXTMAX` is the fast path, but it's untrustworthy:
     // the sentinel (1e20 / -1e20) when the writer never computed extents,
     // stale values when a drawing was edited and extents weren't refreshed,
-    // and Civil-3D-style top-level extents that span only an Insert's
-    // bounding box rather than the actual MSPACE geometry. Any of those
+    // and top-level extents that span only an Insert's bounding box rather
+    // than the actual MSPACE geometry. Any of those
     // leave the precision-preserving offset wrong, so direct MSPACE
     // entities render at huge magnitudes and f32 wires lose precision.
     //

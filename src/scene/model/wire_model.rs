@@ -79,11 +79,6 @@ impl WireModel {
     pub const WHITE: [f32; 4] = [1.00, 1.00, 1.00, 1.0];
     pub const CYAN: [f32; 4] = [0.25, 0.85, 1.00, 1.0];
     pub const SELECTED: [f32; 4] = [0.15, 0.55, 1.00, 1.0];
-    /// Object-acquisition highlight (structure / catchment hover); not yet wired.
-    #[allow(dead_code)]
-    pub const PICK_HIGHLIGHT: [f32; 4] = [0.95, 0.50, 0.08, 1.0];
-    #[allow(dead_code)]
-    pub const PICK_HIGHLIGHT_DIM: [f32; 4] = [0.95, 0.50, 0.08, 0.45];
     /// Sentinel AABB that never rejects any snap query.
     pub const UNBOUNDED_AABB: [f32; 4] = [
         f32::NEG_INFINITY,

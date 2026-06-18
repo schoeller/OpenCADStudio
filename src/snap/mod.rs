@@ -31,7 +31,7 @@ pub enum SnapType {
     ApparentIntersection,
     Parallel,
     Grid,
-    /// C3D-style object acquisition (storm structure / network pick) — orange marker.
+    /// Object acquisition (domain-object pick, e.g. network structure) — orange marker.
     ObjectPick,
 }
 

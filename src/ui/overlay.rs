@@ -501,7 +501,7 @@ impl canvas::Program<Message> for SelectionCanvas {
         // ── Snap marker ───────────────────────────────────────────────────
         if let Some((sp, snap_type)) = self.snap {
             let (r, g, b) = if snap_type == SnapType::ObjectPick {
-                (0.95_f32, 0.50, 0.08) // C3D-style orange object snap
+                (0.95_f32, 0.50, 0.08) // orange object-snap marker
             } else {
                 (1.0, 0.9, 0.1) // classic yellow OSNAP
             };
@@ -513,7 +513,7 @@ impl canvas::Program<Message> for SelectionCanvas {
             };
             match snap_type {
                 SnapType::ObjectPick => {
-                    // Target box + center dot (Civil 3D acquisition glyph).
+                    // Target box + center dot (object-acquisition glyph).
                     let h = 7.0_f32;
                     let rect = canvas::Path::rectangle(
                         Point::new(sp.x - h, sp.y - h),
