@@ -976,8 +976,7 @@ impl OpenCADStudio {
                 }
                 #[cfg(target_arch = "wasm32")]
                 {
-                    let _ = version;
-                    match crate::io::save_to_bytes(&self.tabs[i].scene.document, ext) {
+                    match crate::io::save_to_bytes(&self.tabs[i].scene.document, ext, version) {
                         Ok(bytes) => {
                             crate::sys::download_bytes(&filename, &bytes);
                             self.tabs[i].dirty = false;

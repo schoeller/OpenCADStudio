@@ -357,10 +357,17 @@ pub fn save(doc: &CadDocument, path: &Path) -> Result<(), String> {
 }
 
 /// Serialize a document to an in-memory byte buffer, format chosen by `ext`
-/// (`dxf` → DXF, anything else → DWG). Used by the web build, which hands the
-/// bytes to a browser download instead of writing a path.
-pub fn save_to_bytes(doc: &CadDocument, ext: &str) -> Result<Vec<u8>, String> {
+/// (`dxf` → DXF, anything else → DWG) at the given DXF version (overriding
+/// `doc.version`). Used by the web build, which hands the bytes to a browser
+/// download instead of writing a path — the byte-buffer counterpart to
+/// [`save_as_version`].
+pub fn save_to_bytes(
+    doc: &CadDocument,
+    ext: &str,
+    version: acadrust::DxfVersion,
+) -> Result<Vec<u8>, String> {
     let mut doc = doc.clone();
+    doc.version = version;
     sync_current_styles_on_save(&mut doc);
     match ext.to_lowercase().as_str() {
         "dxf" => DxfWriter::new(&doc).write_to_vec().map_err(|e| e.to_string()),
