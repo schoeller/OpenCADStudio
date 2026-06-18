@@ -2760,18 +2760,27 @@ impl OpenCADStudio {
                                 .snap_result
                                 .map(|s| self.tabs[i].scene.paper_to_model(s.world))
                                 .unwrap_or(cursor_world);
-                            if let Some(base) = self.last_point {
-                                if self.ortho_mode {
-                                    pt = ortho_constrain(pt, base);
-                                } else if self.polar_mode {
-                                    pt = polar_constrain_near(
-                                        pt,
-                                        base,
-                                        self.polar_increment_deg,
-                                        view_proj,
-                                        bounds,
-                                        self.snapper.osnap_radius_px,
-                                    );
+                            // Object snap wins over ortho/polar: a snapped point
+                            // is taken as-is so it isn't pulled onto the ortho
+                            // axis. Grid snap is positional, not an object snap,
+                            // so it still combines with ortho/polar. (#132)
+                            let osnap_locked = self.tabs[i]
+                                .snap_result
+                                .is_some_and(|s| s.snap_type != crate::snap::SnapType::Grid);
+                            if !osnap_locked {
+                                if let Some(base) = self.last_point {
+                                    if self.ortho_mode {
+                                        pt = ortho_constrain(pt, base);
+                                    } else if self.polar_mode {
+                                        pt = polar_constrain_near(
+                                            pt,
+                                            base,
+                                            self.polar_increment_deg,
+                                            view_proj,
+                                            bounds,
+                                            self.snapper.osnap_radius_px,
+                                        );
+                                    }
                                 }
                             }
                             pt
@@ -3360,18 +3369,24 @@ impl OpenCADStudio {
                             if self.tabs[i].active_ucs.is_none() {
                                 pt.z = 0.0;
                             }
-                        } else if let Some(base) = self.last_point {
-                            if self.ortho_mode {
-                                pt = ortho_constrain(pt, base);
-                            } else if self.polar_mode {
-                                pt = polar_constrain_near(
-                                    pt,
-                                    base,
-                                    self.polar_increment_deg,
-                                    vp_mat,
-                                    bounds,
-                                    self.snapper.osnap_radius_px,
-                                );
+                        } else if !snap_hit
+                            .is_some_and(|s| s.snap_type != crate::snap::SnapType::Grid)
+                        {
+                            // Object snap wins over ortho/polar — a snapped point
+                            // commits as-is. Grid snap still combines. (#132)
+                            if let Some(base) = self.last_point {
+                                if self.ortho_mode {
+                                    pt = ortho_constrain(pt, base);
+                                } else if self.polar_mode {
+                                    pt = polar_constrain_near(
+                                        pt,
+                                        base,
+                                        self.polar_increment_deg,
+                                        vp_mat,
+                                        bounds,
+                                        self.snapper.osnap_radius_px,
+                                    );
+                                }
                             }
                         }
                         pt
