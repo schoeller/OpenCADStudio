@@ -600,6 +600,9 @@ impl OpenCADStudio {
                     // Recreate any layer / linetype / style the copied entities
                     // need but this drawing lacks (cross-drawing paste). (#129)
                     self.merge_clipboard_deps(i);
+                    // …and any block definition the pasted INSERTs reference,
+                    // else a block reference renders empty. (#135)
+                    self.merge_clipboard_blocks(i);
                     let count = self.clipboard.len();
                     let new_handles: Vec<Handle> = self
                         .clipboard
@@ -1765,6 +1768,25 @@ impl OpenCADStudio {
                 r.set_handle(doc.allocate_handle());
                 let _ = doc.dim_styles.add(r);
             }
+        }
+    }
+
+    /// Recreate any block definition the pasted INSERTs reference but tab
+    /// `i`'s document lacks (cross-drawing paste), so the block reference
+    /// renders its geometry instead of nothing. No-op for same-document
+    /// pastes. (#135)
+    pub(super) fn merge_clipboard_blocks(&mut self, i: usize) {
+        if self.clipboard_deps.blocks.is_empty() {
+            return;
+        }
+        let blocks = self.clipboard_deps.blocks.clone();
+        for def in blocks {
+            if self.tabs[i].scene.document.block_records.get(&def.name).is_some() {
+                continue;
+            }
+            self.tabs[i]
+                .scene
+                .define_block_raw(&def.name, def.base_point, def.entities);
         }
     }
 

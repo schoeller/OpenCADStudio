@@ -3820,6 +3820,51 @@ impl Scene {
         Ok(())
     }
 
+    /// Recreate a block definition verbatim — the entities are already in
+    /// block-local coordinates (unlike `define_block_from_owned_entities`,
+    /// which folds in a base offset). No-op if the block already exists.
+    /// Used when pasting an INSERT whose block this drawing lacks. (#135)
+    pub fn define_block_raw(
+        &mut self,
+        name: &str,
+        base_point: acadrust::types::Vector3,
+        entities: Vec<EntityType>,
+    ) {
+        if name.is_empty() || self.document.block_records.get(name).is_some() {
+            return;
+        }
+        let next = self.document.next_handle();
+        let br_handle = Handle::new(next);
+        let block_handle = Handle::new(next + 1);
+        let end_handle = Handle::new(next + 2);
+
+        let mut block_record = acadrust::tables::BlockRecord::new(name);
+        block_record.handle = br_handle;
+        block_record.block_entity_handle = block_handle;
+        block_record.block_end_handle = end_handle;
+        if self.document.block_records.add(block_record).is_err() {
+            return;
+        }
+
+        let mut block = Block::new(name, base_point);
+        block.common.handle = block_handle;
+        block.common.owner_handle = br_handle;
+        let _ = self.document.add_entity(EntityType::Block(block));
+
+        let mut block_end = BlockEnd::new();
+        block_end.common.handle = end_handle;
+        block_end.common.owner_handle = br_handle;
+        let _ = self.document.add_entity(EntityType::BlockEnd(block_end));
+
+        for mut entity in entities {
+            Self::reset_clone_subhandles(&mut self.document, &mut entity);
+            entity.common_mut().handle = Handle::NULL;
+            entity.common_mut().owner_handle = br_handle;
+            let _ = self.document.add_entity(entity);
+        }
+        self.bump_geometry();
+    }
+
     fn synced_hatch_models(&self) -> Vec<HatchModel> {
         let layout_block = self.current_layout_block_handle();
         let hatch_offset = if self.current_layout == "Model" {

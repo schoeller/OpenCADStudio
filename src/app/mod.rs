@@ -651,6 +651,21 @@ pub struct ClipboardDeps {
     pub linetypes: Vec<acadrust::tables::LineType>,
     pub text_styles: Vec<acadrust::tables::TextStyle>,
     pub dim_styles: Vec<acadrust::tables::DimStyle>,
+    /// Block definitions the copied INSERTs reference (transitively),
+    /// snapshotted from the source drawing. Recreated on paste so a block
+    /// reference doesn't render empty in a drawing that lacks the
+    /// definition. (#135)
+    pub blocks: Vec<BlockDef>,
+}
+
+/// A captured block definition: its base point and the entities it owns
+/// (in block-local coordinates), minus the structural Block/BlockEnd
+/// markers which are rebuilt on paste.
+#[derive(Clone)]
+pub struct BlockDef {
+    pub name: String,
+    pub base_point: acadrust::types::Vector3,
+    pub entities: Vec<acadrust::EntityType>,
 }
 
 impl ClipboardDeps {
@@ -704,7 +719,62 @@ impl ClipboardDeps {
             linetypes: ltypes.iter().filter_map(|n| doc.line_types.get(n).cloned()).collect(),
             text_styles: tstyles.iter().filter_map(|n| doc.text_styles.get(n).cloned()).collect(),
             dim_styles: dstyles.iter().filter_map(|n| doc.dim_styles.get(n).cloned()).collect(),
+            blocks: Self::capture_blocks(doc, entities),
         }
+    }
+
+    /// Snapshot every block definition the `entities` reference through an
+    /// INSERT, walking nested INSERTs transitively. Model/paper space and
+    /// xref blocks are skipped — those aren't portable definitions.
+    fn capture_blocks(doc: &acadrust::CadDocument, entities: &[acadrust::EntityType]) -> Vec<BlockDef> {
+        use acadrust::EntityType;
+        use rustc_hash::FxHashSet;
+        let mut seen: FxHashSet<String> = FxHashSet::default();
+        let mut queue: Vec<String> = Vec::new();
+        for e in entities {
+            if let EntityType::Insert(ins) = e {
+                if seen.insert(ins.block_name.clone()) {
+                    queue.push(ins.block_name.clone());
+                }
+            }
+        }
+        let mut defs = Vec::new();
+        while let Some(name) = queue.pop() {
+            let Some(br) = doc.block_records.get(&name) else {
+                continue;
+            };
+            if name.starts_with("*Model_Space")
+                || name.starts_with("*Paper_Space")
+                || br.flags.is_xref
+            {
+                continue;
+            }
+            let base_point = match doc.get_entity(br.block_entity_handle) {
+                Some(EntityType::Block(b)) => b.base_point,
+                _ => acadrust::types::Vector3::ZERO,
+            };
+            let mut owned = Vec::new();
+            for &eh in &br.entity_handles {
+                let Some(e) = doc.get_entity(eh) else {
+                    continue;
+                };
+                if matches!(e, EntityType::Block(_) | EntityType::BlockEnd(_)) {
+                    continue;
+                }
+                if let EntityType::Insert(ins) = e {
+                    if seen.insert(ins.block_name.clone()) {
+                        queue.push(ins.block_name.clone());
+                    }
+                }
+                owned.push(e.clone());
+            }
+            defs.push(BlockDef {
+                name,
+                base_point,
+                entities: owned,
+            });
+        }
+        defs
     }
 
     pub fn is_empty(&self) -> bool {
@@ -712,6 +782,7 @@ impl ClipboardDeps {
             && self.linetypes.is_empty()
             && self.text_styles.is_empty()
             && self.dim_styles.is_empty()
+            && self.blocks.is_empty()
     }
 }
 
