@@ -15,6 +15,25 @@ const TRI_RIGHT: &[u8] = include_bytes!("../../assets/icons/ui/tri_right.svg");
 const UNDO: &[u8] = include_bytes!("../../assets/icons/ui/undo.svg");
 const REDO: &[u8] = include_bytes!("../../assets/icons/ui/redo.svg");
 
+// OSNAP marker symbols. Rendered as SVG (not Unicode glyphs) so the snap menu
+// shows the right shapes on the web build, whose bundled Fira Sans lacks the
+// geometric glyphs and rendered them as tofu boxes. (#138)
+const OSNAP_ENDPOINT: &[u8] = include_bytes!("../../assets/icons/osnap/endpoint.svg");
+const OSNAP_MIDPOINT: &[u8] = include_bytes!("../../assets/icons/osnap/midpoint.svg");
+const OSNAP_CENTER: &[u8] = include_bytes!("../../assets/icons/osnap/center.svg");
+const OSNAP_NODE: &[u8] = include_bytes!("../../assets/icons/osnap/node.svg");
+const OSNAP_QUADRANT: &[u8] = include_bytes!("../../assets/icons/osnap/quadrant.svg");
+const OSNAP_INTERSECTION: &[u8] = include_bytes!("../../assets/icons/osnap/intersection.svg");
+const OSNAP_EXTENSION: &[u8] = include_bytes!("../../assets/icons/osnap/extension.svg");
+const OSNAP_INSERTION: &[u8] = include_bytes!("../../assets/icons/osnap/insertion.svg");
+const OSNAP_PERPENDICULAR: &[u8] =
+    include_bytes!("../../assets/icons/osnap/perpendicular.svg");
+const OSNAP_TANGENT: &[u8] = include_bytes!("../../assets/icons/osnap/tangent.svg");
+const OSNAP_NEAREST: &[u8] = include_bytes!("../../assets/icons/osnap/nearest.svg");
+const OSNAP_APPARENT: &[u8] = include_bytes!("../../assets/icons/osnap/apparent.svg");
+const OSNAP_PARALLEL: &[u8] = include_bytes!("../../assets/icons/osnap/parallel.svg");
+const OSNAP_GRID: &[u8] = include_bytes!("../../assets/icons/osnap/grid.svg");
+
 const LAY_ON: &[u8] = include_bytes!("../../assets/icons/layers/layon.svg");
 const LAY_OFF: &[u8] = include_bytes!("../../assets/icons/layers/layoff.svg");
 const LAY_FRZ: &[u8] = include_bytes!("../../assets/icons/layers/layfrz.svg");
@@ -80,6 +99,29 @@ pub fn raw<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
         .width(size)
         .height(size)
         .into()
+}
+
+/// SVG bytes for an OSNAP mode's marker symbol, for the snap menu. (#138)
+pub fn osnap(snap: crate::snap::SnapType) -> &'static [u8] {
+    use crate::snap::SnapType as S;
+    match snap {
+        S::Endpoint => OSNAP_ENDPOINT,
+        S::Midpoint => OSNAP_MIDPOINT,
+        S::Center => OSNAP_CENTER,
+        S::Node => OSNAP_NODE,
+        S::Quadrant => OSNAP_QUADRANT,
+        S::Intersection => OSNAP_INTERSECTION,
+        S::Extension => OSNAP_EXTENSION,
+        S::Insertion => OSNAP_INSERTION,
+        S::Perpendicular => OSNAP_PERPENDICULAR,
+        S::Tangent => OSNAP_TANGENT,
+        S::Nearest => OSNAP_NEAREST,
+        S::ApparentIntersection => OSNAP_APPARENT,
+        S::Parallel => OSNAP_PARALLEL,
+        S::Grid => OSNAP_GRID,
+        // Not shown in the snap menu; fall back to a neutral marker.
+        S::ObjectPick => OSNAP_NEAREST,
+    }
 }
 
 /// Layer visibility icon bytes (on / off).

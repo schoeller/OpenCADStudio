@@ -36,8 +36,8 @@ pub fn snap_popup_overlay<'a>(snapper: &'a Snapper, right_offset: f32) -> Elemen
 
     // Snap mode rows
     let mut rows: Vec<Element<'_, Message>> = Vec::new();
-    for &(snap_type, icon, label) in ALL_SNAP_MODES {
-        rows.push(snap_row(snap_type, icon, label, snapper.is_on(snap_type)));
+    for &(snap_type, _glyph, label) in ALL_SNAP_MODES {
+        rows.push(snap_row(snap_type, label, snapper.is_on(snap_type)));
     }
 
     // "Object Snap Settings…" footer
@@ -101,18 +101,18 @@ pub fn snap_popup_overlay<'a>(snapper: &'a Snapper, right_offset: f32) -> Elemen
 
 // ── Individual snap row ───────────────────────────────────────────────────
 
-fn snap_row<'a>(
-    snap_type: SnapType,
-    icon: &'a str,
-    label: &'a str,
-    active: bool,
-) -> Element<'a, Message> {
+fn snap_row<'a>(snap_type: SnapType, label: &'a str, active: bool) -> Element<'a, Message> {
     let checkmark = crate::ui::icons::check_cell(active, CHECK_COLOR);
 
-    let icon_el = text(icon)
-        .size(11)
-        .color(ICON_COLOR)
-        .width(Length::Fixed(16.0));
+    // SVG marker (not a Unicode glyph) so the symbols render on the web build,
+    // whose bundled font lacks them and showed tofu boxes. (#138)
+    let icon_el = container(crate::ui::icons::tinted::<Message>(
+        crate::ui::icons::osnap(snap_type),
+        13.0,
+        ICON_COLOR,
+    ))
+    .width(Length::Fixed(16.0))
+    .align_x(iced::Center);
 
     let label_el = text(label)
         .size(11)
