@@ -71,11 +71,9 @@ impl DimBaselineCommand {
         rotation: f64,
         dimdli: f32,
     ) -> Self {
-        let axis = if rotation.abs() < 0.1 {
-            Vec3::X
-        } else {
-            Vec3::Y
-        };
+        // Measurement axis = the base dim's rotation angle (any angle, incl. a
+        // UCS-aligned one), not a world horizontal/vertical.
+        let axis = Vec3::new(rotation.cos() as f32, rotation.sin() as f32, 0.0);
         let perp = Vec3::new(-axis.y, axis.x, 0.0);
         let base_offset = (definition_point - p1).dot(perp);
         let dimdli = if dimdli.abs() < 1e-6 {

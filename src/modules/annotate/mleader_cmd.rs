@@ -8,7 +8,7 @@
 use acadrust::entities::MultiLeader;
 use acadrust::types::Vector3;
 use acadrust::EntityType;
-use glam::Vec3;
+use glam::{Mat4, Vec3};
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -27,17 +27,22 @@ pub fn tool() -> ToolDef {
 
 pub struct MLeaderCommand {
     verts: Vec<Vec3>,
+    ucs: Mat4,
 }
 
 impl MLeaderCommand {
     pub fn new() -> Self {
-        Self { verts: Vec::new() }
+        Self { verts: Vec::new(), ucs: Mat4::IDENTITY }
     }
 }
 
 impl CadCommand for MLeaderCommand {
     fn name(&self) -> &'static str {
         "MLEADER"
+    }
+
+    fn set_ucs(&mut self, ucs: Mat4) {
+        self.ucs = ucs;
     }
 
     fn prompt(&self) -> String {
@@ -62,7 +67,7 @@ impl CadCommand for MLeaderCommand {
         }
         // Place the leader with empty text, then open the in-place MText editor
         // so the user types the annotation into the rich editor.
-        let ml = build_mleader("", &self.verts);
+        let ml = build_mleader("", &self.verts, self.ucs);
         CmdResult::CommitAndEditText(EntityType::MultiLeader(ml))
     }
 
@@ -86,7 +91,7 @@ fn v3(p: Vec3) -> Vector3 {
     Vector3::new(p.x as f64, p.y as f64, p.z as f64)
 }
 
-fn build_mleader(text: &str, verts: &[Vec3]) -> MultiLeader {
+fn build_mleader(text: &str, verts: &[Vec3], ucs: Mat4) -> MultiLeader {
     // Last vertex = content/text location; remaining = leader line points
     let (leader_pts, content_pt) = verts.split_at(verts.len() - 1);
     let content_pt = content_pt[0];
@@ -103,26 +108,33 @@ fn build_mleader(text: &str, verts: &[Vec3]) -> MultiLeader {
     ml.dogleg_length = 2.5;
 
     const DOGLEG: f64 = 2.5;
-    // Which side of the leader the text sits on, from the last leader
-    // segment's horizontal direction. The landing is always horizontal.
+    // "Horizontal" landing + text run along the active UCS X axis (identity =
+    // world), so the annotation reads square to the user's coordinate system.
+    let ux = ucs.transform_vector3(Vec3::X).normalize_or(Vec3::X);
+    // Which side of the leader the text sits on, measured along the UCS X axis.
     let last_leader = leader_pts.last().copied().unwrap_or(content_pt);
-    let to_right = (content_pt.x - last_leader.x) >= 0.0;
+    let to_right = (content_pt - last_leader).dot(ux) >= 0.0;
     let sign = if to_right { 1.0 } else { -1.0 };
+    let landing = ux * (sign as f32);
+
+    // Text + landing read along the UCS X axis. text_direction is what the
+    // renderer consults first, so set both.
+    ml.context.text_rotation = (ux.y as f64).atan2(ux.x as f64);
+    ml.context.text_direction = Vector3::new(ux.x as f64, ux.y as f64, 0.0);
 
     if let Some(root) = ml.context.leader_roots.first_mut() {
-        // Leader ends at the clicked point; a horizontal landing runs from
-        // there toward the text.
-        root.direction = Vector3::new(sign, 0.0, 0.0);
+        // Leader ends at the clicked point; the landing runs from there toward
+        // the text along the UCS X axis.
+        root.direction = Vector3::new(landing.x as f64, landing.y as f64, 0.0);
         root.connection_point = content_v3;
         root.landing_distance = DOGLEG;
     }
 
     // Seed the text one landing-length past the leader end, on the side the
-    // user dragged toward. The actual horizontal alignment and the landing are
-    // recomputed every frame from the text grip's position relative to the
-    // leader, so moving the arrow or the text re-mirrors the layout.
+    // user dragged toward, offset along the UCS X axis.
+    let off = landing * DOGLEG as f32;
     ml.context.text_location =
-        Vector3::new(content_v3.x + sign * DOGLEG, content_v3.y, content_v3.z);
+        Vector3::new(content_v3.x + off.x as f64, content_v3.y + off.y as f64, content_v3.z);
 
     ml
 }

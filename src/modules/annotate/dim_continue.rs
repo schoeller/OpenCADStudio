@@ -58,12 +58,9 @@ impl DimContinueCommand {
     /// `definition_point` — where the dim line was placed (defines perpendicular offset).
     /// `rotation` — 0.0 = horizontal dim, PI/2 = vertical dim.
     pub fn from_base(p1: Vec3, p2: Vec3, definition_point: Vec3, rotation: f64) -> Self {
-        // Axis unit vector along the measurement direction.
-        let axis = if rotation.abs() < 0.1 {
-            Vec3::X
-        } else {
-            Vec3::Y
-        };
+        // Axis unit vector along the measurement direction — the base dim's
+        // rotation angle (any angle, incl. a UCS-aligned one), not a world H/V.
+        let axis = Vec3::new(rotation.cos() as f32, rotation.sin() as f32, 0.0);
         // Perpendicular unit vector toward the dim line.
         let perp = Vec3::new(-axis.y, axis.x, 0.0);
         let dim_offset = (definition_point - p1).dot(perp);

@@ -217,6 +217,17 @@ impl DocumentTab {
         )
     }
 
+    /// World-space rotation angle (radians) of the active UCS X axis — the
+    /// default rotation for new text-bearing objects so their text aligns to
+    /// the user's coordinate system. Zero outside model space / with no UCS.
+    pub(super) fn ucs_rotation_angle(&self) -> f64 {
+        if self.scene.current_layout != "Model" {
+            return 0.0;
+        }
+        let (_, x, ..) = self.ucs_xform().axes();
+        (x.y as f64).atan2(x.x as f64)
+    }
+
     /// Grid origin (render/wire space) and UCS→world rotation for grid snap and
     /// the grid overlay. Identity / origin-at-zero outside model space.
     pub(super) fn ucs_grid_basis(&self) -> (glam::Vec3, glam::Mat4) {

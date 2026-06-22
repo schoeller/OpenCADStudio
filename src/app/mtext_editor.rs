@@ -632,7 +632,7 @@ impl super::OpenCADStudio {
         let i = self.active_tab;
         let Some(ed) = self.mtext_editor.take() else { return false };
         let body_empty = ed.content.text().trim().is_empty();
-        let mt = ed.build_mtext();
+        let mut mt = ed.build_mtext();
         if body_empty {
             // Empty content: drop a new entity; leave an edited one untouched.
             self.refresh_properties();
@@ -661,6 +661,8 @@ impl super::OpenCADStudio {
             self.tabs[i].scene.bump_geometry();
             self.tabs[i].dirty = true;
         } else {
+            // Align new MText to the active UCS (text runs along the UCS X axis).
+            mt.rotation = self.tabs[i].ucs_rotation_angle();
             self.push_undo_snapshot(i, "MTEXT");
             self.commit_entity(EntityType::MText(mt));
             self.tabs[i].dirty = true;

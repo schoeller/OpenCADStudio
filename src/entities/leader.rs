@@ -65,7 +65,19 @@ fn to_truck(leader: &Leader) -> TruckEntity {
     if leader.hookline_enabled && verts.len() >= 2 {
         let last = verts.last().unwrap();
         let prev = &verts[verts.len() - 2];
-        let sign = if (last.x - prev.x) >= 0.0 {
+        // Landing runs along the leader's horizontal direction (UCS X for
+        // UCS-placed leaders, world X otherwise), on the side the leader
+        // approaches from.
+        let (hx, hy) = {
+            let h = leader.horizontal_direction;
+            let l = (h.x * h.x + h.y * h.y).sqrt();
+            if l > 1e-9 {
+                (h.x / l, h.y / l)
+            } else {
+                (1.0, 0.0)
+            }
+        };
+        let sign = if (last.x - prev.x) * hx + (last.y - prev.y) * hy >= 0.0 {
             1.0_f64
         } else {
             -1.0_f64
@@ -74,7 +86,11 @@ fn to_truck(leader: &Leader) -> TruckEntity {
         let last_f = p3(last);
         points.push(nan);
         points.push(last_f);
-        points.push([last_f[0] + sign * len, last_f[1], last_f[2]]);
+        points.push([
+            last_f[0] + sign * len * hx,
+            last_f[1] + sign * len * hy,
+            last_f[2],
+        ]);
     }
 
     TruckEntity {

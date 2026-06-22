@@ -225,6 +225,8 @@ impl super::OpenCADStudio {
             if !cur_style.is_empty() {
                 t.style = cur_style;
             }
+            // Align new text to the active UCS (baseline along the UCS X axis).
+            t.rotation = self.tabs[i].ucs_rotation_angle();
             self.push_undo_snapshot(i, "TEXT");
             self.commit_entity(EntityType::Text(t));
             self.tabs[i].dirty = true;

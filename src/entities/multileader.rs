@@ -102,11 +102,22 @@ fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckE
         .copied()
         .or_else(|| ml.context.leader_roots.first().map(|r| r.connection_point))
         .unwrap_or(text_loc);
-    let text_sign: f64 = if text_loc.x >= leader_ref.x {
-        1.0
-    } else {
-        -1.0
+    // Reading direction of the text / landing — the stored text_direction
+    // (UCS X for UCS-placed leaders, world X otherwise), so the whole text-side
+    // layout follows the UCS instead of world horizontal.
+    let (tdx, tdy) = {
+        let td = ml.context.text_direction;
+        let l = (td.x * td.x + td.y * td.y).sqrt();
+        if l > 1e-9 {
+            (td.x / l, td.y / l)
+        } else {
+            let a = ml.context.text_rotation;
+            (a.cos(), a.sin())
+        }
     };
+    // Which side of the leader the text sits on, measured along that direction.
+    let rel_dot = (text_loc.x - leader_ref.x) * tdx + (text_loc.y - leader_ref.y) * tdy;
+    let text_sign: f64 = if rel_dot >= 0.0 { 1.0 } else { -1.0 };
 
     // Lay the text out once, up front: its width fixes where the landing meets
     // the text. The same layout is reused below to emit the glyph strokes.
@@ -164,7 +175,11 @@ fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckE
     };
     // text_location is the leader-facing (near) edge; the landing runs one
     // dogleg from there back toward the leader.
-    let landing_pt = [text_loc.x - text_sign * dogleg, text_loc.y, text_loc.z];
+    let landing_pt = [
+        text_loc.x - text_sign * dogleg * tdx,
+        text_loc.y - text_sign * dogleg * tdy,
+        text_loc.z,
+    ];
 
     for root in &ml.context.leader_roots {
         let cp = &root.connection_point;
