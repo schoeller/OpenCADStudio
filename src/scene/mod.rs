@@ -487,6 +487,10 @@ pub struct ViewportInstance {
     pub render_mode: acadrust::entities::ViewportRenderMode,
     /// `true` when this is the viewport receiving cursor input.
     pub active: bool,
+    /// `true` when this view's grid is switched on — drives `grid_views`, so the
+    /// grid overlay enumerates the exact same sub-views (tile or floating
+    /// viewport) the renderer does, instead of a parallel copy.
+    pub grid_on: bool,
     /// `true` for the full-canvas paper "sheet" viewport — the layout's own
     /// view (paper-space entities, top-locked), the paper equivalent of the
     /// Model view. Floating content viewports overlay it.
@@ -645,6 +649,46 @@ fn camera_pan_invariant_hash(c: &Camera, wpp: Option<f32>) -> u64 {
 #[inline]
 fn aabb_contains(outer: [f32; 4], inner: [f32; 4]) -> bool {
     outer[0] <= inner[0] && outer[1] <= inner[1] && outer[2] >= inner[2] && outer[3] >= inner[3]
+}
+
+/// World-XY rectangle the model camera currently sees, expanded by `margin`
+/// (1.0 = tight), as `[min_x, min_y, max_x, max_y]` for the entity R-tree cull.
+///
+/// The screen is a rectangle in the camera's right/up basis, not the world
+/// axes — under a view twist or yaw that rectangle is rotated in world XY, so
+/// projecting its four corners and taking their bounds gives the correct
+/// enclosing box. A naive `target ± (w, h)` box (world-axis aligned) under-
+/// covers a rotated view and culls the geometry that lands in the rotated
+/// corners.
+///
+/// Returns `None` for a tilted (non-plan) view, where the view direction is
+/// not vertical and a flat XY box cannot bound the visible region (depth
+/// collapses onto the plane); callers then skip the frustum cull rather than
+/// wrongly hide geometry.
+fn view_cull_aabb(cam: &Camera, aspect: f32, margin: f32) -> Option<[f32; 4]> {
+    // Plan view ⇔ line of sight is (near) vertical. Anything else can't be
+    // bounded by a single world-XY rectangle.
+    let fwd = cam.rotation * glam::Vec3::Z;
+    if fwd.z.abs() < 0.999 {
+        return None;
+    }
+    let h = cam.ortho_size();
+    let w = h * aspect.max(0.01);
+    let right = cam.rotation * glam::Vec3::X;
+    let up = cam.rotation * glam::Vec3::Y;
+    let c = cam.target;
+    let (mut min_x, mut min_y) = (f32::INFINITY, f32::INFINITY);
+    let (mut max_x, mut max_y) = (f32::NEG_INFINITY, f32::NEG_INFINITY);
+    for (sw, sh) in [(-w, -h), (w, -h), (-w, h), (w, h)] {
+        let p = c + right * sw + up * sh;
+        min_x = min_x.min(p.x);
+        max_x = max_x.max(p.x);
+        min_y = min_y.min(p.y);
+        max_y = max_y.max(p.y);
+    }
+    let (cx, cy) = ((min_x + max_x) * 0.5, (min_y + max_y) * 0.5);
+    let (hw, hh) = ((max_x - min_x) * 0.5 * margin, (max_y - min_y) * 0.5 * margin);
+    Some([cx - hw, cy - hh, cx + hw, cy + hh])
 }
 
 pub struct Scene {
@@ -1900,13 +1944,13 @@ impl Scene {
         // so zoom (which changes the signature) costs exactly as before.
         let pan_sig = camera_pan_invariant_hash(cam, wpp);
         // Exact visible rect (margin 1.0) the reused wires must still cover.
+        // A tilted view returns no XY box (cull disabled) → require the cached
+        // region to be the full plane, so we only reuse a full tessellation.
+        let full = [f32::NEG_INFINITY, f32::NEG_INFINITY, f32::INFINITY, f32::INFINITY];
         let need_region = if self.camera_generation == 0 {
-            [f32::NEG_INFINITY, f32::NEG_INFINITY, f32::INFINITY, f32::INFINITY]
+            full
         } else {
-            let h = cam.ortho_size();
-            let w = h * cam_aspect.max(0.01);
-            let (cx, cy) = (cam.target.x, cam.target.y);
-            [cx - w, cy - h, cx + w, cy + h]
+            view_cull_aabb(cam, cam_aspect, 1.0).unwrap_or(full)
         };
         {
             let cache = self.model_tile_wire_cache.borrow();
@@ -1924,14 +1968,12 @@ impl Scene {
         }
         // Miss → cull/tessellate to the 1.25×-margin region (unchanged cost)
         // and remember that region for the pan-reuse test above.
+        // A tilted view yields no XY box → `None` = cull nothing (full tess),
+        // which is correct, just heavier, for the less common 3D/elevation case.
         let tess_region = if self.camera_generation == 0 {
             None
         } else {
-            let h = cam.ortho_size();
-            let w = h * cam_aspect.max(0.01);
-            let margin = 1.25_f32;
-            let (cx, cy) = (cam.target.x, cam.target.y);
-            Some([cx - w * margin, cy - h * margin, cx + w * margin, cy + h * margin])
+            view_cull_aabb(cam, cam_aspect, 1.25)
         };
         let block = self.model_space_block_handle();
         let t_tess = iced::time::Instant::now();
@@ -3334,62 +3376,18 @@ impl Scene {
             let view_right = cam_frame.rotation * glam::Vec3::X;
             let view_up = cam_frame.rotation * glam::Vec3::Y;
 
-            // ── Scale, target, view_center — saved-view-then-fallback ─────
-            //
-            // Honor the file's saved view (view_target + view_center +
-            // view_height) whenever the WCS region it points at overlaps
-            // model content. Some DWG files (typical for AutoCAD
-            // viewports the user never explicitly panned/zoomed into)
-            // arrive with view_target = (0, 0, 0) and a stale view_center
-            // pointing at empty WCS — in that case AutoCAD silently
-            // auto-fits to the model on first display; mirror that so
-            // UTM-scale drawings don't open with blank viewports.
-            let mut effective_view_center = (vp.view_center.x, vp.view_center.y);
-            let mut effective_view_height = vp.view_height as f32;
-
-            // Project the saved view's WCS rect and test against
-            // `world_offset`-centered IQR cluster (`local_extent_max`).
-            let saved_center_wcs_x = vp.view_target.x + vp.view_center.x;
-            let saved_center_wcs_y = vp.view_target.y + vp.view_center.y;
-            let saved_half_h = (effective_view_height as f64) * 0.5;
-            let saved_half_w = saved_half_h * (vp.width / vp.height.max(1.0));
-            let cluster_half = self.local_extent_max.max(1.0) as f64;
-            let cluster_min_x = self.world_offset[0] - cluster_half;
-            let cluster_max_x = self.world_offset[0] + cluster_half;
-            let cluster_min_y = self.world_offset[1] - cluster_half;
-            let cluster_max_y = self.world_offset[1] + cluster_half;
-            let saved_overlaps = saved_center_wcs_x + saved_half_w >= cluster_min_x
-                && saved_center_wcs_x - saved_half_w <= cluster_max_x
-                && saved_center_wcs_y + saved_half_h >= cluster_min_y
-                && saved_center_wcs_y - saved_half_h <= cluster_max_y
-                && effective_view_height > 1e-9;
-
-            if !saved_overlaps {
-                // Saved view points at empty space — auto-fit to the
-                // outlier-immune content cluster (world_offset ±
-                // local_extent_max).
-                let margin = 1.05_f64;
-                let fit_h = cluster_half * 2.0 * margin;
-                let fit_w = fit_h * (vp.width / vp.height.max(1.0));
-                let scale_w = vp.width / fit_w;
-                let scale_h = vp.height / fit_h;
-                let fit_scale = scale_w.min(scale_h).max(1e-12);
-                effective_view_height = (vp.height / fit_scale) as f32;
-                effective_view_center = (self.world_offset[0], self.world_offset[1]);
-            }
-
-            // When the saved view did not overlap the model cluster we just
-            // forced `effective_view_height` to a fit value above — that
-            // override must win regardless of the configured priority,
-            // otherwise broken files render blank under custom_scale-first.
-            let scale = if !saved_overlaps {
-                vp.height as f32 / effective_view_height
+            // Scale (paper units per model unit) comes straight from the camera
+            // the GPU uses: the model height shown is `2 * ortho_size`, mapped
+            // onto `vp.height` of paper. `camera_for_viewport` already made the
+            // saved-view-vs-auto-fit decision (with the twist-correct overlap
+            // test), so deriving scale from it keeps the CPU projection (used
+            // for hit-test / snap / fit) locked to the GPU render — no second,
+            // independently-computed scale that could disagree under a twist.
+            let view_height_eff = (cam_frame.ortho_size() * 2.0) as f64;
+            let scale = if view_height_eff > 1e-9 {
+                (vp.height / view_height_eff) as f32
             } else {
-                vp_effective_scale(
-                    vp.custom_scale,
-                    effective_view_height as f64,
-                    vp.height,
-                ) as f32
+                1.0
             };
 
             let pcx = vp.center.x as f32;
@@ -3432,9 +3430,13 @@ impl Scene {
             //
             // Do everything WCS-relative in f64; cast to f32 only at the
             // final paper position.
-            let display_center_x = vp.view_target.x + effective_view_center.0;
-            let display_center_y = vp.view_target.y + effective_view_center.1;
-            let display_center_z = vp.view_target.z;
+            // Display centre = the camera's target, in WCS. `camera_for_viewport`
+            // already folded view_center through the (twisted) view basis and
+            // applied the empty-WCS auto-fit, so taking its target keeps the CPU
+            // projection identical to the GPU renderer under any twist.
+            let display_center_x = cam_frame.target.x as f64 + self.world_offset[0];
+            let display_center_y = cam_frame.target.y as f64 + self.world_offset[1];
+            let display_center_z = cam_frame.target.z as f64 + self.world_offset[2];
             let view_right_d = (
                 view_right.x as f64,
                 view_right.y as f64,
@@ -6018,56 +6020,30 @@ impl Scene {
         self.camera_generation += 1;
     }
 
-    /// Apply camera state from an acadrust View table entry.
-    /// `model_space`: if true, subtracts world_offset from target (wire-space).
+    /// Apply camera state from an acadrust View table entry, through the shared
+    /// `camera_from_view` decoder so the twist round-trips like every other
+    /// saved view. `model_space`: if true, subtracts world_offset from target
+    /// (wire-space); paper-space entries carry no offset.
     fn apply_camera_from_view_entry(
         &mut self,
         view: &acadrust::tables::View,
         model_space: bool,
     ) -> bool {
-        if view.height.abs() < 1e-9 {
+        let offset = if model_space { self.world_offset } else { [0.0; 3] };
+        let Some(cam) = self.camera_from_view(
+            view.direction,
+            view.target,
+            acadrust::types::Vector2 {
+                x: view.center.x,
+                y: view.center.y,
+            },
+            view.height,
+            view.twist_angle,
+            offset,
+        ) else {
             return false;
-        }
-        let vd = glam::Vec3::new(
-            view.direction.x as f32,
-            view.direction.y as f32,
-            view.direction.z as f32,
-        )
-        .normalize_or(glam::Vec3::Z);
-        let pitch = vd.z.clamp(-1.0, 1.0).asin();
-        let yaw = if vd.x.abs() < 1e-6 && vd.y.abs() < 1e-6 {
-            0.0_f32
-        } else {
-            vd.x.atan2(-vd.y)
         };
-        let rotation = view::camera::yaw_pitch_to_quat(yaw, pitch, 0.0);
-        let view_right = rotation * glam::Vec3::X;
-        let view_up = rotation * glam::Vec3::Y;
-        let base = if model_space {
-            glam::Vec3::new(
-                (view.target.x - self.world_offset[0]) as f32,
-                (view.target.y - self.world_offset[1]) as f32,
-                (view.target.z - self.world_offset[2]) as f32,
-            )
-        } else {
-            glam::Vec3::new(
-                view.target.x as f32,
-                view.target.y as f32,
-                view.target.z as f32,
-            )
-        };
-        let target = base + view_right * view.center.x as f32 + view_up * view.center.y as f32;
-        let fov_y = 45.0_f32.to_radians();
-        let distance = ((view.height as f32 / 2.0) / (fov_y * 0.5).tan()).max(0.001);
-        let mut cam = self.camera.borrow_mut();
-        cam.target = target;
-        cam.rotation = rotation;
-        cam.distance = distance;
-        cam.yaw = yaw;
-        cam.pitch = pitch;
-        cam.fov_y = fov_y;
-        cam.projection = view::camera::Projection::Orthographic;
-        drop(cam);
+        *self.camera.borrow_mut() = cam;
         self.camera_generation += 1;
         true
     }
@@ -6110,16 +6086,34 @@ impl Scene {
         true
     }
 
-    /// Decode a VPort table entry into a `Camera`. Returns `None` if the
-    /// entry has a zero view_height (i.e. is uninitialised).
-    fn camera_from_vport(&self, vp: &acadrust::tables::VPort) -> Option<Camera> {
-        if vp.view_height.abs() < 1e-9 {
+    /// Decode a saved view into a `Camera`. This is the single shared decoder
+    /// for both a model-space VPORT table entry (tiled) and a paper-space
+    /// VIEWPORT entity (floating): tiled vs floating only changes *where* the
+    /// fields come from and the floating auto-fit fallback — the projection
+    /// math (view direction → yaw/pitch, twist → roll, view_center fold,
+    /// view_height → distance) is identical, so it lives here once. Callers pass
+    /// their already-effective `view_target` / `view_center` / `view_height`.
+    ///
+    /// Returns `None` for a zero `view_height` (an uninitialised entry).
+    fn camera_from_view(
+        &self,
+        view_direction: acadrust::types::Vector3,
+        view_target: acadrust::types::Vector3,
+        view_center: acadrust::types::Vector2,
+        view_height: f64,
+        twist: f64,
+        // Subtracted from `view_target` to reach wire-space. Model views pass
+        // `self.world_offset`; paper-space views (whose entities carry no
+        // offset) pass `[0; 3]`.
+        world_offset: [f64; 3],
+    ) -> Option<Camera> {
+        if view_height.abs() < 1e-9 {
             return None;
         }
         let vd = glam::Vec3::new(
-            vp.view_direction.x as f32,
-            vp.view_direction.y as f32,
-            vp.view_direction.z as f32,
+            view_direction.x as f32,
+            view_direction.y as f32,
+            view_direction.z as f32,
         )
         .normalize_or(glam::Vec3::Z);
         let pitch = vd.z.clamp(-1.0, 1.0).asin();
@@ -6137,19 +6131,20 @@ impl Scene {
         // ends up horizontal is its negative; feed that in as the camera roll
         // so the drawing opens square, the way it was saved, instead of in raw
         // world orientation (which looks tilted).
-        let rotation = view::camera::yaw_pitch_to_quat(yaw, pitch, -vp.view_twist as f32);
+        let rotation = view::camera::yaw_pitch_to_quat(yaw, pitch, -twist as f32);
         let view_right = rotation * glam::Vec3::X;
         let view_up = rotation * glam::Vec3::Y;
-        // view_target is WCS; wire-space subtracts world_offset.
+        // view_target is WCS; wire-space subtracts world_offset. view_center is
+        // a DCS (screen-plane) offset, so fold it through the view basis.
         let base = glam::Vec3::new(
-            (vp.view_target.x - self.world_offset[0]) as f32,
-            (vp.view_target.y - self.world_offset[1]) as f32,
-            (vp.view_target.z - self.world_offset[2]) as f32,
+            (view_target.x - world_offset[0]) as f32,
+            (view_target.y - world_offset[1]) as f32,
+            (view_target.z - world_offset[2]) as f32,
         );
         let target =
-            base + view_right * vp.view_center.x as f32 + view_up * vp.view_center.y as f32;
+            base + view_right * view_center.x as f32 + view_up * view_center.y as f32;
         let fov_y = 45.0_f32.to_radians();
-        let distance = ((vp.view_height as f32 / 2.0) / (fov_y * 0.5).tan()).max(0.001);
+        let distance = ((view_height as f32 / 2.0) / (fov_y * 0.5).tan()).max(0.001);
         Some(Camera {
             target,
             rotation,
@@ -6159,6 +6154,18 @@ impl Scene {
             yaw,
             pitch,
         })
+    }
+
+    /// Decode a VPort table entry (model-space tiled view) into a `Camera`.
+    fn camera_from_vport(&self, vp: &acadrust::tables::VPort) -> Option<Camera> {
+        self.camera_from_view(
+            vp.view_direction,
+            vp.view_target,
+            vp.view_center,
+            vp.view_height,
+            vp.view_twist,
+            self.world_offset,
+        )
     }
 
     /// Reverse of `camera_from_vport`: write `cam`'s view target / direction
@@ -6189,6 +6196,8 @@ impl Scene {
         };
         entry.view_height = view_height as f64;
         entry.view_center = acadrust::types::Vector2::ZERO;
+        // Stored twist = -roll, matching the decoder (roll = -twist).
+        entry.view_twist = -cam.roll() as f64;
         entry
     }
 
@@ -6406,48 +6415,22 @@ impl Scene {
             }
         };
 
-        let vd = glam::Vec3::new(
-            vp.view_direction.x as f32,
-            vp.view_direction.y as f32,
-            vp.view_direction.z as f32,
-        )
-        .normalize_or(glam::Vec3::Z);
-
-        let pitch = vd.z.clamp(-1.0, 1.0).asin();
-        // view_dir = (sin(yaw)*cos(pitch), -cos(yaw)*cos(pitch), sin(pitch))
-        // → yaw = atan2(x, -y), but when looking straight up/down cos(pitch)≈0
-        //   both x and y are near zero and atan2(0, -0.0) = π due to IEEE 754.
-        let yaw = if vd.x.abs() < 1e-6 && vd.y.abs() < 1e-6 {
-            0.0_f32 // plan/nadir view: yaw is undefined, default to 0
-        } else {
-            vd.x.atan2(-vd.y)
+        // Paper-space entities carry no world_offset → decode with a zero
+        // offset, through the same shared decoder (twist included).
+        let Some(cam) = self.camera_from_view(
+            vp.view_direction,
+            vp.view_target,
+            acadrust::types::Vector2 {
+                x: vp.view_center.x,
+                y: vp.view_center.y,
+            },
+            vp.view_height,
+            vp.twist_angle,
+            [0.0; 3],
+        ) else {
+            return false;
         };
-        let rotation = view::camera::yaw_pitch_to_quat(yaw, pitch, 0.0);
-        let view_right = rotation * glam::Vec3::X;
-        let view_up = rotation * glam::Vec3::Y;
-
-        // Paper-space entities have no world_offset applied, so target is raw.
-        let base = glam::Vec3::new(
-            vp.view_target.x as f32,
-            vp.view_target.y as f32,
-            vp.view_target.z as f32,
-        );
-        let target =
-            base + view_right * vp.view_center.x as f32 + view_up * vp.view_center.y as f32;
-
-        let fov_y = 45.0_f32.to_radians();
-        let distance = ((vp.view_height as f32 / 2.0) / (fov_y * 0.5).tan()).max(0.001);
-
-        let mut cam = self.camera.borrow_mut();
-        cam.target = target;
-        cam.rotation = rotation;
-        cam.distance = distance;
-        cam.yaw = yaw;
-        cam.pitch = pitch;
-        cam.fov_y = fov_y;
-        cam.projection = view::camera::Projection::Orthographic;
-        drop(cam);
-
+        *self.camera.borrow_mut() = cam;
         self.camera_generation += 1;
         true
     }
@@ -6458,6 +6441,9 @@ impl Scene {
         let cam = self.camera.borrow().clone();
         let view_dir = cam.rotation * glam::Vec3::Z;
         let view_height = cam.ortho_size() * 2.0;
+        // Stored twist is the negative of the camera roll (the decoder applies
+        // roll = -twist), so the saved view round-trips square.
+        let twist = -cam.roll() as f64;
         let vd3 = acadrust::types::Vector3 {
             x: view_dir.x as f64,
             y: view_dir.y as f64,
@@ -6482,13 +6468,20 @@ impl Scene {
                 vp.view_center = acadrust::types::Vector2::ZERO;
                 vp.view_direction = vd3;
                 vp.view_height = view_height as f64;
+                vp.view_twist = twist;
             }
 
             // Persist the tiled layout as duplicate `*Active` VPort entries.
             self.save_model_tiles_to_vports();
 
             // Also write to View table — survives DWG save without override.
-            self.write_camera_view_entry("OpenCADStudio_Camera_Model", target_wcs, vd3, view_height);
+            self.write_camera_view_entry(
+                "OpenCADStudio_Camera_Model",
+                target_wcs,
+                vd3,
+                view_height,
+                twist,
+            );
             true
         } else {
             let target_wcs = acadrust::types::Vector3 {
@@ -6528,6 +6521,7 @@ impl Scene {
                         vp.view_target = acadrust::types::Vector3::ZERO;
                         vp.view_direction = vd3;
                         vp.view_height = view_height as f64;
+                        vp.twist_angle = twist;
                     }
                 }
             }
@@ -6542,6 +6536,7 @@ impl Scene {
         target: acadrust::types::Vector3,
         direction: acadrust::types::Vector3,
         height: f32,
+        twist: f64,
     ) {
         let existing_handle = self
             .document
@@ -6556,6 +6551,7 @@ impl Scene {
         entry.height = height as f64;
         entry.width = height as f64;
         entry.center = acadrust::types::Vector3::ZERO;
+        entry.twist_angle = twist;
         self.document.views.add_or_replace(entry);
     }
 
@@ -7177,69 +7173,18 @@ impl Scene {
     /// hovered, so the grid never flickers as the cursor crosses panes. The
     /// active tile uses the live camera (mid-orbit/pan); others use their
     /// stored camera. (#121)
-    pub fn model_tile_grid_views(&self, vw: f32, vh: f32) -> Vec<(iced::Rectangle, Camera)> {
-        if self.current_layout != "Model" {
-            return Vec::new();
-        }
-        let tiles = self.model_tiles.borrow();
-        let active = self.active_model_tile.get().min(tiles.len().saturating_sub(1));
-        let live = self.camera.borrow().clone();
-        tiles
-            .iter()
-            .enumerate()
-            .filter(|(_, t)| t.grid_on)
-            .map(|(idx, t)| {
-                let bounds = iced::Rectangle {
-                    x: t.rect.x * vw,
-                    y: t.rect.y * vh,
-                    width: (t.rect.width * vw).max(1.0),
-                    height: (t.rect.height * vh).max(1.0),
-                };
-                let cam = if idx == active { live.clone() } else { t.camera.clone() };
-                (bounds, cam)
-            })
+    /// Screen rect + camera for every grid-on sub-view in the current layout —
+    /// model tiles in model space, the sheet plus each floating viewport
+    /// (clipped to its rectangle) in paper space. Derived from the same
+    /// `active_viewports` enumeration the renderer uses, so the grid overlay can
+    /// never drift from the views actually on screen (issue #121). The grid
+    /// ignores render mode, so any value passes through.
+    pub fn grid_views(&self, vw: f32, vh: f32) -> Vec<(iced::Rectangle, Camera)> {
+        self.active_viewports(vw, vh, acadrust::entities::ViewportRenderMode::Wireframe2D)
+            .into_iter()
+            .filter(|inst| inst.grid_on)
+            .map(|inst| (inst.screen_rect, inst.camera))
             .collect()
-    }
-
-    /// Grid views for a paper-space layout: the sheet (paper) grid covers the
-    /// whole canvas under the paper camera; each floating viewport whose grid is
-    /// on draws the model grid through its own camera, clipped to its screen
-    /// rectangle so it never spills onto the paper. Mirrors model tiles. (#121)
-    pub fn paper_viewport_grid_views(&self, vw: f32, vh: f32) -> Vec<(iced::Rectangle, Camera)> {
-        if self.current_layout == "Model" {
-            return Vec::new();
-        }
-        let layout_block = self.current_layout_block_handle();
-        let sheet = self.current_layout_sheet_viewport_handle();
-        // Snapshot (handle, grid_on, is_sheet) so the later camera_for_viewport
-        // calls don't overlap this immutable borrow of the document.
-        let vps: Vec<(Handle, bool, bool)> = self
-            .document
-            .entities()
-            .filter_map(|e| {
-                let EntityType::Viewport(vp) = e else { return None };
-                if vp.common.owner_handle != layout_block {
-                    return None;
-                }
-                Some((vp.common.handle, vp.status.grid_on, vp.common.handle == sheet))
-            })
-            .collect();
-        let full = iced::Rectangle { x: 0.0, y: 0.0, width: vw, height: vh };
-        let mut out = Vec::new();
-        for (h, grid_on, is_sheet) in vps {
-            if !grid_on {
-                continue;
-            }
-            if is_sheet {
-                out.push((full, self.camera.borrow().clone()));
-            } else if let (Some(rect), Some(cam)) = (
-                self.viewport_screen_rect(h, (vw, vh)),
-                self.camera_for_viewport(h),
-            ) {
-                out.push((rect, cam));
-            }
-        }
-        out
     }
 
     pub fn active_model_tile_bounds(&self, vw: f32, vh: f32) -> iced::Rectangle {
@@ -7302,6 +7247,7 @@ impl Scene {
                         // style so editing one never disturbs the rest.
                         render_mode: if i == active { model_mode } else { tile.render_mode },
                         active: i == active,
+                        grid_on: tile.grid_on,
                         paper_sheet: false,
                     }
                 })
@@ -7319,6 +7265,13 @@ impl Scene {
         sheet_cam.pitch = std::f32::consts::FRAC_PI_2;
         sheet_cam.rotation = view::camera::yaw_pitch_to_quat(0.0, std::f32::consts::FRAC_PI_2, 0.0);
         sheet_cam.projection = view::camera::Projection::Orthographic;
+        let sheet_grid_on = match self
+            .document
+            .get_entity(self.current_layout_sheet_viewport_handle())
+        {
+            Some(EntityType::Viewport(vp)) => vp.status.grid_on,
+            _ => false,
+        };
         out.push(ViewportInstance {
             handle: Handle::NULL,
             tile_idx: None,
@@ -7331,6 +7284,7 @@ impl Scene {
             camera: sheet_cam,
             render_mode: acadrust::entities::ViewportRenderMode::Wireframe2D,
             active: false,
+            grid_on: sheet_grid_on,
             paper_sheet: true,
         });
         for e in self.document.entities() {
@@ -7356,6 +7310,7 @@ impl Scene {
                 camera,
                 render_mode: vp.render_mode,
                 active: self.active_viewport == Some(h),
+                grid_on: vp.status.grid_on,
                 paper_sheet: false,
             });
         }
@@ -7528,88 +7483,64 @@ impl Scene {
             _ => return None,
         };
 
-        let vd = glam::Vec3::new(
-            vp.view_direction.x as f32,
-            vp.view_direction.y as f32,
-            vp.view_direction.z as f32,
-        )
-        .normalize_or(glam::Vec3::Z);
-
-        let pitch = vd.z.clamp(-1.0, 1.0).asin();
-        // view_dir = (sin(yaw)*cos(pitch), -cos(yaw)*cos(pitch), sin(pitch))
-        // → yaw = atan2(x, -y), but when looking straight up/down cos(pitch)≈0
-        //   both x and y are near zero and atan2(0, -0.0) = π due to IEEE 754.
-        let yaw = if vd.x.abs() < 1e-6 && vd.y.abs() < 1e-6 {
-            0.0_f32 // plan/nadir view: yaw is undefined, default to 0
-        } else {
-            vd.x.atan2(-vd.y)
-        };
-
-        let rotation = view::camera::yaw_pitch_to_quat(yaw, pitch, 0.0);
-
-        // view_target is in raw model/WCS coords; the GPU renderer works in
-        // wire-space (model - world_offset), so subtract world_offset here.
-        // view_center is a 2-D DCS offset of the display centre from view_target.
+        // Floating-viewport–specific step: decide saved-view vs auto-fit, then
+        // hand the effective view to the shared `camera_from_view` decoder so
+        // twist / view_center / distance behave identically to a model VPORT.
         //
         // UTM / coordinate-shifted drawings often arrive with
-        // `view_target = (0, 0, 0)` and a stale `view_center` from before
-        // the file was geo-referenced; the saved view points at empty
-        // WCS while the actual model sits ~`world_offset` away. The CPU
-        // projection path in `viewport_content_wires` already auto-fits
-        // to the content cluster in that case — apply the same fallback
-        // here so the GPU-rendered viewport shows the model instead of
-        // an empty rectangle.
-        let mut effective_target_wcs = (
-            vp.view_target.x + vp.view_center.x,
-            vp.view_target.y + vp.view_center.y,
-        );
-        let mut effective_view_height = vp.view_height.abs().max(1e-9);
+        // `view_target = (0, 0, 0)` and a stale `view_center` from before the
+        // file was geo-referenced; the saved view points at empty WCS while the
+        // actual model sits ~`world_offset` away. Decode the saved view first
+        // and keep it only if its target actually frames the model cluster.
+        //
+        // The overlap test runs on the *decoded* target (wire-space, so the
+        // cluster is `±cluster_half` about the origin), NOT a raw
+        // `view_target + view_center` sum: under a view twist `view_center` is a
+        // DCS offset, so the raw sum lands far from the real WCS centre and
+        // would wrongly trip the auto-fit — replacing the saved view_height with
+        // the whole-cluster fit and rendering the content at the wrong zoom.
+        let saved_h = vp.view_height.abs();
         let aspect_d = (vp.width / vp.height.max(1.0)).max(1e-9);
         let cluster_half = self.local_extent_max.max(1.0) as f64;
-        let saved_half_h = effective_view_height * 0.5;
-        let saved_half_w = saved_half_h * aspect_d;
-        let cluster_min_x = self.world_offset[0] - cluster_half;
-        let cluster_max_x = self.world_offset[0] + cluster_half;
-        let cluster_min_y = self.world_offset[1] - cluster_half;
-        let cluster_max_y = self.world_offset[1] + cluster_half;
-        let saved_overlaps = effective_target_wcs.0 + saved_half_w >= cluster_min_x
-            && effective_target_wcs.0 - saved_half_w <= cluster_max_x
-            && effective_target_wcs.1 + saved_half_h >= cluster_min_y
-            && effective_target_wcs.1 - saved_half_h <= cluster_max_y;
-        if !saved_overlaps {
-            let margin = 1.05_f64;
-            effective_view_height = cluster_half * 2.0 * margin;
-            effective_target_wcs = (self.world_offset[0], self.world_offset[1]);
+
+        if let Some(cam) = self.camera_from_view(
+            vp.view_direction,
+            vp.view_target,
+            acadrust::types::Vector2 {
+                x: vp.view_center.x,
+                y: vp.view_center.y,
+            },
+            saved_h,
+            vp.twist_angle,
+            self.world_offset,
+        ) {
+            let half_h = saved_h * 0.5;
+            let half_w = half_h * aspect_d;
+            let (tx, ty) = (cam.target.x as f64, cam.target.y as f64);
+            let overlaps = tx + half_w >= -cluster_half
+                && tx - half_w <= cluster_half
+                && ty + half_h >= -cluster_half
+                && ty - half_h <= cluster_half;
+            if overlaps {
+                return Some(cam);
+            }
         }
 
-        let base_target = glam::Vec3::new(
-            (effective_target_wcs.0 - self.world_offset[0]) as f32,
-            (effective_target_wcs.1 - self.world_offset[1]) as f32,
-            (vp.view_target.z - self.world_offset[2]) as f32,
-        );
-        // `effective_target_wcs` already folded `view_center` in above
-        // (CPU path does the same via `display_center_*`), so no extra
-        // `view_right * view_center` shift here — that would double-count.
-        let target = base_target;
-
-        let fov_y = 45.0_f32.to_radians();
-        let view_height = if effective_view_height > 1e-9 {
-            effective_view_height as f32
-        } else {
-            vp.height as f32
+        // Auto-fit: aim at the content cluster, drop the stale view_center.
+        let fit_h = cluster_half * 2.0 * 1.05;
+        let tgt = acadrust::types::Vector3 {
+            x: self.world_offset[0],
+            y: self.world_offset[1],
+            z: vp.view_target.z,
         };
-        // ortho_size = distance * tan(fov_y/2)  =>  distance = view_height/2 / tan(fov_y/2)
-        let distance = ((view_height / 2.0) / (fov_y * 0.5).tan()).max(0.001);
-
-        Some(view::camera::Camera {
-            target,
-            rotation,
-            distance,
-            fov_y,
-            projection: view::camera::Projection::Orthographic,
-            yaw,
-            pitch,
-        })
+        self.camera_from_view(
+            vp.view_direction,
+            tgt,
+            acadrust::types::Vector2::ZERO,
+            fit_h,
+            vp.twist_angle,
+            self.world_offset,
+        )
     }
 
     /// Collect model-space WireModels visible through `vp_handle`, respecting
@@ -7653,14 +7584,10 @@ impl Scene {
             return Vec::new();
         };
         let vp_ortho_h = cam.ortho_size();
-        let half_w = vp_ortho_h * vp_aspect.max(0.01);
-        let margin = 1.25_f32;
-        let view_aabb = Some([
-            cam.target.x - half_w * margin,
-            cam.target.y - vp_ortho_h * margin,
-            cam.target.x + half_w * margin,
-            cam.target.y + vp_ortho_h * margin,
-        ]);
+        // Rotation-aware cull box: a twisted/rotated viewport sees a rotated
+        // rectangle in world XY, so derive the box from the camera basis.
+        // `None` (tilted view) disables the cull — render everything.
+        let view_aabb = view_cull_aabb(&cam, vp_aspect, 1.25);
         // World units per on-screen pixel for LOD substitution + curve
         // tolerance. Tracks the paper-zoom-driven pixel height the
         // viewport currently occupies.

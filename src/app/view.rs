@@ -136,13 +136,11 @@ impl OpenCADStudio {
 
             // Each view draws its own grid, clipped to its own bounds, so they
             // stay independent: model tiles in model space; the sheet plus each
-            // floating viewport (clipped to its rectangle) in paper space.
-            let grid_views = if !is_paper {
-                tab.scene.model_tile_grid_views(vw, vh)
-            } else {
-                tab.scene.paper_viewport_grid_views(vw, vh)
-            };
-            let grid: Vec<overlay::GridParams> = grid_views
+            // floating viewport (clipped to its rectangle) in paper space. One
+            // enumeration for both, shared with the renderer.
+            let grid: Vec<overlay::GridParams> = tab
+                .scene
+                .grid_views(vw, vh)
                 .into_iter()
                 .map(|(bounds, cam)| {
                     let plane = grid_plane_from_camera(cam.pitch, cam.yaw);

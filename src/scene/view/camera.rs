@@ -187,6 +187,18 @@ impl Camera {
         Mat4::from_quat(self.rotation.conjugate())
     }
 
+    /// The camera's roll — rotation about the view axis, in radians — the
+    /// inverse of the `roll` argument to [`yaw_pitch_to_quat`]. Recovered by
+    /// removing the yaw/pitch frame from the live rotation, so a saved view can
+    /// store its twist and round-trip it. Exact for a plan view (the twisted-
+    /// UCS case); approximate after a free 3D orbit.
+    pub fn roll(&self) -> f32 {
+        let q_yp = yaw_pitch_to_quat(self.yaw, self.pitch, 0.0);
+        let q_roll = q_yp.conjugate() * self.rotation;
+        // q_roll is (nominally) a rotation about Z; extract its angle.
+        2.0 * q_roll.z.atan2(q_roll.w)
+    }
+
     // ── Navigation ────────────────────────────────────────────────────────
 
     /// Arcball orbit: drag delta (dx, dy) in screen pixels.
