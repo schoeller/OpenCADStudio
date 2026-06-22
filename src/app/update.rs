@@ -8384,10 +8384,17 @@ impl OpenCADStudio {
                 None => live,
             }
         };
-        let dx = w.x - base.x;
-        let dy = w.y - base.y;
+        // Work in the active UCS frame: the cursor delta from the base is
+        // rotated into UCS, so typed cartesian/polar values are interpreted in
+        // the user's coordinate system and mapped back to world on return.
+        // (The delta is offset-invariant, so only the rotation matters.)
+        let xf = self.tabs[i].ucs_xform();
+        let d_ucs = xf.vec_to_ucs(w - base);
+        let dx = d_ucs.x;
+        let dy = d_ucs.y;
+        let dz = d_ucs.z;
         let live_d = (dx * dx + dy * dy).sqrt();
-        let live_a = dy.atan2(dx); // radians
+        let live_a = dy.atan2(dx); // radians, in the UCS plane
         // A typed angle is shown unsigned (0..180); give it the sign of the
         // cursor's current side so an entry made below the X axis sweeps
         // downward to match the arc instead of mirroring up. Untyped → live.
@@ -8429,21 +8436,17 @@ impl OpenCADStudio {
         // (see #26 / #35). The live cartesian fallback is the cursor
         // position relative to base; typed values are relative deltas.
         let has_base = self.last_point.is_some();
+        // Relative result: base + the typed UCS-frame offset mapped to world.
+        let rel = |off_ucs: glam::Vec3| base + xf.vec_to_wcs(off_ucs);
         match comps.as_slice() {
-            [DynComponent::X, DynComponent::Y] if has_base => Some(glam::Vec3::new(
-                base.x + val(0, dx),
-                base.y + val(1, dy),
-                base.z,
-            )),
+            [DynComponent::X, DynComponent::Y] if has_base => {
+                Some(rel(glam::Vec3::new(val(0, dx), val(1, dy), 0.0)))
+            }
             [DynComponent::X, DynComponent::Y] => {
                 Some(glam::Vec3::new(val(0, w.x), val(1, w.y), base.z))
             }
             [DynComponent::X, DynComponent::Y, DynComponent::Z] if has_base => {
-                Some(glam::Vec3::new(
-                    base.x + val(0, dx),
-                    base.y + val(1, dy),
-                    base.z + val(2, 0.0),
-                ))
+                Some(rel(glam::Vec3::new(val(0, dx), val(1, dy), val(2, dz))))
             }
             [DynComponent::X, DynComponent::Y, DynComponent::Z] => {
                 Some(glam::Vec3::new(val(0, w.x), val(1, w.y), val(2, base.z)))
@@ -8451,28 +8454,20 @@ impl OpenCADStudio {
             [DynComponent::Distance, DynComponent::Angle] => {
                 let d = val(0, live_d);
                 let a = angle_rad(1);
-                Some(glam::Vec3::new(
-                    base.x + d * a.cos(),
-                    base.y + d * a.sin(),
-                    base.z,
-                ))
+                Some(rel(glam::Vec3::new(d * a.cos(), d * a.sin(), 0.0)))
             }
             [DynComponent::Distance] => {
-                // Keep the cursor's direction, override the magnitude.
+                // Keep the cursor's direction (in UCS), override the magnitude.
                 let dir = glam::Vec3::new(dx, dy, 0.0).normalize_or(glam::Vec3::X);
-                Some(base + dir * val(0, live_d))
+                Some(rel(dir * val(0, live_d)))
             }
             [DynComponent::Angle] => {
                 // Standalone angle (e.g. ROTATE): the typed value is an
-                // absolute CCW angle, not a cursor-signed magnitude — keep it
-                // literal. Only the polar Distance+Angle pair uses the
-                // cursor-signed `angle_rad`.
+                // absolute CCW angle in the UCS plane, not a cursor-signed
+                // magnitude — keep it literal. Only the polar Distance+Angle
+                // pair uses the cursor-signed `angle_rad`.
                 let a = val(0, live_a.to_degrees()).to_radians();
-                Some(glam::Vec3::new(
-                    base.x + live_d * a.cos(),
-                    base.y + live_d * a.sin(),
-                    base.z,
-                ))
+                Some(rel(glam::Vec3::new(live_d * a.cos(), live_d * a.sin(), 0.0)))
             }
             _ => None,
         }
