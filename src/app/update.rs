@@ -3265,8 +3265,8 @@ impl OpenCADStudio {
                             let aspect = if vh > 0.0 { vw / vh } else { 1.0 };
                             let half_h = cam.ortho_size();
                             let half_w = half_h * aspect;
-                            let tx = cam.target.x;
-                            let ty = cam.target.y;
+                            let tx = cam.target.x as f32;
+                            let ty = cam.target.y as f32;
                             drop(cam);
                             find_hit_grip_paper(
                                 p,
@@ -8259,8 +8259,8 @@ impl OpenCADStudio {
             let aspect = if vh > 0.0 { vw / vh } else { 1.0 };
             let half_h = cam.ortho_size();
             let half_w = half_h * aspect;
-            let tx = cam.target.x;
-            let ty = cam.target.y;
+            let tx = cam.target.x as f32;
+            let ty = cam.target.y as f32;
             drop(cam);
             find_hit_grip_paper(
                 p,

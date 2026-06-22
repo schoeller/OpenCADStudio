@@ -11,7 +11,7 @@
 //
 // Coordinate convention: Z-up world space (same as the rest of OpenCADStudio).
 
-use glam::{vec3, Mat4, Quat, Vec3};
+use glam::{vec3, DVec3, Mat4, Quat, Vec3};
 use iced::{Point, Rectangle};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -22,8 +22,11 @@ pub enum Projection {
 
 #[derive(Clone)]
 pub struct Camera {
-    /// World-space pivot point the camera orbits around.
-    pub target: Vec3,
+    /// World-space pivot point the camera orbits around. Kept in f64 so a far
+    /// pan (large offset-relative coordinate) doesn't lose precision in the
+    /// pivot itself — the eventual relative-to-eye render path needs an exact
+    /// eye, which derives from this target.
+    pub target: DVec3,
     /// Arcball rotation: maps canonical pose to current orientation.
     pub rotation: Quat,
     /// Distance from eye to target.
@@ -45,7 +48,7 @@ impl Default for Camera {
         let yaw = 0.0_f32;
         let pitch = std::f32::consts::FRAC_PI_2;
         Self {
-            target: Vec3::ZERO,
+            target: DVec3::ZERO,
             rotation: yaw_pitch_to_quat(yaw, pitch, 0.0),
             distance: 60.36,
             fov_y: 45.0_f32.to_radians(),
@@ -70,7 +73,16 @@ impl Camera {
         // The canonical eye direction is +Z (looking at origin from above).
         // The rotation maps that canonical pose to the current orientation.
         let eye_dir = self.rotation * Vec3::Z;
-        self.target + eye_dir * self.distance
+        self.target.as_vec3() + eye_dir * self.distance
+    }
+
+    /// Eye position in full f64 precision (offset-relative world space). Used
+    /// by the relative-to-eye render path; the f32 [`eye`] stays for ray/pick
+    /// math that operates at human scale.
+    #[allow(dead_code)] // consumed by the relative-to-eye uniform (next phase)
+    pub fn eye_f64(&self) -> DVec3 {
+        let eye_dir = (self.rotation * Vec3::Z).as_dvec3();
+        self.target + eye_dir * self.distance as f64
     }
 
     /// Half-height of the orthographic frustum in world units.
@@ -89,7 +101,7 @@ impl Camera {
         // in the current camera frame.
         let up_dir = self.rotation * Vec3::Y;
 
-        let view = Mat4::look_at_rh(self.eye(), self.target, up_dir);
+        let view = Mat4::look_at_rh(self.eye(), self.target.as_vec3(), up_dir);
         let proj = match self.projection {
             Projection::Perspective => Mat4::perspective_rh(self.fov_y, aspect, near, far),
             Projection::Orthographic => {
@@ -126,7 +138,7 @@ impl Camera {
             }
             Projection::Orthographic => {
                 let origin = inv.project_point3(Vec3::new(ndc_x, ndc_y, 0.0));
-                let forward = (self.target - self.eye()).normalize();
+                let forward = (self.target.as_vec3() - self.eye()).normalize();
                 (origin, forward)
             }
         };
@@ -149,24 +161,26 @@ impl Camera {
 
         match self.projection {
             Projection::Perspective => {
+                let target = self.target.as_vec3();
                 let near_pt = inv.project_point3(Vec3::new(ndc_x, ndc_y, 0.0));
                 let far_pt = inv.project_point3(Vec3::new(ndc_x, ndc_y, 1.0));
                 let dir = (far_pt - near_pt).normalize();
-                let forward = (self.target - self.eye()).normalize();
+                let forward = (target - self.eye()).normalize();
                 let denom = dir.dot(forward);
                 if denom.abs() < 1e-6 {
-                    return self.target;
+                    return target;
                 }
-                let t = (self.target - near_pt).dot(forward) / denom;
+                let t = (target - near_pt).dot(forward) / denom;
                 if t < 0.0 {
-                    return self.target;
+                    return target;
                 }
                 near_pt + dir * t
             }
             Projection::Orthographic => {
+                let target = self.target.as_vec3();
                 let ray_origin = inv.project_point3(Vec3::new(ndc_x, ndc_y, 0.0));
-                let forward = (self.target - self.eye()).normalize();
-                let t = (self.target - ray_origin).dot(forward) / forward.dot(forward);
+                let forward = (target - self.eye()).normalize();
+                let t = (target - ray_origin).dot(forward) / forward.dot(forward);
                 ray_origin + forward * t
             }
         }
@@ -243,7 +257,7 @@ impl Camera {
         let before = self.pick_on_target_plane(screen, bounds);
         self.zoom(delta);
         let after = self.pick_on_target_plane(screen, bounds);
-        self.target += before - after;
+        self.target += (before - after).as_dvec3();
     }
 
     /// Pan so the world point under the cursor tracks it: screen pixels are
@@ -258,12 +272,12 @@ impl Camera {
         };
         let cam_right = self.rotation * Vec3::X;
         let cam_up = self.rotation * Vec3::Y;
-        self.target -= cam_right * delta_x * wpp;
-        self.target += cam_up * delta_y * wpp;
+        self.target -= (cam_right * delta_x * wpp).as_dvec3();
+        self.target += (cam_up * delta_y * wpp).as_dvec3();
     }
 
     pub fn fit_to_bounds(&mut self, min: Vec3, max: Vec3) {
-        self.target = (min + max) * 0.5;
+        self.target = ((min + max) * 0.5).as_dvec3();
         let size = (max - min).length();
         self.distance = size * 1.5;
     }

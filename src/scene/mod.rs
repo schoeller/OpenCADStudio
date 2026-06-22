@@ -676,7 +676,7 @@ fn view_cull_aabb(cam: &Camera, aspect: f32, margin: f32) -> Option<[f32; 4]> {
     let w = h * aspect.max(0.01);
     let right = cam.rotation * glam::Vec3::X;
     let up = cam.rotation * glam::Vec3::Y;
-    let c = cam.target;
+    let c = cam.target.as_vec3();
     let (mut min_x, mut min_y) = (f32::INFINITY, f32::INFINITY);
     let (mut max_x, mut max_y) = (f32::NEG_INFINITY, f32::NEG_INFINITY);
     for (sw, sh) in [(-w, -h), (w, -h), (-w, h), (w, h)] {
@@ -1012,8 +1012,8 @@ impl Scene {
         // `cam.target` is in the same local f32 space as emitted wire points
         // (fit_to_bounds populates it from local wire coords). No further
         // `world_offset` subtraction is needed.
-        let cx = cam.target.x;
-        let cy = cam.target.y;
+        let cx = cam.target.x as f32;
+        let cy = cam.target.y as f32;
         Some([
             cx - w * margin,
             cy - h * margin,
@@ -5948,11 +5948,7 @@ impl Scene {
         use glam::Vec3;
         let cam = &mut *self.camera.borrow_mut();
         // view.target is the look-at point; view.direction is eye→target direction.
-        cam.target = Vec3::new(
-            view.target.x as f32,
-            view.target.y as f32,
-            view.target.z as f32,
-        );
+        cam.target = glam::DVec3::new(view.target.x, view.target.y, view.target.z);
         // direction in acadrust = from-target-to-eye (same as AutoCAD convention).
         let eye_dir = Vec3::new(
             view.direction.x as f32,
@@ -6162,7 +6158,7 @@ impl Scene {
         let fov_y = 45.0_f32.to_radians();
         let distance = ((view_height as f32 / 2.0) / (fov_y * 0.5).tan()).max(0.001);
         Some(Camera {
-            target,
+            target: target.as_dvec3(),
             rotation,
             distance,
             fov_y,
@@ -7358,8 +7354,8 @@ impl Scene {
         let aspect = canvas_w / canvas_h;
         let half_h = cam.ortho_size();
         let half_w = half_h * aspect;
-        let tx = cam.target.x;
-        let ty = cam.target.y;
+        let tx = cam.target.x as f32;
+        let ty = cam.target.y as f32;
         drop(cam);
 
         // Top-down ortho mapping matching the GPU sheet viewport's camera.
