@@ -4204,7 +4204,7 @@ impl Scene {
         &mut self,
         entities: Vec<EntityType>,
         name: &str,
-        base: glam::Vec3,
+        base: glam::DVec3,
     ) -> Result<(), String> {
         let name = name.trim();
         if name.is_empty() {
@@ -4248,7 +4248,7 @@ impl Scene {
             .add_entity(EntityType::BlockEnd(block_end))
             .map_err(|e| e.to_string())?;
 
-        let local = EntityTransform::Translate((-base).as_dvec3());
+        let local = EntityTransform::Translate(-base);
         for mut entity in entities {
             view::dispatch::apply_transform(&mut entity, &local);
             entity = crate::modules::draw::modify::explode::normalize_entity_for_block(entity);

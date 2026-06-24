@@ -603,13 +603,15 @@ impl OpenCADStudio {
                     let src_wo = self.clipboard_world_offset;
                     let tgt_wo = [0.0_f64; 3];
                     let centroid = self.clipboard_centroid
-                        + glam::Vec3::new(
-                            (src_wo[0] - tgt_wo[0]) as f32,
-                            (src_wo[1] - tgt_wo[1]) as f32,
-                            (src_wo[2] - tgt_wo[2]) as f32,
+                        + glam::DVec3::new(
+                            src_wo[0] - tgt_wo[0],
+                            src_wo[1] - tgt_wo[1],
+                            src_wo[2] - tgt_wo[2],
                         );
                     use crate::modules::draw::clipboard::paste::PasteCommand;
-                    let cmd = PasteCommand::new(wires, centroid);
+                    // The ghost anchor is a display-only offset; the precise
+                    // paste delta is computed in f64 at commit time.
+                    let cmd = PasteCommand::new(wires, centroid.as_vec3());
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 }
@@ -674,7 +676,7 @@ impl OpenCADStudio {
                             self.tabs[i].dirty = true;
                             let wires = self.tabs[i].scene.wires_for_entities(&self.clipboard);
                             use crate::modules::insert::insert_block::InsertBlockCommand;
-                            let cmd = InsertBlockCommand::new_for_block(name, wires, base);
+                            let cmd = InsertBlockCommand::new_for_block(name, wires, base.as_vec3());
                             self.command_line.push_info(&cmd.prompt());
                             self.tabs[i].active_cmd = Some(Box::new(cmd));
                         }

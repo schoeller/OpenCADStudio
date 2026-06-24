@@ -254,25 +254,34 @@ pub(super) fn polar_constrain_near(
 // ── Clipboard / selection helpers ──────────────────────────────────────────
 
 /// Compute the centroid of a set of wire models (average of all points).
-pub(super) fn entities_centroid(wires: &[WireModel]) -> glam::Vec3 {
-    let mut sum = glam::Vec3::ZERO;
+pub(super) fn entities_centroid(wires: &[WireModel]) -> glam::DVec3 {
+    // Reconstruct each vertex's absolute f64 from the double-single high/low
+    // pair and accumulate in f64: summing the f32 `points` alone at UTM scale
+    // (~5.7e6) both quantizes each term ~0.5 m and loses low bits across the
+    // running total, drifting the paste base / block base metres off.
+    let mut sum = glam::DVec3::ZERO;
     let mut count = 0usize;
     for w in wires {
-        for p in &w.points {
-            let v = glam::Vec3::from(*p);
+        for (i, p) in w.points.iter().enumerate() {
             // Wire models carry NaN points as separators between disjoint
             // segments; summing them poisons the whole centroid into NaN,
             // which then makes every paste base point NaN. (#129)
-            if v.is_finite() {
-                sum += v;
-                count += 1;
+            if !p[0].is_finite() || !p[1].is_finite() || !p[2].is_finite() {
+                continue;
             }
+            let l = w.points_low.get(i).copied().unwrap_or([0.0; 3]);
+            sum += glam::DVec3::new(
+                p[0] as f64 + l[0] as f64,
+                p[1] as f64 + l[1] as f64,
+                p[2] as f64 + l[2] as f64,
+            );
+            count += 1;
         }
     }
     if count > 0 {
-        sum / count as f32
+        sum / count as f64
     } else {
-        glam::Vec3::ZERO
+        glam::DVec3::ZERO
     }
 }
 

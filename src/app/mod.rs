@@ -371,7 +371,7 @@ pub(super) struct OpenCADStudio {
     /// In-memory clipboard: cloned entities waiting to be pasted.
     clipboard: Vec<acadrust::EntityType>,
     /// Centroid of the clipboard entities (world XY plane).
-    clipboard_centroid: glam::Vec3,
+    clipboard_centroid: glam::DVec3,
     /// The source drawing's `world_offset` at copy time. The centroid above is
     /// measured in that drawing's offset-relative frame; pasting into a drawing
     /// with a different offset (e.g. a large-coordinate file → a fresh one)
@@ -1808,7 +1808,7 @@ impl OpenCADStudio {
             update_notice_version: None,
             update_notice_body: None,
             clipboard: Vec::new(),
-            clipboard_centroid: glam::Vec3::ZERO,
+            clipboard_centroid: glam::DVec3::ZERO,
             clipboard_world_offset: [0.0; 3],
             clipboard_deps: ClipboardDeps::default(),
             shift_down: false,

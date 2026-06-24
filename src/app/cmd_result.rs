@@ -616,8 +616,7 @@ impl OpenCADStudio {
                         tgt_wo[1] - src_wo[1],
                         tgt_wo[2] - src_wo[2],
                     );
-                    let delta =
-                        base_pt - self.clipboard_centroid.as_dvec3() + wo_corr;
+                    let delta = base_pt - self.clipboard_centroid + wo_corr;
                     let translate = crate::command::EntityTransform::Translate(delta);
                     self.push_undo_snapshot(i, "PASTECLIP");
                     let count = self.clipboard.len();
