@@ -65,9 +65,8 @@ fn dict_entry(doc: &CadDocument, dict: Handle, key: &str) -> Option<Handle> {
 pub fn world_clip_polygon(
     sf: &SpatialFilter,
     ins: &Insert,
-    world_offset: [f64; 3],
 ) -> Vec<[f32; 2]> {
-    world_clip_polygon_f64(sf, ins, world_offset)
+    world_clip_polygon_f64(sf, ins)
         .into_iter()
         .map(|[x, y]| [x as f32, y as f32])
         .collect()
@@ -80,11 +79,10 @@ pub fn world_clip_polygon(
 pub fn world_clip_polygon_f64(
     sf: &SpatialFilter,
     ins: &Insert,
-    world_offset: [f64; 3],
 ) -> Vec<[f64; 2]> {
     let xform = ins.get_transform();
     let inv_block = &sf.inverse_block_transform;
-    let [ox, oy, _] = world_offset;
+    let [ox, oy, _] = [0.0_f64; 3];
     let local: Vec<[f64; 2]> = if sf.boundary_points.len() == 2 {
         let a = sf.boundary_points[0];
         let b = sf.boundary_points[1];

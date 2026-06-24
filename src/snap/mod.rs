@@ -162,10 +162,6 @@ impl Snapper {
         self.grid_snap_on = !self.grid_snap_on;
     }
 
-    pub fn set_grid_snap(&mut self, on: bool) {
-        self.grid_snap_on = on;
-    }
-
     pub fn toggle(&mut self, t: SnapType) {
         if !self.enabled.remove(&t) {
             self.enabled.insert(t);

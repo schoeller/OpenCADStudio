@@ -423,7 +423,7 @@ fn build_nested_ref(
     // its clip when the parent block is expanded — the spatial filter object
     // isn't reachable at expand time.
     let clip_poly = crate::scene::pick::xclip::insert_spatial_filter(doc, nested_ins)
-        .map(|sf| crate::scene::pick::xclip::world_clip_polygon_f64(sf, nested_ins, [0.0; 3]));
+        .map(|sf| crate::scene::pick::xclip::world_clip_polygon_f64(sf, nested_ins));
 
     NestedRef {
         block_name: nested_ins.block_name.clone(),
@@ -481,7 +481,7 @@ fn tessellate_sub_local(
     // top-level MTEXT outside blocks the colour split is preserved via the
     // hot path in `tessellate_entity`.
     let mut wires_out = tessellate::tessellate(
-        doc, h, sub, false, sub_color, pat_len, pat, lw_px, local_offset, anno_scale, None,
+        doc, h, sub, false, sub_color, pat_len, pat, lw_px, anno_scale, None,
     );
     if wires_out.is_empty() {
         return None;
@@ -654,7 +654,6 @@ pub fn expand_insert(
     ins_pat: [f32; 8],
     ins_lw_px: f32,
     selected: bool,
-    world_offset: [f64; 3],
     pslt_factor: f32,
     // World-space XY view AABB (with world_offset already subtracted, so the
     // comparison is in the same f32 space as emitted wires). `None` disables
@@ -674,7 +673,7 @@ pub fn expand_insert(
     let name = ins_handle.value().to_string();
     let mut batches = Batches::default();
     let mut visited: Vec<String> = Vec::with_capacity(8);
-    let [ox, oy, _] = world_offset;
+    let [ox, oy, _] = [0.0_f64; 3];
 
     // `defn.aabb_local` is in the defn's offset frame — re-add
     // `defn.local_offset` (f64) before transforming so the world AABB is
@@ -717,7 +716,6 @@ pub fn expand_insert(
             ins_pat,
             ins_lw_px,
             selected,
-            world_offset,
             pslt_factor,
             view_aabb,
             world_per_pixel,
@@ -744,7 +742,7 @@ fn emit_greeked_text(
     ctx: &ExpandCtx,
     out: &mut Batches,
 ) {
-    let [ox, oy, oz] = ctx.world_offset;
+    let [ox, oy, oz] = [0.0_f64; 3];
     let [lo_x, lo_y, lo_z] = defn_lo;
     // Re-add the defn's `local_offset` in f64 before composing with
     // `accum_xform` so the rect corners share the batch's f32 space
@@ -879,7 +877,7 @@ fn emit_text_baseline(
     if h_local <= 0.0 {
         return;
     }
-    let [ox, oy, oz] = ctx.world_offset;
+    let [ox, oy, oz] = [0.0_f64; 3];
     let [lo_x, lo_y, lo_z] = defn_lo;
     let xf = |p: [f32; 3]| -> [f32; 3] {
         let w = accum_xform.apply(Vector3::new(
@@ -1001,7 +999,6 @@ struct ExpandCtx<'a> {
     ins_pat: [f32; 8],
     ins_lw_px: f32,
     selected: bool,
-    world_offset: [f64; 3],
     pslt_factor: f32,
     // World-space XY view AABB (post world_offset). `None` = no culling.
     view_aabb: Option<[f32; 4]>,
@@ -1219,7 +1216,7 @@ fn expand_defn(
                 // `defn_lo` (in f64) before composing with `accum_xform`
                 // so culling uses correct world-space corners.
                 let world = transform_offset_aabb_xy(lw.aabb_local, defn_lo, accum_xform);
-                let [ox, oy, _] = ctx.world_offset;
+                let [ox, oy, _] = [0.0_f64; 3];
                 let local = [
                     world[0] - ox as f32,
                     world[1] - oy as f32,
@@ -1282,7 +1279,7 @@ fn expand_defn(
                     nested_defn.local_offset,
                     &composed,
                 );
-                let [ox, oy, _] = ctx.world_offset;
+                let [ox, oy, _] = [0.0_f64; 3];
                 let local = [
                     world[0] - ox as f32,
                     world[1] - oy as f32,
@@ -1322,7 +1319,6 @@ fn expand_defn(
                     ins_pat: nested_pat,
                     ins_lw_px: nested_lw_px,
                     selected: ctx.selected,
-                    world_offset: ctx.world_offset,
                     pslt_factor: ctx.pslt_factor,
                     view_aabb: ctx.view_aabb,
                     world_per_pixel: ctx.world_per_pixel,
@@ -1387,7 +1383,7 @@ fn emit_wire(
     if lw.points.is_empty() && lw.fill_tris.is_empty() {
         return;
     }
-    let [ox, oy, oz] = ctx.world_offset;
+    let [ox, oy, oz] = [0.0_f64; 3];
     let [lo_x, lo_y, lo_z] = defn_lo;
 
     // Resolve final style for this LocalWire against the outer Insert ctx
@@ -1521,7 +1517,7 @@ fn emit_wire(
     for tg in &lw.tangent_geoms {
         entry
             .tangent_geoms
-            .push(transform_tangent(tg, accum_xform, defn_lo, [ox, oy, oz]));
+            .push(transform_tangent(tg, accum_xform, defn_lo));
     }
     for p in &lw.fill_tris {
         let v = accum_xform.apply(Vector3::new(
@@ -1540,9 +1536,8 @@ fn transform_tangent(
     tg: &TangentGeom,
     t: &Transform,
     defn_lo: [f64; 3],
-    woff: [f64; 3],
 ) -> TangentGeom {
-    let [ox, oy, oz] = woff;
+    let [ox, oy, oz] = [0.0_f64; 3];
     let [lo_x, lo_y, lo_z] = defn_lo;
     match tg {
         TangentGeom::Line { p1, p2 } => {

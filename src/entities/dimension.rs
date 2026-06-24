@@ -849,7 +849,6 @@ pub trait DimensionTess {
         selected: bool,
         entity_color: [f32; 4],
         line_weight_px: f32,
-        world_offset: [f64; 3],
         anno_scale: f32,
         selected_set: &rustc_hash::FxHashSet<acadrust::Handle>,
         active_viewport: Option<acadrust::Handle>,
@@ -867,7 +866,6 @@ impl DimensionTess for Dimension {
         selected: bool,
         entity_color: [f32; 4],
         line_weight_px: f32,
-        world_offset: [f64; 3],
         anno_scale: f32,
         selected_set: &rustc_hash::FxHashSet<acadrust::Handle>,
         active_viewport: Option<acadrust::Handle>,
@@ -882,7 +880,6 @@ impl DimensionTess for Dimension {
             selected,
             entity_color,
             line_weight_px,
-            world_offset,
             anno_scale,
             selected_set,
             active_viewport,
@@ -900,7 +897,6 @@ fn tessellate_dimension_inner(
     selected: bool,
     entity_color: [f32; 4],
     line_weight_px: f32,
-    world_offset: [f64; 3],
     anno_scale: f32,
     // LOD hints — when present, synthesised dim text routes through the
     // top-level LOD ladder (baseline / greek / full) instead of the truck
@@ -1012,7 +1008,6 @@ fn tessellate_dimension_inner(
     let text_break = {
         let tp = vec3_local(
             dimension_text_pos_f64(dim, style, dim_txt, dim_scale),
-            world_offset,
         );
         let tw = dimension_text_value(dim, style)
             .map(|t| t.chars().count() as f32 * dim_txt as f32 * 0.6)
@@ -1054,7 +1049,6 @@ fn tessellate_dimension_inner(
             dim1: dimsd1,
             dim2: dimsd2,
         },
-        world_offset,
     );
 
     // DIMTMOVE = 1: when the saved text_middle_point sits far from the
@@ -1062,7 +1056,7 @@ fn tessellate_dimension_inner(
     // to the dim line — no leader; =2 frees text without a leader.)
     if let Some(s) = style {
         if s.dimtmove == 1 {
-            if let Some((anchor, txt)) = dimtmove_leader_endpoints(dim, world_offset) {
+            if let Some((anchor, txt)) = dimtmove_leader_endpoints(dim) {
                 let gap = dim_txt as f32 * 0.5;
                 if (txt - anchor).length() > gap * 2.0 {
                     add_segment(&mut geom.dim_lines, anchor, txt);
@@ -1120,7 +1114,7 @@ fn tessellate_dimension_inner(
         resolve_dim_color(style.map(|s| s.dimclrt).unwrap_or(0), entity_color)
     };
 
-    let snap_pts = dimension_snap_pts(dim, world_offset);
+    let snap_pts = dimension_snap_pts(dim);
     let key_vertices: Vec<[f64; 3]> = geom
         .dim_lines
         .iter()
@@ -1244,7 +1238,7 @@ fn tessellate_dimension_inner(
     // DIMTFILL: 0=none, 1=drawing background (mask), 2=DIMTFILLCLR.
     if let Some(s) = style {
         if s.dimtfill == 1 || s.dimtfill == 2 {
-            if let Some(rect) = text_fill_rect(dim, style, dim_txt, world_offset, dim_scale) {
+            if let Some(rect) = text_fill_rect(dim, style, dim_txt, dim_scale) {
                 let fill_color = if selected {
                     WireModel::SELECTED
                 } else if s.dimtfill == 1 {
@@ -1290,7 +1284,6 @@ fn tessellate_dimension_inner(
             document,
             selected_set,
             active_viewport,
-            world_offset,
             bg_color,
             1.0,
             &synth_text_entity,
@@ -1308,7 +1301,6 @@ fn tessellate_dimension_inner(
                 document,
                 selected_set,
                 active_viewport,
-                world_offset,
                 bg_color,
                 1.0,
                 &tol_entity_e,
@@ -1395,13 +1387,13 @@ fn split_ext_lines(points: &[[f32; 3]]) -> (Vec<[f32; 3]>, Vec<[f32; 3]>) {
 /// text_middle_point). Returns None when the dim has no saved text position
 /// or has no well-defined dim-line midpoint (radius/diameter handled by
 /// their own leg).
-fn dimtmove_leader_endpoints(dim: &Dimension, world_offset: [f64; 3]) -> Option<(Vec3, Vec3)> {
+fn dimtmove_leader_endpoints(dim: &Dimension) -> Option<(Vec3, Vec3)> {
     let base = dim.base();
     let txt = base.text_middle_point;
     if txt.x * txt.x + txt.y * txt.y + txt.z * txt.z <= 1e-16 {
         return None;
     }
-    let lv = |v| vec3_local(v, world_offset);
+    let lv = |v| vec3_local(v);
     let anchor = match dim {
         Dimension::Linear(d) => {
             let perp = Vec3::new(-(d.rotation.sin() as f32), d.rotation.cos() as f32, 0.0);
@@ -1437,7 +1429,6 @@ fn text_fill_rect(
     dim: &Dimension,
     style: Option<&DimStyle>,
     text_height: f64,
-    world_offset: [f64; 3],
     dim_scale: f64,
 ) -> Option<Vec<[f32; 3]>> {
     let value = dimension_text_value(dim, style)?;
@@ -1458,7 +1449,7 @@ fn text_fill_rect(
     let (sr, cr) = rot.sin_cos();
     let hx = approx_w * 0.5;
     let hy = approx_h * 0.5;
-    let [ox, oy, oz] = world_offset;
+    let [ox, oy, oz] = [0.0_f64; 3];
     let cx = (pos.x - ox) as f32;
     let cy = (pos.y - oy) as f32;
     let cz = (pos.z - oz) as f32;
@@ -1503,9 +1494,8 @@ fn dimension_geometry(
     arrow2: &ArrowKind,
     params: DimLineParams,
     suppress: SuppressFlags,
-    world_offset: [f64; 3],
 ) -> DimGeom {
-    let lv = |v| vec3_local(v, world_offset);
+    let lv = |v| vec3_local(v);
     let mut g = DimGeom::new();
     match dim {
         Dimension::Aligned(d) => {
@@ -1547,7 +1537,7 @@ fn dimension_geometry(
         Dimension::Radius(d) => {
             let center = lv(d.angle_vertex);
             let point = lv(d.definition_point);
-            let text = dimension_text_position(dim, world_offset);
+            let text = dimension_text_position(dim);
             add_segment(&mut g.dim_lines, center, point);
             // Honour leader_length: extend from the arrow tip past it
             // toward the text by that distance along (text - point).
@@ -1575,7 +1565,7 @@ fn dimension_geometry(
             append_arrow(&mut g, p2, normalized_or(p1 - p2, Vec3::X), arrow2);
             // DIMETER leader: continue past p2 toward the text.
             if d.leader_length.abs() > 1e-9 {
-                let text = dimension_text_position(dim, world_offset);
+                let text = dimension_text_position(dim);
                 let leader_dir = normalized_or(text - p2, p2 - p1);
                 add_segment(
                     &mut g.dim_lines,
@@ -1839,12 +1829,12 @@ fn append_angular_dimension(
     }
 }
 
-fn dimension_snap_pts(dim: &Dimension, world_offset: [f64; 3]) -> Vec<(glam::DVec3, SnapHint)> {
+fn dimension_snap_pts(dim: &Dimension) -> Vec<(glam::DVec3, SnapHint)> {
     let lv = |v: acadrust::types::Vector3| {
         glam::DVec3::new(
-            v.x - world_offset[0],
-            v.y - world_offset[1],
-            v.z - world_offset[2],
+            v.x,
+            v.y,
+            v.z,
         )
     };
     let node = |v: acadrust::types::Vector3| (lv(v), SnapHint::Node);
@@ -2568,8 +2558,8 @@ fn swap_decimal_sep(s: &str, dsep_code: i16) -> String {
     s.replace('.', &ch.to_string())
 }
 
-fn dimension_text_position(dim: &Dimension, world_offset: [f64; 3]) -> Vec3 {
-    let lv = |v| vec3_local(v, world_offset);
+fn dimension_text_position(dim: &Dimension) -> Vec3 {
+    let lv = |v| vec3_local(v);
     let base = dim.base();
     let pos = lv(base.text_middle_point);
     if pos.length_squared() > 1e-8 {
@@ -2586,12 +2576,8 @@ fn dimension_text_position(dim: &Dimension, world_offset: [f64; 3]) -> Vec3 {
     }
 }
 
-fn vec3_local(v: Vector3, off: [f64; 3]) -> Vec3 {
-    Vec3::new(
-        (v.x - off[0]) as f32,
-        (v.y - off[1]) as f32,
-        (v.z - off[2]) as f32,
-    )
+fn vec3_local(v: Vector3) -> Vec3 {
+    Vec3::new(v.x as f32, v.y as f32, v.z as f32)
 }
 
 /// Style-driven text anchor on the dimension line: a point on the line through

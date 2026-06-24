@@ -406,7 +406,6 @@ impl super::OpenCADStudio {
             0.0,
             [0.0; 8],
             1.0,
-            woff,
             anno,
             None,
         );

@@ -41,7 +41,6 @@ impl ImageModel {
     /// Returns `None` if the image file cannot be opened or decoded.
     pub fn from_raster_image(
         img: &acadrust::entities::RasterImage,
-        world_offset: [f64; 3],
     ) -> Option<Self> {
         let w = img.size.x;
         let h = img.size.y;
@@ -50,9 +49,9 @@ impl ImageModel {
         // Corners come from a large insertion point plus small u/v spans.
         // Split each into double-single (high, low) f32 so the GPU keeps
         // sub-unit precision at UTM scale and after a cross-drawing paste.
-        let oxv = img.insertion_point.x - world_offset[0];
-        let oyv = img.insertion_point.y - world_offset[1];
-        let ozv = img.insertion_point.z - world_offset[2];
+        let oxv = img.insertion_point.x;
+        let oyv = img.insertion_point.y;
+        let ozv = img.insertion_point.z;
         let ux = (img.u_vector.x * w) as f32;
         let uy = (img.u_vector.y * w) as f32;
         let uz = (img.u_vector.z * w) as f32;

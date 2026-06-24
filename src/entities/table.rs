@@ -344,7 +344,6 @@ pub fn tessellate_table(
     selected: bool,
     entity_color: [f32; 4],
     line_weight_px: f32,
-    world_offset: [f64; 3],
 ) -> Vec<crate::scene::model::wire_model::WireModel> {
     use crate::scene::convert::tess_util::aci_to_rgba;
     use crate::scene::model::wire_model::WireModel;
@@ -355,7 +354,7 @@ pub fn tessellate_table(
         return Vec::new();
     }
 
-    let [ox, oy, oz] = world_offset;
+    let [ox, oy, oz] = [0.0_f64; 3];
     let rel = |p: Vec3| -> [f32; 3] {
         [
             (p.x as f64 - ox) as f32,

@@ -43,13 +43,12 @@ fn split_ds_xyz(x: f64, y: f64, z: f64) -> ([f32; 3], [f32; 3]) {
     ([xh, yh, zh], [xl, yl, zl])
 }
 
-/// Subtract `world_offset` from each f64 source point and split the residual
-/// into double-single (high, low) f32 buffers in one pass.
-fn offset_to_ds(
+/// Split each absolute f64 source point into double-single (high, low) f32
+/// buffers in one pass — the relative-to-eye residual the GPU/CPU reconstruct
+/// to f64 precision at UTM-scale coordinates.
+fn points_to_ds(
     src: impl IntoIterator<Item = [f64; 3]>,
-    world_offset: [f64; 3],
 ) -> (Vec<[f32; 3]>, Vec<[f32; 3]>) {
-    let [ox, oy, oz] = world_offset;
     let it = src.into_iter();
     let (lo, hi) = it.size_hint();
     let cap = hi.unwrap_or(lo);
@@ -62,7 +61,7 @@ fn offset_to_ds(
             low.push([0.0; 3]);
             continue;
         }
-        let (h, l) = split_ds_xyz(x - ox, y - oy, z - oz);
+        let (h, l) = split_ds_xyz(x, y, z);
         high.push(h);
         low.push(l);
     }
@@ -85,7 +84,6 @@ pub fn tessellate(
     pattern_length: f32,
     pattern: [f32; 8],
     line_weight_px: f32,
-    world_offset: [f64; 3],
     anno_scale: f32,
     world_per_pixel: Option<f32>,
 ) -> Vec<WireModel> {
@@ -127,7 +125,6 @@ pub fn tessellate(
             selected,
             entity_color,
             line_weight_px,
-            world_offset,
             anno_scale,
         )];
     }
@@ -148,7 +145,7 @@ pub fn tessellate(
             // single MTEXT can hand back N colour-distinct wires when the
             // value mixes inline colours.
             TruckObject::Text(stroke_groups) => {
-                let [ox, oy, oz] = world_offset;
+                let [ox, oy, oz] = [0.0_f64; 3];
                 let entity_zf = entity_z(entity) as f64;
                 let elev_v = entity_zf - oz;
 
@@ -212,7 +209,7 @@ pub fn tessellate(
                     }
                 }
 
-                let snap_pts = offset_snap_pts(te.snap_pts, world_offset);
+                let snap_pts = te.snap_pts;
                 let key_vertices: Vec<[f64; 3]> = te
                     .key_vertices
                     .into_iter()
@@ -287,12 +284,12 @@ pub fn tessellate(
 
             // ── Standard topology objects ─────────────────────────────────
             TruckObject::Point(v) => {
-                let result = tessellate_vertex(&v, world_offset);
+                let result = tessellate_vertex(&v);
                 match result {
                     TruckTessResult::Point([x, y, z], [xl, yl, zl]) => {
                         let s = 0.1_f32;
-                        let snap_pts = offset_snap_pts(te.snap_pts, world_offset);
-                        let [ox, oy, oz] = world_offset;
+                        let snap_pts = te.snap_pts;
+                        let [ox, oy, oz] = [0.0_f64; 3];
                         let key_vertices: Vec<[f64; 3]> = te
                             .key_vertices
                             .into_iter()
@@ -333,10 +330,10 @@ pub fn tessellate(
 
             TruckObject::Curve(e) => {
                 if let TruckTessResult::Lines(points, points_low) =
-                    tessellate_edge(&e, world_offset)
+                    tessellate_edge(&e)
                 {
-                    let [ox, oy, oz] = world_offset;
-                    let snap_pts = offset_snap_pts(te.snap_pts, world_offset);
+                    let [ox, oy, oz] = [0.0_f64; 3];
+                    let snap_pts = te.snap_pts;
                     let key_vertices: Vec<[f64; 3]> = te
                         .key_vertices
                         .into_iter()
@@ -366,10 +363,10 @@ pub fn tessellate(
 
             TruckObject::Contour(w) => {
                 if let TruckTessResult::Lines(points, points_low) =
-                    tessellate_wire(&w, world_offset)
+                    tessellate_wire(&w)
                 {
-                    let [ox, oy, oz] = world_offset;
-                    let snap_pts = offset_snap_pts(te.snap_pts, world_offset);
+                    let [ox, oy, oz] = [0.0_f64; 3];
+                    let snap_pts = te.snap_pts;
                     let key_vertices: Vec<[f64; 3]> = te
                         .key_vertices
                         .into_iter()
@@ -404,15 +401,15 @@ pub fn tessellate(
                 // GPU shader pairs them so drawings at large UTM-style
                 // coordinates keep sub-unit precision in the wire model and
                 // don't jitter on camera movement.
-                let [ox, oy, oz] = world_offset;
-                let (local_pts, local_pts_low) = offset_to_ds(points, world_offset);
-                let snap_pts = offset_snap_pts(te.snap_pts, world_offset);
+                let [ox, oy, oz] = [0.0_f64; 3];
+                let (local_pts, local_pts_low) = points_to_ds(points);
+                let snap_pts = te.snap_pts;
                 let key_vertices: Vec<[f64; 3]> = te
                     .key_vertices
                     .into_iter()
                     .map(|[x, y, z]| [x - ox, y - oy, z - oz])
                     .collect();
-                let (fill_tris, fill_tris_low) = offset_to_ds(te.fill_tris, world_offset);
+                let (fill_tris, fill_tris_low) = points_to_ds(te.fill_tris);
                 return vec![WireModel {
                     name,
                     points: local_pts,
@@ -435,9 +432,9 @@ pub fn tessellate(
             }
 
             TruckObject::SegmentedLines(points) => {
-                let [ox, oy, oz] = world_offset;
-                let (local_pts, local_pts_low) = offset_to_ds(points, world_offset);
-                let snap_pts = offset_snap_pts(te.snap_pts, world_offset);
+                let [ox, oy, oz] = [0.0_f64; 3];
+                let (local_pts, local_pts_low) = points_to_ds(points);
+                let snap_pts = te.snap_pts;
                 let key_vertices: Vec<[f64; 3]> = te
                     .key_vertices
                     .into_iter()
@@ -470,10 +467,10 @@ pub fn tessellate(
                 // edge wires stored in the entity when present (e.g. from
                 // SOLVIEW output or when the SAT kernel cannot parse the
                 // ACIS data).
-                let wire_pts = solid_wire_fallback(entity, world_offset);
+                let wire_pts = solid_wire_fallback(entity);
                 let mut wm = WireModel::solid_f64(name, wire_pts, color, selected);
                 // Add insertion snap at point_of_reference.
-                let [ox, oy, oz] = world_offset;
+                let [ox, oy, oz] = [0.0_f64; 3];
                 if let Some(p) = crate::entities::solid3d::point_of_reference(entity) {
                     let sp = glam::DVec3::new(p.x - ox, p.y - oy, p.z - oz);
                     wm.snap_pts.push((sp, SnapHint::Insertion));
@@ -485,7 +482,7 @@ pub fn tessellate(
 
     // ── Fallback for Viewport / Insert / Hatch / Ole2Frame ────────────────
     let (points_f64, snap_pts, tangent_geoms, key_vertices) =
-        fallback_geometry(entity, world_offset);
+        fallback_geometry(entity);
     // `points_f64` are absolute world coords; split into the double-single
     // high/low pair so the outline reconstructs to f64 precision at UTM scale
     // (a NaN separator stays NaN in both buffers).
@@ -691,12 +688,12 @@ pub(crate) fn entity_z(entity: &EntityType) -> f32 {
 use crate::entities::traits::FallbackTess;
 use crate::scene::convert::tess_util::FallbackGeometry as Geometry;
 
-fn fallback_geometry(entity: &EntityType, world_offset: [f64; 3]) -> Geometry {
+fn fallback_geometry(entity: &EntityType) -> Geometry {
     match entity {
-        EntityType::Viewport(vp) => vp.fallback_geometry(world_offset),
-        EntityType::Insert(ins) => ins.fallback_geometry(world_offset),
-        EntityType::Hatch(h) => h.fallback_geometry(world_offset),
-        EntityType::Ole2Frame(ole) => ole.fallback_geometry(world_offset),
+        EntityType::Viewport(vp) => vp.fallback_geometry(),
+        EntityType::Insert(ins) => ins.fallback_geometry(),
+        EntityType::Hatch(h) => h.fallback_geometry(),
+        EntityType::Ole2Frame(ole) => ole.fallback_geometry(),
         // Modeler solids render as meshes (solid3d_tess). Their wire path
         // contributes only the pre-computed edge wires (empty for binary SAB)
         // plus an insertion snap — never the placeholder segment below, which
@@ -706,10 +703,10 @@ fn fallback_geometry(entity: &EntityType, world_offset: [f64; 3]) -> Geometry {
         | EntityType::Region(_)
         | EntityType::Body(_)
         | EntityType::Surface(_) => {
-            let pts = solid_wire_fallback(entity, world_offset);
+            let pts = solid_wire_fallback(entity);
             let mut snap = vec![];
             if let Some(p) = crate::entities::solid3d::point_of_reference(entity) {
-                let [ox, oy, oz] = world_offset;
+                let [ox, oy, oz] = [0.0_f64; 3];
                 snap.push((
                     Vec3::new((p.x - ox) as f32, (p.y - oy) as f32, (p.z - oz) as f32),
                     SnapHint::Insertion,
@@ -729,8 +726,8 @@ fn fallback_geometry(entity: &EntityType, world_offset: [f64; 3]) -> Geometry {
 /// AutoCAD stores explicit wire geometry (from SOLVIEW / 3DPLOT) alongside the
 /// ACIS data.  We use this as a visible fallback when the SAT tessellator
 /// produces no mesh (e.g. binary SAB data or unsupported geometry).
-fn solid_wire_fallback(entity: &EntityType, world_offset: [f64; 3]) -> Vec<[f64; 3]> {
-    let [ox, oy, oz] = world_offset;
+fn solid_wire_fallback(entity: &EntityType) -> Vec<[f64; 3]> {
+    let [ox, oy, oz] = [0.0_f64; 3];
     let Some(wires) = crate::entities::solid3d::fallback_wires(entity) else {
         return vec![];
     };
@@ -876,16 +873,6 @@ pub(crate) fn add_polyline(points: &mut Vec<[f32; 3]>, polyline: &[Vec3]) {
         points.push([f32::NAN, f32::NAN, f32::NAN]);
     }
     points.extend(polyline.iter().map(|p| [p.x, p.y, p.z]));
-}
-
-pub(crate) fn offset_snap_pts(
-    pts: Vec<(glam::DVec3, SnapHint)>,
-    off: [f64; 3],
-) -> Vec<(glam::DVec3, SnapHint)> {
-    let [ox, oy, oz] = off;
-    pts.into_iter()
-        .map(|(p, h)| (glam::DVec3::new(p.x - ox, p.y - oy, p.z - oz), h))
-        .collect()
 }
 
 /// Returns the text position of a dimension in DXF world-space (f64, no offset applied).

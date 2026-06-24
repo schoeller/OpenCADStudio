@@ -101,13 +101,11 @@ crate::impl_entity_basics!(Insert);
 impl crate::entities::traits::FallbackTess for Insert {
     fn fallback_geometry(
         &self,
-        world_offset: [f64; 3],
     ) -> crate::scene::convert::tess_util::FallbackGeometry {
-        let [ox, oy, oz] = world_offset;
         let (ipx, ipy, ipz) = (
-            self.insert_point.x - ox,
-            self.insert_point.y - oy,
-            self.insert_point.z - oz,
+            self.insert_point.x,
+            self.insert_point.y,
+            self.insert_point.z,
         );
         let ip = Vec3::new(ipx as f32, ipy as f32, ipz as f32);
         let s = 0.1_f64;
@@ -139,7 +137,6 @@ pub(crate) fn append_insert_attribute_wires(
     is_xref: bool,
     pslt_factor: f32,
     anno_scale: f32,
-    world_offset: [f64; 3],
 ) {
     if ins.attributes.is_empty() {
         return;
@@ -172,7 +169,7 @@ pub(crate) fn append_insert_attribute_wires(
         } else {
             sub_color
         };
-        let sub_aabb = crate::scene::entity_aabb(&attr_entity, world_offset);
+        let sub_aabb = crate::scene::entity_aabb(&attr_entity);
         let mut attr_wires = tessellate::tessellate(
             document,
             insert_handle,
@@ -182,7 +179,6 @@ pub(crate) fn append_insert_attribute_wires(
             sub_plen * pslt_factor,
             sub_pat.map(|v| v * pslt_factor),
             sub_lw_px,
-            world_offset,
             anno_scale,
             None,
         );

@@ -1702,7 +1702,6 @@ pub(crate) fn text_obb_corners_native(
 pub(crate) fn text_baseline_points(
     e: &EntityType,
     anno_scale: f32,
-    world_offset: [f64; 3],
     n_lines: usize,
 ) -> Vec<[f32; 3]> {
     let Some(corners) = text_obb_corners_native(e, anno_scale, Some(n_lines)) else {
@@ -1723,7 +1722,7 @@ pub(crate) fn text_baseline_points(
         return vec![];
     }
     let n_lines = n_lines.max(1);
-    let [ox, oy, oz] = world_offset;
+    let [ox, oy, oz] = [0.0_f64; 3];
     let cast = |p: [f64; 3]| -> [f32; 3] {
         [(p[0] - ox) as f32, (p[1] - oy) as f32, (p[2] - oz) as f32]
     };
@@ -1763,7 +1762,6 @@ pub(crate) fn text_baseline_points(
 pub(crate) fn text_greek_obb_tris(
     e: &EntityType,
     anno_scale: f32,
-    world_offset: [f64; 3],
     n_lines: usize,
 ) -> Vec<[f32; 3]> {
     let Some(corners) = text_obb_corners_native(e, anno_scale, Some(n_lines)) else {
@@ -1784,7 +1782,7 @@ pub(crate) fn text_greek_obb_tris(
         return vec![];
     }
     let n_lines = n_lines.max(1);
-    let [ox, oy, oz] = world_offset;
+    let [ox, oy, oz] = [0.0_f64; 3];
     let cast = |p: [f64; 3]| -> [f32; 3] {
         [(p[0] - ox) as f32, (p[1] - oy) as f32, (p[2] - oz) as f32]
     };

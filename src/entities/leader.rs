@@ -567,7 +567,6 @@ pub trait LeaderTess {
         selected: bool,
         entity_color: [f32; 4],
         line_weight_px: f32,
-        world_offset: [f64; 3],
         anno_scale: f32,
     ) -> crate::scene::model::wire_model::WireModel;
 }
@@ -580,7 +579,6 @@ impl LeaderTess for Leader {
         selected: bool,
         entity_color: [f32; 4],
         line_weight_px: f32,
-        world_offset: [f64; 3],
         anno_scale: f32,
     ) -> crate::scene::model::wire_model::WireModel {
         use crate::scene::convert::tessellate::{append_arrow, arrow_from_block, ArrowKind, DimGeom};
@@ -591,7 +589,7 @@ impl LeaderTess for Leader {
             entity_color
         };
         let name = handle.value().to_string();
-        let [ox, oy, oz] = world_offset;
+        let [ox, oy, oz] = [0.0_f64; 3];
         let p3 = |v: &acadrust::types::Vector3| -> [f32; 3] {
             [(v.x - ox) as f32, (v.y - oy) as f32, (v.z - oz) as f32]
         };

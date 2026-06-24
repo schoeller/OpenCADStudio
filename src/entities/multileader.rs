@@ -1069,7 +1069,6 @@ pub trait MultiLeaderTess {
         selected: bool,
         entity_color: [f32; 4],
         line_weight_px: f32,
-        world_offset: [f64; 3],
         anno_scale: f32,
         world_per_pixel: Option<f32>,
     ) -> Vec<crate::scene::model::wire_model::WireModel>;
@@ -1083,7 +1082,6 @@ impl MultiLeaderTess for MultiLeader {
         selected: bool,
         entity_color: [f32; 4],
         line_weight_px: f32,
-        world_offset: [f64; 3],
         anno_scale: f32,
         world_per_pixel: Option<f32>,
     ) -> Vec<crate::scene::model::wire_model::WireModel> {
@@ -1129,7 +1127,7 @@ impl MultiLeaderTess for MultiLeader {
 
         let name = handle.value().to_string();
         let nan = [f32::NAN; 3];
-        let [ox, oy, oz] = world_offset;
+        let [ox, oy, oz] = [0.0_f64; 3];
         let p3 = |v: &acadrust::types::Vector3| -> [f32; 3] {
             [(v.x - ox) as f32, (v.y - oy) as f32, (v.z - oz) as f32]
         };
@@ -1349,7 +1347,6 @@ impl MultiLeaderTess for MultiLeader {
                         leader_pat_len,
                         leader_pat,
                         leader_lw_px,
-                        world_offset,
                         1.0,
                         None,
                     );

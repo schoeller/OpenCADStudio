@@ -344,14 +344,13 @@ impl Grippable for Hatch {
 }
 
 impl FallbackTess for Hatch {
-    fn fallback_geometry(&self, world_offset: [f64; 3]) -> FallbackGeometry {
-        let [ox, oy, oz] = world_offset;
+    fn fallback_geometry(&self) -> FallbackGeometry {
         let normal = (self.normal.x, self.normal.y, self.normal.z);
-        // Convert a 2D OCS hatch boundary point to WCS, then subtract world_offset.
+        // Convert a 2D OCS hatch boundary point to absolute WCS.
         let to_wcs = |x: f64, y: f64| -> [f64; 3] {
             let (wx, wy, wz) =
                 crate::scene::view::transform::ocs_point_to_wcs((x, y, self.elevation), normal);
-            [wx - ox, wy - oy, wz - oz]
+            [wx, wy, wz]
         };
         // Snap point at a world (f64) location, cast to the f32 snap buffer.
         let snap_at = |w: [f64; 3]| Vec3::new(w[0] as f32, w[1] as f32, w[2] as f32);

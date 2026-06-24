@@ -182,16 +182,14 @@ crate::impl_entity_basics!(Ole2Frame);
 impl crate::entities::traits::FallbackTess for Ole2Frame {
     fn fallback_geometry(
         &self,
-        world_offset: [f64; 3],
     ) -> crate::scene::convert::tess_util::FallbackGeometry {
         // OLE objects carry a bounding rectangle in model space.
         // Render a simple X-through-rectangle placeholder.
-        let [ox, oy, oz] = world_offset;
-        let x0 = self.upper_left_corner.x - ox;
-        let y0 = self.lower_right_corner.y - oy;
-        let x1 = self.lower_right_corner.x - ox;
-        let y1 = self.upper_left_corner.y - oy;
-        let z = self.upper_left_corner.z - oz;
+        let x0 = self.upper_left_corner.x;
+        let y0 = self.lower_right_corner.y;
+        let x1 = self.lower_right_corner.x;
+        let y1 = self.upper_left_corner.y;
+        let z = self.upper_left_corner.z;
         if (x1 - x0).abs() < 1e-6 && (y1 - y0).abs() < 1e-6 {
             // Degenerate / unknown size — show a small cross.
             let s = 0.5_f64;

@@ -105,7 +105,7 @@ pub fn edge_wires(solid: &Solid) -> Vec<acadrust::entities::Wire> {
     for shell in solid.boundaries() {
         for edge in shell.edge_iter() {
             if let TruckTessResult::Lines(pts, pts_low) =
-                tessellate_edge(&edge, [0.0; 3])
+                tessellate_edge(&edge)
             {
                 if pts.len() < 2 {
                     continue;
@@ -169,7 +169,7 @@ pub fn boolean(_op: Bool, _a: &Solid, _b: &Solid) -> Option<Solid> {
 /// before world_offset is applied by the caller).
 pub fn mesh_from_solid(solid: &Solid, color: [f32; 4]) -> Option<MeshLodSet> {
     use crate::scene::convert::truck_tess::{tessellate_solid, TruckTessResult};
-    match tessellate_solid(solid, [0.0; 3]) {
+    match tessellate_solid(solid) {
         TruckTessResult::Mesh {
             verts,
             verts_low,

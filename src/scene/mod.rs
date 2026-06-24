@@ -196,17 +196,11 @@ pub fn build_derived_caches(doc: &CadDocument) -> DerivedCaches {
         .par_iter()
         .filter_map(|&handle| {
             let e = doc.get_entity(handle)?;
-            let owner = e.common().owner_handle;
-            let offset = if owner == model_block {
-                [0.0_f64; 3]
-            } else {
-                [0.0; 3]
-            };
             let (raw, ..) = view::render::render_style_for(doc, e);
             let color = view::render::adapt_to_bg(raw, LOAD_BG);
             let model = match e {
-                EntityType::Hatch(dxf) => Scene::hatch_model_from_dxf(dxf, color, offset),
-                EntityType::Solid(solid) => Some(Scene::solid_hatch_model(solid, color, offset)),
+                EntityType::Hatch(dxf) => Scene::hatch_model_from_dxf(dxf, color),
+                EntityType::Solid(solid) => Some(Scene::solid_hatch_model(solid, color)),
                 _ => None,
             };
             model.map(|m| (handle, m))
@@ -218,7 +212,7 @@ pub fn build_derived_caches(doc: &CadDocument) -> DerivedCaches {
         .par_iter()
         .filter_map(|&handle| {
             if let EntityType::RasterImage(img) = doc.get_entity(handle)? {
-                ImageModel::from_raster_image(img, [0.0_f64; 3]).map(|m| (handle, m))
+                ImageModel::from_raster_image(img).map(|m| (handle, m))
             } else {
                 None
             }
@@ -251,7 +245,7 @@ pub fn build_derived_caches(doc: &CadDocument) -> DerivedCaches {
             let color = view::render::adapt_to_bg(raw, LOAD_BG);
             let top_level = layout_blocks.contains(&e.common().owner_handle);
             crate::entities::solid3d::tessellate_volume(e, color, facet_res).map(|m| {
-                let m = if top_level { offset_mesh_lod_set(m, [0.0_f64; 3]) } else { m };
+                let m = if top_level { offset_mesh_lod_set(m) } else { m };
                 (handle, m, top_level)
             })
         })
@@ -554,8 +548,8 @@ fn overlap_len(a: (f32, f32), b: (f32, f32)) -> f32 {
 /// origins would otherwise float far away from the rest of the
 /// geometry. Also recomputes `world_aabb` so per-frame LOD / cull math
 /// uses the same space.
-fn offset_mesh_lod_set(mut set: MeshLodSet, world_offset: [f64; 3]) -> MeshLodSet {
-    let [ox, oy, oz] = world_offset;
+fn offset_mesh_lod_set(mut set: MeshLodSet) -> MeshLodSet {
+    let [ox, oy, oz] = [0.0_f64; 3];
     let mut min_x = f32::INFINITY;
     let mut min_y = f32::INFINITY;
     let mut max_x = f32::NEG_INFINITY;
@@ -596,10 +590,9 @@ fn offset_mesh_lod_set(mut set: MeshLodSet, world_offset: [f64; 3]) -> MeshLodSe
 fn transform_block_mesh_lod_set(
     set: &MeshLodSet,
     xform: &acadrust::types::Transform,
-    world_offset: [f64; 3],
 ) -> MeshLodSet {
     use acadrust::types::Vector3;
-    let [ox, oy, oz] = world_offset;
+    let [ox, oy, oz] = [0.0_f64; 3];
     let mut out = set.clone();
     let mut min_x = f32::INFINITY;
     let mut min_y = f32::INFINITY;
@@ -2318,7 +2311,6 @@ impl Scene {
         if self.block_meshes.is_empty() {
             return Vec::new();
         }
-        let woff = [0.0_f64; 3];
         let mut out = Vec::new();
         for e in self.document.entities() {
             if e.common().owner_handle != layout_block {
@@ -2331,7 +2323,7 @@ impl Scene {
                     continue;
                 }
                 let start = out.len();
-                self.expand_block_meshes(&ins.block_name, &ins.get_transform(), 0, woff, &mut out);
+                self.expand_block_meshes(&ins.block_name, &ins.get_transform(), 0, &mut out);
                 // Tag the instanced meshes with the parent INSERT handle so the
                 // hover / selection highlight (keyed on the mesh name) tints the
                 // block, not the inner solid's own handle which nothing selects.
@@ -2353,7 +2345,6 @@ impl Scene {
         block_name: &str,
         accum: &acadrust::types::Transform,
         depth: usize,
-        woff: [f64; 3],
         out: &mut Vec<MeshLodSet>,
     ) {
         if depth > 16 {
@@ -2374,9 +2365,9 @@ impl Scene {
             }
             if let EntityType::Insert(ins) = e {
                 let composed = ins.get_transform().then(accum);
-                self.expand_block_meshes(&ins.block_name, &composed, depth + 1, woff, out);
+                self.expand_block_meshes(&ins.block_name, &composed, depth + 1, out);
             } else if let Some(set) = self.block_meshes.get(&h) {
-                out.push(transform_block_mesh_lod_set(set, accum, woff));
+                out.push(transform_block_mesh_lod_set(set, accum));
             }
         }
     }
@@ -2425,11 +2416,6 @@ impl Scene {
     /// selectable; the click resolves to the Insert).
     pub fn insert_hatches_for_click(&self) -> Vec<(Handle, HatchModel)> {
         let layout_block = self.current_layout_block_handle();
-        let hatch_offset = if self.current_layout == "Model" {
-            [0.0_f64; 3]
-        } else {
-            [0.0; 3]
-        };
         let layer_hidden = |layer: &str| {
             self.document
                 .layers
@@ -2464,7 +2450,7 @@ impl Scene {
                     continue;
                 }
                 let color = self.render_style(&EntityType::Hatch(dxf.clone())).0;
-                if let Some(model) = Self::hatch_model_from_dxf(&dxf, color, hatch_offset) {
+                if let Some(model) = Self::hatch_model_from_dxf(&dxf, color) {
                     out.push((ins.common.handle, model));
                 }
             }
@@ -2578,7 +2564,6 @@ impl Scene {
         let mut block_owned: Vec<(Handle, crate::scene::model::mesh_model::MeshModel)> = Vec::new();
         if !self.block_meshes.is_empty() {
             let layout_block = self.current_layout_block_handle();
-            let woff = [0.0_f64; 3];
             for e in self.document.entities() {
                 if e.common().owner_handle != layout_block {
                     continue;
@@ -2588,7 +2573,7 @@ impl Scene {
                     continue;
                 }
                 let mut sets = Vec::new();
-                self.expand_block_meshes(&ins.block_name, &ins.get_transform(), 0, woff, &mut sets);
+                self.expand_block_meshes(&ins.block_name, &ins.get_transform(), 0, &mut sets);
                 for set in sets {
                     if let Some(m) = set.lods.into_iter().next() {
                         block_owned.push((ins.common.handle, m));
@@ -2621,7 +2606,6 @@ impl Scene {
             return Vec::new();
         }
         let layout_block = self.current_layout_block_handle();
-        let woff = [0.0_f64; 3];
         let mut out = Vec::new();
         for e in self.document.entities() {
             if e.common().owner_handle != layout_block {
@@ -2632,7 +2616,7 @@ impl Scene {
                 continue;
             }
             let mut sets = Vec::new();
-            self.expand_block_meshes(&ins.block_name, &ins.get_transform(), 0, woff, &mut sets);
+            self.expand_block_meshes(&ins.block_name, &ins.get_transform(), 0, &mut sets);
             let hit = sets.iter().any(|set| {
                 set.lods.first().map_or(false, |m| {
                     !pick::hit_test::mesh_box_hit(
@@ -2667,7 +2651,6 @@ impl Scene {
             return Vec::new();
         }
         let layout_block = self.current_layout_block_handle();
-        let woff = [0.0_f64; 3];
         let mut out = Vec::new();
         for e in self.document.entities() {
             if e.common().owner_handle != layout_block {
@@ -2678,7 +2661,7 @@ impl Scene {
                 continue;
             }
             let mut sets = Vec::new();
-            self.expand_block_meshes(&ins.block_name, &ins.get_transform(), 0, woff, &mut sets);
+            self.expand_block_meshes(&ins.block_name, &ins.get_transform(), 0, &mut sets);
             let hit = sets.iter().any(|set| {
                 set.lods.first().map_or(false, |m| {
                     !pick::hit_test::mesh_poly_hit(
@@ -2860,11 +2843,6 @@ impl Scene {
         // `world_offset` subtraction even though `current_layout != "Model"`.
         // Decide based on the block being tessellated, not the layout.
         let is_model_block = block_handle == self.model_space_block_handle();
-        let woff = if is_model_block {
-            [0.0_f64; 3]
-        } else {
-            [0.0; 3]
-        };
         let bg = if self.current_layout == "Model" {
             self.bg_color
         } else {
@@ -2918,9 +2896,6 @@ impl Scene {
                     }
                 }
                 mix(anno.to_bits() as u64);
-                for c in woff {
-                    mix(c.to_bits());
-                }
                 for c in bg {
                     mix(c.to_bits() as u64);
                 }
@@ -2952,7 +2927,7 @@ impl Scene {
                 .map(|e| {
                     let e: &EntityType = e;
                     let w = tessellate_entity(
-                        doc, sel, avp, woff, bg, anno, e, Some(blk_ref), view_aabb, wpp,
+                        doc, sel, avp, bg, anno, e, Some(blk_ref), view_aabb, wpp,
                     );
                     (e.common().handle, Arc::new(w))
                 })
@@ -2971,7 +2946,7 @@ impl Scene {
                 .into_par_iter()
                 .flat_map(|e| {
                     tessellate_entity(
-                        doc, sel, avp, woff, bg, anno, e, Some(blk_ref), view_aabb, wpp,
+                        doc, sel, avp, bg, anno, e, Some(blk_ref), view_aabb, wpp,
                     )
                 })
                 .collect()
@@ -3167,7 +3142,6 @@ impl Scene {
             &self.document,
             &self.selected,
             self.active_viewport,
-            [0.0_f64; 3],
             bg,
             anno,
             e,
@@ -4150,22 +4124,17 @@ impl Scene {
             &entity,
             EntityType::Insert(_) | EntityType::Block(_) | EntityType::BlockEnd(_)
         );
-        let hatch_offset = if self.current_layout == "Model" {
-            [0.0_f64; 3]
-        } else {
-            [0.0; 3]
-        };
         let hatch_seed = if let EntityType::Hatch(dxf) = &entity {
             let color = self.render_style(&entity).0;
-            Self::hatch_model_from_dxf(dxf, color, hatch_offset)
+            Self::hatch_model_from_dxf(dxf, color)
         } else if let EntityType::Solid(solid) = &entity {
             let color = self.render_style(&entity).0;
-            Some(Self::solid_hatch_model(solid, color, hatch_offset))
+            Some(Self::solid_hatch_model(solid, color))
         } else {
             None
         };
         let image_seed = if let EntityType::RasterImage(img) = &entity {
-            ImageModel::from_raster_image(img, [0.0_f64; 3])
+            ImageModel::from_raster_image(img)
         } else {
             None
         };
@@ -4175,9 +4144,8 @@ impl Scene {
             EntityType::Solid3D(_) | EntityType::Region(_) | EntityType::Body(_) | EntityType::Surface(_)
         ) {
             let color = self.render_style(&entity).0;
-            let woff = [0.0_f64; 3];
             crate::entities::solid3d::tessellate_volume(&entity, color, facet_res)
-                .map(|m| offset_mesh_lod_set(m, woff))
+                .map(|m| offset_mesh_lod_set(m))
         } else {
             None
         };
@@ -4442,11 +4410,6 @@ impl Scene {
 
     fn synced_hatch_models(&self) -> Vec<HatchModel> {
         let layout_block = self.current_layout_block_handle();
-        let hatch_offset = if self.current_layout == "Model" {
-            [0.0_f64; 3]
-        } else {
-            [0.0; 3]
-        };
 
         let layer_hidden = |layer: &str| {
             self.document
@@ -4543,7 +4506,7 @@ impl Scene {
             // XCLIP: clip this insert's exploded hatch fills to the boundary,
             // matching how the line geometry is clipped in expand_insert.
             let clip_poly = pick::xclip::insert_spatial_filter(&self.document, ins)
-                .map(|sf| pick::xclip::world_clip_polygon(sf, ins, hatch_offset));
+                .map(|sf| pick::xclip::world_clip_polygon(sf, ins));
             // Walk the full block tree: `explode_from_document` only descends
             // one level, so nested INSERTs are re-exploded here. Each level
             // bakes its transform into the children it returns, so nested
@@ -4571,7 +4534,7 @@ impl Scene {
                         }
                         let color = self.render_style(&EntityType::Hatch(dxf.clone())).0;
                         if let Some(mut model) =
-                            Self::hatch_model_from_dxf(&dxf, color, hatch_offset)
+                            Self::hatch_model_from_dxf(&dxf, color)
                         {
                             if let Some(poly) = &clip_poly {
                                 let clipped = pick::xclip::clip_hatch_boundary(
@@ -4596,7 +4559,7 @@ impl Scene {
         }
 
         // Wide LWPolyline and Polyline2D fills
-        let [ox, oy, _] = hatch_offset;
+        let [ox, oy, _] = [0.0_f64; 3];
         let ox = ox as f32;
         let oy = oy as f32;
         for entity in self.document.entities() {
@@ -4655,7 +4618,6 @@ impl Scene {
         } else {
             self.bg_color
         };
-        let model_block = self.model_space_block_handle();
         // No per-frame view-cull here: GPU wipeout buffer upload is
         // gated on geometry_epoch only (see render.rs), so any cull at
         // build time would freeze the visible subset at the geometry
@@ -4682,12 +4644,7 @@ impl Scene {
             // Per-entity world_offset selection so paper-layout content
             // viewports still see model-block wipeouts at the right local
             // coordinates (same rationale as hatches).
-            let world_offset = if wo.common.owner_handle == model_block {
-                [0.0_f64; 3]
-            } else {
-                [0.0; 3]
-            };
-            let boundary = Self::wipeout_boundary_2d(wo, world_offset);
+            let boundary = Self::wipeout_boundary_2d(wo);
             if boundary.len() >= 3 {
                 let mut fill_color = bg_color;
                 if self.selected.contains(&wo.common.handle) {
@@ -4712,11 +4669,10 @@ impl Scene {
     /// Compute the 2D (XY) boundary polygon for a Wipeout entity.
     fn wipeout_boundary_2d(
         wo: &acadrust::entities::Wipeout,
-        world_offset: [f64; 3],
     ) -> Vec<[f32; 2]> {
         use acadrust::entities::WipeoutClipType;
 
-        let [wox, woy, _woz] = world_offset;
+        let [wox, woy, _woz] = [0.0_f64; 3];
         let is_polygon = wo.clipping_enabled
             && wo.clip_boundary_vertices.len() >= 3
             && matches!(wo.clip_type, WipeoutClipType::Polygonal);
@@ -4780,9 +4736,8 @@ impl Scene {
     fn hatch_model_from_dxf(
         dxf: &DxfHatch,
         color: [f32; 4],
-        world_offset: [f64; 3],
     ) -> Option<HatchModel> {
-        let [ox, oy, _oz] = world_offset;
+        let [ox, oy, _oz] = [0.0_f64; 3];
         let normal = (dxf.normal.x, dxf.normal.y, dxf.normal.z);
         // Build the boundary in f64 first so the precision-preserving
         // origin computation below sees full WCS precision. We only cast
@@ -5126,7 +5081,7 @@ impl Scene {
             })
             .collect();
         for (handle, img) in entries {
-            if let Some(model) = ImageModel::from_raster_image(&img, [0.0_f64; 3]) {
+            if let Some(model) = ImageModel::from_raster_image(&img) {
                 self.images.insert(handle, model);
             }
         }
@@ -5135,9 +5090,6 @@ impl Scene {
 
     pub fn populate_hatches_from_document(&mut self) {
         self.hatches.clear();
-
-        let model_block = self.model_space_block_handle();
-        let world_offset = [0.0_f64; 3];
 
         let entries: Vec<(Handle, EntityType)> = self
             .document
@@ -5154,21 +5106,14 @@ impl Scene {
             .into_par_iter()
             .filter_map(|(handle, kind)| {
                 // Paper-space entities live in sheet coordinates — world_offset must not
-                // be applied to them.  Only model-space entities need the shift.
-                let owner = kind.common().owner_handle;
-                let offset = if owner == model_block {
-                    world_offset
-                } else {
-                    [0.0; 3]
-                };
                 let model = match &kind {
                     EntityType::Hatch(dxf) => {
                         let color = convert::tess_util::aci_to_rgba(&dxf.common.color);
-                        Self::hatch_model_from_dxf(dxf, color, offset)
+                        Self::hatch_model_from_dxf(dxf, color)
                     }
                     EntityType::Solid(solid) => {
                         let color = convert::tess_util::aci_to_rgba(&solid.common.color);
-                        Some(Self::solid_hatch_model(solid, color, offset))
+                        Some(Self::solid_hatch_model(solid, color))
                     }
                     _ => None,
                 };
@@ -5220,7 +5165,6 @@ impl Scene {
 
         use crate::par::prelude::*;
         let facet_res = self.document.header.facet_resolution;
-        let woff = [0.0_f64; 3];
         // Top-level solids: offset into the render frame, drawn flat.
         // Block-definition solids: keep block-local coords for per-INSERT
         // instancing (no offset applied here).
@@ -5228,7 +5172,7 @@ impl Scene {
             .into_par_iter()
             .filter_map(|(handle, entity, color, top_level)| {
                 crate::entities::solid3d::tessellate_volume(&entity, color, facet_res).map(|m| {
-                    let m = if top_level { offset_mesh_lod_set(m, woff) } else { m };
+                    let m = if top_level { offset_mesh_lod_set(m) } else { m };
                     (handle, m, top_level)
                 })
             })
@@ -5255,8 +5199,8 @@ impl Scene {
     /// Build a solid-fill HatchModel for a DXF Solid entity.
     /// DXF SOLID corners are in "Z-order": p0-p1 top, p2-p3 bottom.
     /// Visual quad is p0→p1→p3→p2 (closed).
-    fn solid_hatch_model(solid: &DxfSolid, color: [f32; 4], world_offset: [f64; 3]) -> HatchModel {
-        let [ox, oy, _oz] = world_offset;
+    fn solid_hatch_model(solid: &DxfSolid, color: [f32; 4]) -> HatchModel {
+        let [ox, oy, _oz] = [0.0_f64; 3];
         let boundary = vec![
             [
                 (solid.first_corner.x - ox) as f32,
@@ -5298,13 +5242,8 @@ impl Scene {
         // already subtracted). The stored DXF entity must hold WCS, so add the
         // offset back — otherwise the boundary wire, re-projected through the
         // normal entity path, lands `world_offset` away from the fill.
-        let off = if self.current_layout == "Model" {
-            [0.0_f64; 3]
-        } else {
-            [0.0; 3]
-        };
-        let wx = model.world_origin[0] + off[0];
-        let wy = model.world_origin[1] + off[1];
+        let wx = model.world_origin[0];
+        let wy = model.world_origin[1];
         let verts: Vec<Vector2> = model
             .boundary
             .iter()
@@ -5840,11 +5779,6 @@ impl Scene {
     // ── Modify (transform / copy) ─────────────────────────────────────────
 
     pub fn transform_entities(&mut self, handles: &[Handle], t: &EntityTransform) {
-        let hatch_offset = if self.current_layout == "Model" {
-            [0.0_f64; 3]
-        } else {
-            [0.0; 3]
-        };
         // MIRRTEXT (header.mirror_text): when false AutoCAD positions text /
         // mtext / shape by the mirror but keeps the original rotation +
         // oblique so the text stays right-reading. Capture before the
@@ -5907,12 +5841,12 @@ impl Scene {
                 let existing_color = self.hatches[&h].color;
                 let new_model = match self.document.get_entity(h) {
                     Some(EntityType::Hatch(dxf)) => {
-                        Self::hatch_model_from_dxf(dxf, existing_color, hatch_offset)
+                        Self::hatch_model_from_dxf(dxf, existing_color)
                     }
                     // A DXF SOLID renders as a solid-fill hatch; rebuild it from
                     // the moved corners so the fill follows the transform.
                     Some(EntityType::Solid(s)) => {
-                        Some(Self::solid_hatch_model(s, existing_color, hatch_offset))
+                        Some(Self::solid_hatch_model(s, existing_color))
                     }
                     _ => None,
                 };
@@ -5990,11 +5924,6 @@ impl Scene {
     }
 
     pub fn copy_entities(&mut self, handles: &[Handle], t: &EntityTransform) -> Vec<Handle> {
-        let hatch_offset = if self.current_layout == "Model" {
-            [0.0_f64; 3]
-        } else {
-            [0.0; 3]
-        };
         let clones: Vec<EntityType> = handles
             .iter()
             .filter_map(|&h| self.document.get_entity(h).cloned())
@@ -6009,11 +5938,11 @@ impl Scene {
                 let new_model = match self.document.get_entity(h) {
                     Some(EntityType::Hatch(dxf)) => {
                         let color = convert::tess_util::aci_to_rgba(&dxf.common.color);
-                        Self::hatch_model_from_dxf(dxf, color, hatch_offset)
+                        Self::hatch_model_from_dxf(dxf, color)
                     }
                     Some(EntityType::Solid(s)) => {
                         let color = convert::tess_util::aci_to_rgba(&s.common.color);
-                        Some(Self::solid_hatch_model(s, color, hatch_offset))
+                        Some(Self::solid_hatch_model(s, color))
                     }
                     _ => None,
                 };
@@ -6073,15 +6002,10 @@ impl Scene {
         }
 
         // Rebuild GPU hatch/solid model when a boundary vertex or corner moves.
-        let hatch_offset = if self.current_layout == "Model" {
-            [0.0_f64; 3]
-        } else {
-            [0.0; 3]
-        };
         match self.document.get_entity(handle) {
             Some(EntityType::Hatch(dxf)) => {
                 let color = convert::tess_util::aci_to_rgba(&dxf.common.color);
-                if let Some(model) = Self::hatch_model_from_dxf(dxf, color, hatch_offset) {
+                if let Some(model) = Self::hatch_model_from_dxf(dxf, color) {
                     self.hatches.insert(handle, model);
                 } else {
                     self.hatches.remove(&handle);
@@ -6090,7 +6014,7 @@ impl Scene {
             Some(EntityType::Solid(solid)) => {
                 let color = convert::tess_util::aci_to_rgba(&solid.common.color);
                 self.hatches
-                    .insert(handle, Self::solid_hatch_model(solid, color, hatch_offset));
+                    .insert(handle, Self::solid_hatch_model(solid, color));
             }
             _ => {}
         }
@@ -6204,7 +6128,7 @@ impl Scene {
         view: &acadrust::tables::View,
         model_space: bool,
     ) -> bool {
-        let offset = if model_space { [0.0_f64; 3] } else { [0.0; 3] };
+        let _ = model_space;
         let Some(cam) = self.camera_from_view(
             view.direction,
             view.target,
@@ -6214,7 +6138,6 @@ impl Scene {
             },
             view.height,
             view.twist_angle,
-            offset,
         ) else {
             return false;
         };
@@ -6280,7 +6203,6 @@ impl Scene {
         // Subtracted from `view_target` to reach wire-space. Model views pass
         // `[0.0_f64; 3]`; paper-space views (whose entities carry no
         // offset) pass `[0; 3]`.
-        world_offset: [f64; 3],
     ) -> Option<Camera> {
         if view_height.abs() < 1e-9 {
             return None;
@@ -6317,9 +6239,9 @@ impl Scene {
         // jump on the f32 grid. The axis directions stay f32 (orientation only);
         // only the position must stay precise — matching the model camera.
         let base = glam::DVec3::new(
-            view_target.x - world_offset[0],
-            view_target.y - world_offset[1],
-            view_target.z - world_offset[2],
+            view_target.x,
+            view_target.y,
+            view_target.z,
         );
         let target = base
             + view_right.as_dvec3() * view_center.x
@@ -6345,7 +6267,6 @@ impl Scene {
             vp.view_center,
             vp.view_height,
             vp.view_twist,
-            [0.0_f64; 3],
         )
     }
 
@@ -6607,7 +6528,6 @@ impl Scene {
             },
             vp.view_height,
             vp.twist_angle,
-            [0.0; 3],
         ) else {
             return false;
         };
@@ -7646,7 +7566,7 @@ impl Scene {
                 continue;
             }
             // Paper-block wipeouts live in paper coords — no `world_offset`.
-            let boundary = Self::wipeout_boundary_2d(wo, [0.0; 3]);
+            let boundary = Self::wipeout_boundary_2d(wo);
             if boundary.len() < 3 {
                 continue;
             }
@@ -7719,7 +7639,6 @@ impl Scene {
             },
             saved_h,
             vp.twist_angle,
-            [0.0_f64; 3],
         ) {
             let half_h = saved_h * 0.5;
             let half_w = half_h * aspect_d;
@@ -7746,7 +7665,6 @@ impl Scene {
             acadrust::types::Vector2::ZERO,
             fit_h,
             vp.twist_angle,
-            [0.0_f64; 3],
         )
     }
 
@@ -8031,7 +7949,6 @@ pub(crate) fn tessellate_entity_dim_text(
     document: &acadrust::CadDocument,
     selected: &HashSet<Handle>,
     active_viewport: Option<Handle>,
-    world_offset: [f64; 3],
     bg_color: [f32; 4],
     anno_scale: f32,
     e: &EntityType,
@@ -8040,7 +7957,7 @@ pub(crate) fn tessellate_entity_dim_text(
     text_color: [f32; 4],
 ) -> Vec<WireModel> {
     let mut wires = tessellate_entity(
-        document, selected, active_viewport, world_offset, bg_color,
+        document, selected, active_viewport, bg_color,
         anno_scale, e, None, view_aabb, world_per_pixel,
     );
     for w in &mut wires {
@@ -8059,7 +7976,6 @@ fn tessellate_entity(
     document: &acadrust::CadDocument,
     selected: &HashSet<Handle>,
     active_viewport: Option<Handle>,
-    world_offset: [f64; 3],
     bg_color: [f32; 4],
     anno_scale: f32,
     e: &EntityType,
@@ -8082,7 +7998,7 @@ fn tessellate_entity(
         match e {
             EntityType::Viewport(_) | EntityType::Insert(_) => {}
             _ => {
-                let ab = entity_aabb(e, world_offset);
+                let ab = entity_aabb(e);
                 if ab != WireModel::UNBOUNDED_AABB {
                     if let Some(view) = view_aabb {
                         if cache::block_cache::aabb_disjoint_xy(ab, view) {
@@ -8129,7 +8045,7 @@ fn tessellate_entity(
                                 // and the geometry visibly shifts when
                                 // the camera crosses the LOD threshold.
                                 let bbox = e.as_entity().bounding_box();
-                                let oz = world_offset[2];
+                                let oz = 0.0_f64;
                                 let z_min = (bbox.min.z - oz) as f32;
                                 let z_max = (bbox.max.z - oz) as f32;
                                 return vec![lod_stub_wire_3d(
@@ -8189,11 +8105,10 @@ fn tessellate_entity(
             pattern_length,
             pattern,
             1.5,
-            world_offset,
             1.0,
             world_per_pixel,
         );
-        let ab = entity_aabb(e, world_offset);
+        let ab = entity_aabb(e);
         for w in &mut wires {
             w.aabb = ab;
         }
@@ -8241,7 +8156,7 @@ fn tessellate_entity(
                         let sub_color_is_byblock =
                             sub.common().color == acadrust::types::Color::ByBlock;
                         let sub_wires = tessellate_entity(
-                            document, selected, active_viewport, world_offset, bg_color,
+                            document, selected, active_viewport, bg_color,
                             // Block contents are baked at the final WCS size —
                             // don't let downstream paths re-apply anno_scale.
                             1.0, sub, block_cache, view_aabb, world_per_pixel,
@@ -8260,7 +8175,7 @@ fn tessellate_entity(
                         }
                     }
                     if !wires.is_empty() {
-                        let aabb = entity_aabb(e, world_offset);
+                        let aabb = entity_aabb(e);
                         for w in &mut wires {
                             w.aabb = aabb;
                         }
@@ -8273,7 +8188,7 @@ fn tessellate_entity(
     }
 
     if let EntityType::Dimension(dim) = e {
-        let aabb = entity_aabb(e, world_offset);
+        let aabb = entity_aabb(e);
         use crate::entities::dimension::DimensionTess;
         let mut wires = dim.tessellate(
             document,
@@ -8281,7 +8196,6 @@ fn tessellate_entity(
             sel,
             entity_color,
             line_weight_px,
-            world_offset,
             anno_scale,
             selected,
             active_viewport,
@@ -8297,7 +8211,7 @@ fn tessellate_entity(
     }
 
     if let EntityType::MultiLeader(ml) = e {
-        let aabb = entity_aabb(e, world_offset);
+        let aabb = entity_aabb(e);
         use crate::entities::multileader::MultiLeaderTess;
         let mut wires = ml.tessellate(
             document,
@@ -8305,7 +8219,6 @@ fn tessellate_entity(
             sel,
             entity_color,
             line_weight_px,
-            world_offset,
             anno_scale,
             world_per_pixel,
         );
@@ -8340,7 +8253,7 @@ fn tessellate_entity(
                         let sub_color_is_byblock =
                             sub.common().color == acadrust::types::Color::ByBlock;
                         let sub_wires = tessellate_entity(
-                            document, selected, active_viewport, world_offset, bg_color,
+                            document, selected, active_viewport, bg_color,
                             anno_scale, sub, block_cache, view_aabb, world_per_pixel,
                         );
                         for mut w in sub_wires {
@@ -8353,7 +8266,7 @@ fn tessellate_entity(
                         }
                     }
                     if !wires.is_empty() {
-                        let aabb = entity_aabb(e, world_offset);
+                        let aabb = entity_aabb(e);
                         for w in &mut wires {
                             w.aabb = aabb;
                         }
@@ -8366,10 +8279,10 @@ fn tessellate_entity(
         // geometry from the rows + TableStyle so fills/colours/borders/margins
         // are honoured instead of the monochrome fallback.
         let mut wires = crate::entities::table::tessellate_table(
-            tab, document, sel, entity_color, line_weight_px, world_offset,
+            tab, document, sel, entity_color, line_weight_px,
         );
         if !wires.is_empty() {
-            let aabb = entity_aabb(e, world_offset);
+            let aabb = entity_aabb(e);
             for w in &mut wires {
                 w.aci = aci;
                 w.aabb = aabb;
@@ -8382,7 +8295,7 @@ fn tessellate_entity(
         // Resolve the INSERT's own style so ByBlock sub-entities can inherit it.
         let (ins_color, ins_pat_len, ins_pat, ins_lw_px, _) = view::render::render_style_for(document, e);
         let ins_color = view::render::adapt_to_bg(ins_color, bg_color);
-        let [ox, oy, oz] = world_offset;
+        let [ox, oy, oz] = [0.0_f64; 3];
         let ip = glam::Vec3::new(
             (ins.insert_point.x - ox) as f32,
             (ins.insert_point.y - oy) as f32,
@@ -8425,7 +8338,6 @@ fn tessellate_entity(
                 ins_pat,
                 ins_lw_px,
                 sel,
-                world_offset,
                 pslt_factor,
                 view_aabb,
                 world_per_pixel,
@@ -8436,7 +8348,7 @@ fn tessellate_entity(
                 // clip the expanded block geometry to the boundary polygon so
                 // only the portion inside the clip is drawn.
                 if let Some(sf) = pick::xclip::insert_spatial_filter(document, ins) {
-                    let poly = pick::xclip::world_clip_polygon_f64(sf, ins, world_offset);
+                    let poly = pick::xclip::world_clip_polygon_f64(sf, ins);
                     pick::xclip::clip_wires(&mut wires, &poly);
                 }
 
@@ -8459,7 +8371,6 @@ fn tessellate_entity(
                     is_xref,
                     pslt_factor,
                     anno_scale,
-                    world_offset,
                 );
                 wires.push(marker);
                 return wires;
@@ -8494,7 +8405,7 @@ fn tessellate_entity(
                 } else {
                     sub_color
                 };
-                let sub_aabb = entity_aabb(&sub, world_offset);
+                let sub_aabb = entity_aabb(&sub);
                 let sub_pattern_length = sub_pattern_length * pslt_factor;
                 let sub_pattern = sub_pattern.map(|v| v * pslt_factor);
                 let mut wires = convert::tessellate::tessellate(
@@ -8506,7 +8417,6 @@ fn tessellate_entity(
                     sub_pattern_length,
                     sub_pattern,
                     sub_line_weight_px,
-                    world_offset,
                     anno_scale,
                     world_per_pixel,
                 );
@@ -8532,13 +8442,12 @@ fn tessellate_entity(
             is_xref,
             pslt_factor,
             anno_scale,
-            world_offset,
         );
         wires.push(marker);
         return wires;
     }
 
-    let aabb = entity_aabb(e, world_offset);
+    let aabb = entity_aabb(e);
 
     // Text-specific LOD ladder, keyed off the entity's glyph height in
     // pixels (anno-scaled):
@@ -8575,7 +8484,7 @@ fn tessellate_entity(
                 _ => 1,
             };
             if h_px < 1.0 {
-                let pts = crate::entities::text_support::text_baseline_points(e, anno_scale, world_offset, n_lines);
+                let pts = crate::entities::text_support::text_baseline_points(e, anno_scale, n_lines);
                 if pts.len() < 2 {
                     return vec![];
                 }
@@ -8622,7 +8531,7 @@ fn tessellate_entity(
                 }];
             }
             if h_px < 5.0 && aabb != WireModel::UNBOUNDED_AABB {
-                let fill_tris = crate::entities::text_support::text_greek_obb_tris(e, anno_scale, world_offset, n_lines);
+                let fill_tris = crate::entities::text_support::text_greek_obb_tris(e, anno_scale, n_lines);
                 if fill_tris.is_empty() {
                     // Text greek fallback: also 2-D, keep stub at z=0.
                     return vec![lod_stub_wire(
@@ -8672,7 +8581,6 @@ fn tessellate_entity(
         pattern_length,
         pattern,
         line_weight_px,
-        world_offset,
         anno_scale,
         world_per_pixel,
     );
@@ -8836,9 +8744,9 @@ fn lod_stub_wire_3d(
 /// INSERT only stamps the geometry once, attribute text sits at the world
 /// position recorded on each ATTRIB. See #20.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn entity_aabb(e: &acadrust::EntityType, world_offset: [f64; 3]) -> [f32; 4] {
+pub(crate) fn entity_aabb(e: &acadrust::EntityType) -> [f32; 4] {
     let bbox = e.as_entity().bounding_box();
-    let [ox, oy, _] = world_offset;
+    let [ox, oy, _] = [0.0_f64; 3];
     let min_x = (bbox.min.x - ox) as f32;
     let min_y = (bbox.min.y - oy) as f32;
     let max_x = (bbox.max.x - ox) as f32;

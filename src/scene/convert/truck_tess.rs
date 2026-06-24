@@ -94,11 +94,11 @@ pub enum TruckTessResult {
 /// before truncating.  This preserves sub-unit decimal precision even when the
 /// raw world coordinates are in the millions (e.g. Turkish UTM).
 #[inline]
-fn to_local(x: f64, y: f64, z: f64, off: [f64; 3]) -> [f32; 3] {
+fn to_local(x: f64, y: f64, z: f64) -> [f32; 3] {
     [
-        (x - off[0]) as f32,
-        (y - off[1]) as f32,
-        (z - off[2]) as f32,
+        x as f32,
+        y as f32,
+        z as f32,
     ]
 }
 
@@ -106,26 +106,26 @@ fn to_local(x: f64, y: f64, z: f64, off: [f64; 3]) -> [f32; 3] {
 /// with the high half so the double-single shader path reconstructs the f64
 /// source even when the high half is quantized to half a metre at UTM scale.
 #[inline]
-fn to_local_low(x: f64, y: f64, z: f64, off: [f64; 3], hi: [f32; 3]) -> [f32; 3] {
+fn to_local_low(x: f64, y: f64, z: f64, hi: [f32; 3]) -> [f32; 3] {
     [
-        ((x - off[0]) - hi[0] as f64) as f32,
-        ((y - off[1]) - hi[1] as f64) as f32,
-        ((z - off[2]) - hi[2] as f64) as f32,
+        (x - hi[0] as f64) as f32,
+        (y - hi[1] as f64) as f32,
+        (z - hi[2] as f64) as f32,
     ]
 }
 
 // ── Vertex ────────────────────────────────────────────────────────────────
 
-pub fn tessellate_vertex(v: &Vertex, offset: [f64; 3]) -> TruckTessResult {
+pub fn tessellate_vertex(v: &Vertex) -> TruckTessResult {
     let p = v.point();
-    let hi = to_local(p.x, p.y, p.z, offset);
-    let lo = to_local_low(p.x, p.y, p.z, offset, hi);
+    let hi = to_local(p.x, p.y, p.z);
+    let lo = to_local_low(p.x, p.y, p.z, hi);
     TruckTessResult::Point(hi, lo)
 }
 
 // ── Edge ──────────────────────────────────────────────────────────────────
 
-pub fn tessellate_edge(e: &Edge, offset: [f64; 3]) -> TruckTessResult {
+pub fn tessellate_edge(e: &Edge) -> TruckTessResult {
     // oriented_curve() respects the edge direction (inverts if needed).
     let curve = e.oriented_curve();
     let (t0, t1) = curve.range_tuple();
@@ -136,8 +136,8 @@ pub fn tessellate_edge(e: &Edge, offset: [f64; 3]) -> TruckTessResult {
     let mut high: Vec<[f32; 3]> = Vec::with_capacity(pts.len());
     let mut low: Vec<[f32; 3]> = Vec::with_capacity(pts.len());
     for p in &pts {
-        let hi = to_local(p.x, p.y, p.z, offset);
-        let lo = to_local_low(p.x, p.y, p.z, offset, hi);
+        let hi = to_local(p.x, p.y, p.z);
+        let lo = to_local_low(p.x, p.y, p.z, hi);
         high.push(hi);
         low.push(lo);
     }
@@ -146,11 +146,11 @@ pub fn tessellate_edge(e: &Edge, offset: [f64; 3]) -> TruckTessResult {
 
 // ── Wire ──────────────────────────────────────────────────────────────────
 
-pub fn tessellate_wire(w: &Wire, offset: [f64; 3]) -> TruckTessResult {
+pub fn tessellate_wire(w: &Wire) -> TruckTessResult {
     let mut high: Vec<[f32; 3]> = Vec::new();
     let mut low: Vec<[f32; 3]> = Vec::new();
     for edge in w.edge_iter() {
-        if let TruckTessResult::Lines(eh, el) = tessellate_edge(edge, offset) {
+        if let TruckTessResult::Lines(eh, el) = tessellate_edge(edge) {
             if high.is_empty() {
                 high = eh;
                 low = el;
@@ -169,14 +169,14 @@ pub fn tessellate_wire(w: &Wire, offset: [f64; 3]) -> TruckTessResult {
 
 #[allow(dead_code)]
 #[cfg(feature = "solid3d")]
-pub fn tessellate_shell(s: &Shell, offset: [f64; 3]) -> TruckTessResult {
+pub fn tessellate_shell(s: &Shell) -> TruckTessResult {
     let meshed = s.triangulation(MESH_TOL);
-    polygon_to_result(meshed.to_polygon(), offset)
+    polygon_to_result(meshed.to_polygon())
 }
 
 /// Without `solid3d` (e.g. wasm) there is no mesher; a shell yields no mesh.
 #[cfg(not(feature = "solid3d"))]
-pub fn tessellate_shell(_s: &Shell, _offset: [f64; 3]) -> TruckTessResult {
+pub fn tessellate_shell(_s: &Shell) -> TruckTessResult {
     TruckTessResult::Mesh {
         verts: Vec::new(),
         verts_low: Vec::new(),
@@ -189,15 +189,15 @@ pub fn tessellate_shell(_s: &Shell, _offset: [f64; 3]) -> TruckTessResult {
 
 #[allow(dead_code)]
 #[cfg(feature = "solid3d")]
-pub fn tessellate_solid(s: &Solid, offset: [f64; 3]) -> TruckTessResult {
+pub fn tessellate_solid(s: &Solid) -> TruckTessResult {
     let meshed = s.triangulation(MESH_TOL);
-    polygon_to_result(meshed.to_polygon(), offset)
+    polygon_to_result(meshed.to_polygon())
 }
 
 /// Without `solid3d` (e.g. wasm) there is no mesher; a solid yields no mesh.
 #[allow(dead_code)]
 #[cfg(not(feature = "solid3d"))]
-pub fn tessellate_solid(_s: &Solid, _offset: [f64; 3]) -> TruckTessResult {
+pub fn tessellate_solid(_s: &Solid) -> TruckTessResult {
     TruckTessResult::Mesh {
         verts: Vec::new(),
         verts_low: Vec::new(),
@@ -209,13 +209,13 @@ pub fn tessellate_solid(_s: &Solid, _offset: [f64; 3]) -> TruckTessResult {
 // ── Internal ─────────────────────────────────────────────────────────────
 
 #[cfg(feature = "solid3d")]
-fn polygon_to_result(mesh: PolygonMesh, offset: [f64; 3]) -> TruckTessResult {
+fn polygon_to_result(mesh: PolygonMesh) -> TruckTessResult {
     let positions = mesh.positions();
     let mut verts: Vec<[f32; 3]> = Vec::with_capacity(positions.len());
     let mut verts_low: Vec<[f32; 3]> = Vec::with_capacity(positions.len());
     for p in positions.iter() {
-        let hi = to_local(p.x, p.y, p.z, offset);
-        verts_low.push(to_local_low(p.x, p.y, p.z, offset, hi));
+        let hi = to_local(p.x, p.y, p.z);
+        verts_low.push(to_local_low(p.x, p.y, p.z, hi));
         verts.push(hi);
     }
 

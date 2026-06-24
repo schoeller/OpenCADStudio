@@ -1241,7 +1241,6 @@ impl OpenCADStudio {
                 let entity_opt = self.tabs[i].scene.document.get_entity(handle).cloned();
                 if let Some(entity) = entity_opt {
                     let truck_entity = entity.to_truck_entity(&self.tabs[i].scene.document);
-                    let woff = [0.0_f64; 3];
                     let result = truck_entity.and_then(|te| {
                         match te.object {
                             TruckObject::Contour(wire) => {
@@ -1250,7 +1249,7 @@ impl OpenCADStudio {
                                 // tsweep(Face) → Solid
                                 let solid =
                                     builder::tsweep(&face, TruckVec3::new(0.0, 0.0, height as f64));
-                                match truck_tess::tessellate_solid(&solid, woff) {
+                                match truck_tess::tessellate_solid(&solid) {
                                     truck_tess::TruckTessResult::Mesh {
                                         verts,
                                         verts_low,
@@ -1309,7 +1308,6 @@ impl OpenCADStudio {
                 let entity_opt = self.tabs[i].scene.document.get_entity(handle).cloned();
                 if let Some(entity) = entity_opt {
                     let truck_entity = entity.to_truck_entity(&self.tabs[i].scene.document);
-                    let woff = [0.0_f64; 3];
                     let result = truck_entity.and_then(|te| {
                         let wire: Option<truck_modeling::Wire> = match te.object {
                             TruckObject::Contour(w) => Some(w),
@@ -1330,7 +1328,7 @@ impl OpenCADStudio {
                             axis,
                             Rad(angle_deg.to_radians() as f64),
                         );
-                        match truck_tess::tessellate_shell(&shell, woff) {
+                        match truck_tess::tessellate_shell(&shell) {
                             truck_tess::TruckTessResult::Mesh {
                                 verts,
                                 verts_low,
@@ -1389,7 +1387,6 @@ impl OpenCADStudio {
                     .get_entity(profile_handle)
                     .cloned();
                 let path_ent = self.tabs[i].scene.document.get_entity(path_handle).cloned();
-                let woff = [0.0_f64; 3];
 
                 let result = profile_ent.zip(path_ent).and_then(|(prof_e, path_e)| {
                     let prof_truck = prof_e.to_truck_entity(&self.tabs[i].scene.document)?;
@@ -1417,7 +1414,7 @@ impl OpenCADStudio {
                             // wire we get a Solid, otherwise a Shell.
                             if let Ok(face) = builder::try_attach_plane(&[profile_wire.clone()]) {
                                 let solid = builder::tsweep(&face, dir);
-                                match truck_tess::tessellate_solid(&solid, woff) {
+                                match truck_tess::tessellate_solid(&solid) {
                                     truck_tess::TruckTessResult::Mesh {
                                         verts,
                                         verts_low,
@@ -1436,7 +1433,7 @@ impl OpenCADStudio {
                                 }
                             } else {
                                 let shell = builder::tsweep(&profile_wire, dir);
-                                match truck_tess::tessellate_shell(&shell, woff) {
+                                match truck_tess::tessellate_shell(&shell) {
                                     truck_tess::TruckTessResult::Mesh {
                                         verts,
                                         verts_low,
@@ -1470,7 +1467,7 @@ impl OpenCADStudio {
                             );
                             if let Ok(face) = builder::try_attach_plane(&[profile_wire.clone()]) {
                                 let solid = builder::tsweep(&face, dir);
-                                match truck_tess::tessellate_solid(&solid, woff) {
+                                match truck_tess::tessellate_solid(&solid) {
                                     truck_tess::TruckTessResult::Mesh {
                                         verts,
                                         verts_low,
@@ -1489,7 +1486,7 @@ impl OpenCADStudio {
                                 }
                             } else {
                                 let shell = builder::tsweep(&profile_wire, dir);
-                                match truck_tess::tessellate_shell(&shell, woff) {
+                                match truck_tess::tessellate_shell(&shell) {
                                     truck_tess::TruckTessResult::Mesh {
                                         verts,
                                         verts_low,
@@ -1556,7 +1553,6 @@ impl OpenCADStudio {
                     }
                 }
 
-                let woff = [0.0_f64; 3];
                 let result: Option<crate::scene::model::mesh_model::MeshModel> = (|| {
                     if wires.len() < 2 {
                         return None;
@@ -1581,7 +1577,7 @@ impl OpenCADStudio {
                     }
 
                     let shell = truck_modeling::Shell::from(all_faces);
-                    match truck_tess::tessellate_shell(&shell, woff) {
+                    match truck_tess::tessellate_shell(&shell) {
                         truck_tess::TruckTessResult::Mesh {
                             verts,
                             verts_low,

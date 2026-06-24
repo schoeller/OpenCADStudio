@@ -12,11 +12,11 @@ pub trait TruckConvertible {
 }
 
 /// Fallback geometry for entities not routed through the truck topology
-/// pipeline (Viewport, Insert, Hatch outline, Ole2Frame). Returns
-/// world-offset-relative `f32` points + snap/key vertices the
-/// dispatcher wraps into a `WireModel`.
+/// pipeline (Viewport, Insert, Hatch outline, Ole2Frame). Returns absolute
+/// WCS `f32` points + snap/key vertices the dispatcher wraps into a
+/// `WireModel`.
 pub trait FallbackTess {
-    fn fallback_geometry(&self, world_offset: [f64; 3]) -> FallbackGeometry;
+    fn fallback_geometry(&self) -> FallbackGeometry;
 }
 
 pub trait Grippable {
