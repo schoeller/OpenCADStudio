@@ -233,9 +233,24 @@ impl Camera {
     }
 
     pub fn pick_on_target_plane(&self, screen: Point, bounds: Rectangle) -> Vec3 {
+        self.pick_on_target_plane_f64(screen, bounds).as_vec3()
+    }
+
+    /// f64 variant of [`pick_on_plane`] — keeps the cursor precise at UTM-scale.
+    pub fn pick_on_plane_f64(
+        &self,
+        screen: Point,
+        bounds: Rectangle,
+        plane_normal: Vec3,
+        plane_point: glam::DVec3,
+    ) -> glam::DVec3 {
+        self.unproject_on_plane_f64(screen, bounds, plane_normal, plane_point)
+    }
+
+    /// f64 variant of [`pick_on_target_plane`].
+    pub fn pick_on_target_plane_f64(&self, screen: Point, bounds: Rectangle) -> glam::DVec3 {
         let forward = (self.target.as_vec3() - self.eye()).normalize_or(Vec3::NEG_Z);
         self.unproject_on_plane_f64(screen, bounds, forward, self.target)
-            .as_vec3()
     }
 
 

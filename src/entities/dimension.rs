@@ -3,7 +3,7 @@ use acadrust::entities::{
     DimensionDiameter, DimensionLinear, DimensionOrdinate, DimensionRadius,
 };
 use acadrust::Entity;
-use glam::Vec3;
+use glam::{DVec3, Vec3};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
@@ -540,21 +540,22 @@ where
     }
 }
 
-fn rotate_point(p: &mut acadrust::types::Vector3, center: Vec3, angle_rad: f32) {
-    let dx = p.x as f32 - center.x;
-    let dy = p.y as f32 - center.y;
-    let (s, c) = angle_rad.sin_cos();
-    p.x = (center.x + dx * c - dy * s) as f64;
-    p.y = (center.y + dx * s + dy * c) as f64;
+fn rotate_point(p: &mut acadrust::types::Vector3, center: DVec3, angle_rad: f32) {
+    let dx = p.x - center.x;
+    let dy = p.y - center.y;
+    let (s, c) = (angle_rad as f64).sin_cos();
+    p.x = center.x + dx * c - dy * s;
+    p.y = center.y + dx * s + dy * c;
 }
 
-fn scale_point(p: &mut acadrust::types::Vector3, center: Vec3, factor: f32) {
-    p.x = (center.x + (p.x as f32 - center.x) * factor) as f64;
-    p.y = (center.y + (p.y as f32 - center.y) * factor) as f64;
-    p.z = (center.z + (p.z as f32 - center.z) * factor) as f64;
+fn scale_point(p: &mut acadrust::types::Vector3, center: DVec3, factor: f32) {
+    let f = factor as f64;
+    p.x = center.x + (p.x - center.x) * f;
+    p.y = center.y + (p.y - center.y) * f;
+    p.z = center.z + (p.z - center.z) * f;
 }
 
-fn mirror_point(p: &mut acadrust::types::Vector3, p1: Vec3, p2: Vec3) {
+fn mirror_point(p: &mut acadrust::types::Vector3, p1: DVec3, p2: DVec3) {
     crate::scene::view::transform::reflect_xy_point(&mut p.x, &mut p.y, p1, p2);
 }
 
@@ -582,16 +583,16 @@ fn dv3(v: &acadrust::types::Vector3) -> glam::DVec3 {
     glam::DVec3::new(v.x, v.y, v.z)
 }
 
-fn set_v3(target: &mut acadrust::types::Vector3, p: Vec3) {
-    target.x = p.x as f64;
-    target.y = p.y as f64;
-    target.z = p.z as f64;
+fn set_v3(target: &mut acadrust::types::Vector3, p: DVec3) {
+    target.x = p.x;
+    target.y = p.y;
+    target.z = p.z;
 }
 
-fn translate_v3(target: &mut acadrust::types::Vector3, d: Vec3) {
-    target.x += d.x as f64;
-    target.y += d.y as f64;
-    target.z += d.z as f64;
+fn translate_v3(target: &mut acadrust::types::Vector3, d: DVec3) {
+    target.x += d.x;
+    target.y += d.y;
+    target.z += d.z;
 }
 
 fn apply_to_v3(target: &mut acadrust::types::Vector3, apply: &GripApply) {

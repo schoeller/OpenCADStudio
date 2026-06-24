@@ -1688,7 +1688,7 @@ impl OpenCADStudio {
                             self.sync_dyn_fields();
                             self.reset_tracking_after_point();
                             self.push_ucs_to_cmd(i);
-                            let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_point(pt));
+                            let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_point(pt.as_dvec3()));
                             if let Some(r) = result {
                                 let task = self.apply_cmd_result(r);
                                 self.refresh_active_cmd_preview(i);
@@ -1730,7 +1730,7 @@ impl OpenCADStudio {
                         self.sync_dyn_fields();
                         self.reset_tracking_after_point();
                         self.push_ucs_to_cmd(i);
-                        let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_point(wcs_pt));
+                        let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_point(wcs_pt.as_dvec3()));
                         if let Some(r) = result {
                             let task = self.apply_cmd_result(r);
                             // The rubber-band preview that the command
@@ -2617,10 +2617,10 @@ impl OpenCADStudio {
                         height: vh,
                     };
                     let cam = self.tabs[i].scene.camera.borrow();
-                    let raw_paper = cam.pick_on_target_plane(p, bounds);
+                    let raw_paper = cam.pick_on_target_plane_f64(p, bounds);
                     let view_rot = cam.view_proj_rte(bounds); let eye = cam.eye_f64();
                     drop(cam);
-                    let raw = self.tabs[i].scene.paper_to_model(raw_paper);
+                    let raw = self.tabs[i].scene.paper_to_model_f64(raw_paper);
 
                     // First move of this drag: hide the edited entity from the
                     // base tessellation (one re-tess) so subsequent moves only
@@ -2648,7 +2648,7 @@ impl OpenCADStudio {
                     self.snapper.from_point = None;
                     let (go, gr) = self.tabs[i].ucs_grid_basis();
                     let snap_hit =
-                        self.snapper.snap(raw, p, &all_wires[..], view_rot, eye, bounds, go, gr);
+                        self.snapper.snap(raw.as_vec3(), p, &all_wires[..], view_rot, eye, bounds, go, gr);
                     let mut snapped = snap_hit.map(|s| s.world).unwrap_or(raw);
                     self.tabs[i].snap_result = snap_hit;
                     if let Some(s) = self.tabs[i].snap_result.as_mut() {
@@ -2657,13 +2657,13 @@ impl OpenCADStudio {
                     }
 
                     if snap_hit.is_none() {
-                        let base = grip.origin_world;
+                        let base = grip.origin_world.as_vec3();
                         let ucs_xf = self.tabs[i].ucs_xform();
                         if self.ortho_mode {
-                            snapped = ortho_constrain(snapped, base, &ucs_xf);
+                            snapped = ortho_constrain(snapped.as_vec3(), base, &ucs_xf).as_dvec3();
                         } else if self.polar_mode {
                             snapped = polar_constrain_near(
-                                snapped,
+                                snapped.as_vec3(),
                                 base,
                                 self.polar_increment_deg,
                                 view_rot,
@@ -2671,7 +2671,8 @@ impl OpenCADStudio {
                                 bounds,
                                 self.snapper.osnap_radius_px,
                                 &ucs_xf,
-                            );
+                            )
+                            .as_dvec3();
                         }
                     }
 
@@ -2679,9 +2680,9 @@ impl OpenCADStudio {
                     // Only add world_offset when converting local → DXF space in model space.
                     let wo_vec = if self.tabs[i].scene.current_layout == "Model" {
                         let wo = [0.0_f64; 3];
-                        glam::Vec3::new(wo[0] as f32, wo[1] as f32, wo[2] as f32)
+                        glam::DVec3::new(wo[0], wo[1], wo[2])
                     } else {
-                        glam::Vec3::ZERO
+                        glam::DVec3::ZERO
                     };
                     let apply = if grip.is_translate {
                         GripApply::Translate(snapped - grip.last_world)
@@ -2765,23 +2766,19 @@ impl OpenCADStudio {
                         height: vh,
                     };
                     let cursor_paper = if let Some(ref ucs) = self.tabs[i].active_ucs {
-                        let origin = glam::Vec3::new(
-                            ucs.origin.x as f32,
-                            ucs.origin.y as f32,
-                            ucs.origin.z as f32,
-                        );
+                        let origin = glam::DVec3::new(ucs.origin.x, ucs.origin.y, ucs.origin.z);
                         let normal = ucs_z_axis(ucs);
                         self.tabs[i]
                             .scene
                             .camera
                             .borrow()
-                            .pick_on_plane(p, bounds, normal, origin)
+                            .pick_on_plane_f64(p, bounds, normal, origin)
                     } else {
                         self.tabs[i]
                             .scene
                             .camera
                             .borrow()
-                            .pick_on_target_plane(p, bounds)
+                            .pick_on_target_plane_f64(p, bounds)
                     };
                     let (view_rot, eye) = {
                         let cam = self.tabs[i].scene.camera.borrow();
@@ -2792,7 +2789,7 @@ impl OpenCADStudio {
                         crate::ui::overlay::compute_grid_step(view_rot, bounds);
                     // In MSPACE, map paper-space cursor to model space so that
                     // command previews and snapping work in the correct coordinate space.
-                    let cursor_world = self.tabs[i].scene.paper_to_model(cursor_paper);
+                    let cursor_world = self.tabs[i].scene.paper_to_model_f64(cursor_paper);
 
                     let all_wires = self.tabs[i].scene.hit_test_wires();
                     let needs_entity = self.tabs[i]
@@ -2819,7 +2816,7 @@ impl OpenCADStudio {
                         None
                     } else if needs_tan {
                         self.snapper.snap_tangent_only(
-                            cursor_world,
+                            cursor_world.as_vec3(),
                             p,
                             &all_wires[..],
                             view_rot,
@@ -2830,14 +2827,14 @@ impl OpenCADStudio {
                         let (go, gr) = self.tabs[i].ucs_grid_basis();
                         self.snapper.from_point = self.last_point;
                         self.snapper
-                            .snap(cursor_world, p, &all_wires[..], view_rot, eye, bounds, go, gr)
+                            .snap(cursor_world.as_vec3(), p, &all_wires[..], view_rot, eye, bounds, go, gr)
                     };
 
                     // Object Snap Tracking: update dwell, then align the cursor
                     // to a tracking ray (and store the alignment so a typed
                     // distance can place a point along it — issue #69).
                     let otrack_hit = {
-                        let snap_world = self.tabs[i].snap_result.map(|s| s.world);
+                        let snap_world = self.tabs[i].snap_result.map(|s| s.world.as_vec3());
                         self.snapper.update_otrack_dwell(
                             snap_world,
                             view_rot,
@@ -2853,7 +2850,7 @@ impl OpenCADStudio {
                             };
                             let ucs = self.tabs[i].scene.viewcube_ucs_mat();
                             self.snapper.otrack_snap(
-                                cursor_world,
+                                cursor_world.as_vec3(),
                                 view_rot,
                                 eye,
                                 bounds,
@@ -2868,16 +2865,16 @@ impl OpenCADStudio {
                     self.otrack_active = otrack_hit.map(|h| (h.base, h.dir));
 
                     let effective = {
-                        let mut pt = if let Some(h) = otrack_hit {
+                        let mut pt: glam::DVec3 = if let Some(h) = otrack_hit {
                             // Tracking alignment wins over the free cursor;
                             // ortho/polar don't re-constrain it.
-                            h.aligned
+                            h.aligned.as_dvec3()
                         } else {
                             // snap.world is paper-space for viewport-projected
                             // wires; convert to model-space for previews.
                             let mut pt = self.tabs[i]
                                 .snap_result
-                                .map(|s| self.tabs[i].scene.paper_to_model(s.world))
+                                .map(|s| self.tabs[i].scene.paper_to_model_f64(s.world))
                                 .unwrap_or(cursor_world);
                             // Object snap wins over ortho/polar: a snapped point
                             // is taken as-is so it isn't pulled onto the ortho
@@ -2890,10 +2887,11 @@ impl OpenCADStudio {
                                 if let Some(base) = self.last_point {
                                     let ucs_xf = self.tabs[i].ucs_xform();
                                     if self.ortho_mode {
-                                        pt = ortho_constrain(pt, base, &ucs_xf);
+                                        pt = ortho_constrain(pt.as_vec3(), base, &ucs_xf)
+                                            .as_dvec3();
                                     } else if self.polar_mode {
                                         pt = polar_constrain_near(
-                                            pt,
+                                            pt.as_vec3(),
                                             base,
                                             self.polar_increment_deg,
                                             view_rot,
@@ -2901,7 +2899,8 @@ impl OpenCADStudio {
                                             bounds,
                                             self.snapper.osnap_radius_px,
                                             &ucs_xf,
-                                        );
+                                        )
+                                        .as_dvec3();
                                     }
                                 }
                             }
@@ -2914,7 +2913,7 @@ impl OpenCADStudio {
                         }
                         pt
                     };
-                    self.tabs[i].last_cursor_world = effective;
+                    self.tabs[i].last_cursor_world = effective.as_vec3();
                     self.tabs[i].last_cursor_screen = p_full;
                     // Project the step anchor (an explicit `dyn_anchor` or the
                     // last point) so the dynamic-input overlay can place its
@@ -2941,7 +2940,7 @@ impl OpenCADStudio {
                     } else {
                         [0.0; 3]
                     };
-                    let wo_f = glam::Vec3::new(wo_local[0] as f32, wo_local[1] as f32, wo_local[2] as f32);
+                    let wo_f = glam::DVec3::new(wo_local[0], wo_local[1], wo_local[2]);
                     let effective_wcs = effective + wo_f;
 
                     // Orange object snap (plugin commands implement resolve_object_pick).
@@ -2955,8 +2954,8 @@ impl OpenCADStudio {
                             )
                         });
                         if let Some(pick) = pick {
-                            let world = glam::Vec3::new(pick.x as f32, pick.y as f32, effective.z);
-                            let ndc = view_rot.project_point3((world.as_dvec3() - eye).as_vec3());
+                            let world = glam::DVec3::new(pick.x, pick.y, effective.z);
+                            let ndc = view_rot.project_point3((world - eye).as_vec3());
                             let screen = iced::Point::new(
                                 (ndc.x + 1.0) * 0.5 * bounds.width,
                                 (1.0 - ndc.y) * 0.5 * bounds.height,
@@ -3008,12 +3007,12 @@ impl OpenCADStudio {
                         // on_hover_entity returns WCS wires; shift to the
                         // offset-relative frame so the preview lands on the
                         // geometry on large-coordinate drawings.
-                        if wo_f != glam::Vec3::ZERO {
+                        if wo_f != glam::DVec3::ZERO {
                             for w in p.iter_mut() {
                                 for pt in w.points.iter_mut() {
-                                    pt[0] -= wo_f.x;
-                                    pt[1] -= wo_f.y;
-                                    pt[2] -= wo_f.z;
+                                    pt[0] -= wo_f.x as f32;
+                                    pt[1] -= wo_f.y as f32;
+                                    pt[2] -= wo_f.z as f32;
                                 }
                             }
                         }
@@ -3042,6 +3041,7 @@ impl OpenCADStudio {
                     // the snapped angle direction, extending across the drawing.
                     if self.polar_mode && !needs_entity {
                         if let Some(base) = self.last_point {
+                            let effective = effective.as_vec3();
                             let dx = effective.x - base.x;
                             let dy = effective.y - base.y;
                             // Only show the guide while POLAR is actually engaged
@@ -3428,26 +3428,22 @@ impl OpenCADStudio {
                         // Project screen point onto the active UCS XY plane (or world XY when
                         // no UCS is active).
                         let raw_paper = if let Some(ref ucs) = self.tabs[i].active_ucs {
-                            let origin = glam::Vec3::new(
-                                ucs.origin.x as f32,
-                                ucs.origin.y as f32,
-                                ucs.origin.z as f32,
-                            );
+                            let origin = glam::DVec3::new(ucs.origin.x, ucs.origin.y, ucs.origin.z);
                             let normal = ucs_z_axis(ucs);
                             self.tabs[i]
                                 .scene
                                 .camera
                                 .borrow()
-                                .pick_on_plane(p, bounds, normal, origin)
+                                .pick_on_plane_f64(p, bounds, normal, origin)
                         } else {
                             self.tabs[i]
                                 .scene
                                 .camera
                                 .borrow()
-                                .pick_on_target_plane(p, bounds)
+                                .pick_on_target_plane_f64(p, bounds)
                         };
                         // Convert paper-space → model-space when inside a viewport.
-                        let raw = self.tabs[i].scene.paper_to_model(raw_paper);
+                        let raw = self.tabs[i].scene.paper_to_model_f64(raw_paper);
                         let (view_rot, eye) = { let c = self.tabs[i].scene.camera.borrow(); (c.view_proj_rte(bounds), c.eye_f64()) };
                         let all_wires = self.tabs[i].scene.hit_test_wires();
                         let needs_tan = self.tabs[i]
@@ -3464,16 +3460,16 @@ impl OpenCADStudio {
                             None
                         } else if needs_tan {
                             self.snapper
-                                .snap_tangent_only(raw, p, &all_wires[..], view_rot, eye, bounds)
+                                .snap_tangent_only(raw.as_vec3(), p, &all_wires[..], view_rot, eye, bounds)
                         } else {
                             let (go, gr) = self.tabs[i].ucs_grid_basis();
                             self.snapper.from_point = self.last_point;
-                            self.snapper.snap(raw, p, &all_wires[..], view_rot, eye, bounds, go, gr)
+                            self.snapper.snap(raw.as_vec3(), p, &all_wires[..], view_rot, eye, bounds, go, gr)
                         };
                         // snap.world is in paper-space (projected wire coords in MSPACE);
                         // convert to model-space so commands receive consistent coordinates.
                         let mut pt = snap_hit
-                            .map(|s| self.tabs[i].scene.paper_to_model(s.world))
+                            .map(|s| self.tabs[i].scene.paper_to_model_f64(s.world))
                             .unwrap_or(raw);
                         // When no UCS is active clamp to world XY; with a UCS the point is
                         // already constrained to that plane by the ray–plane intersection.
@@ -3490,12 +3486,12 @@ impl OpenCADStudio {
                             };
                             let ucs = self.tabs[i].scene.viewcube_ucs_mat();
                             self.snapper
-                                .otrack_snap(raw, view_rot, eye, bounds, step, self.last_point, ucs)
+                                .otrack_snap(raw.as_vec3(), view_rot, eye, bounds, step, self.last_point, ucs)
                         } else {
                             None
                         };
                         if let Some(h) = otrack {
-                            pt = h.aligned;
+                            pt = h.aligned.as_dvec3();
                             if self.tabs[i].active_ucs.is_none() {
                                 pt.z = 0.0;
                             }
@@ -3507,10 +3503,10 @@ impl OpenCADStudio {
                             if let Some(base) = self.last_point {
                                 let ucs_xf = self.tabs[i].ucs_xform();
                                 if self.ortho_mode {
-                                    pt = ortho_constrain(pt, base, &ucs_xf);
+                                    pt = ortho_constrain(pt.as_vec3(), base, &ucs_xf).as_dvec3();
                                 } else if self.polar_mode {
                                     pt = polar_constrain_near(
-                                        pt,
+                                        pt.as_vec3(),
                                         base,
                                         self.polar_increment_deg,
                                         view_rot,
@@ -3518,7 +3514,8 @@ impl OpenCADStudio {
                                         bounds,
                                         self.snapper.osnap_radius_px,
                                         &ucs_xf,
-                                    );
+                                    )
+                                    .as_dvec3();
                                 }
                             }
                         }
@@ -3538,7 +3535,7 @@ impl OpenCADStudio {
                         } else {
                             [0.0; 3]
                         };
-                        world_pt + glam::Vec3::new(wo[0] as f32, wo[1] as f32, wo[2] as f32)
+                        world_pt + glam::DVec3::new(wo[0], wo[1], wo[2])
                     };
 
                     let result = if self.tabs[i]
@@ -3555,7 +3552,7 @@ impl OpenCADStudio {
                             )
                         });
                         if let Some(pick) = pick {
-                            let center = glam::Vec3::new(pick.x as f32, pick.y as f32, pick_wcs.z);
+                            let center = glam::DVec3::new(pick.x, pick.y, pick_wcs.z);
                             let result = self.tabs[i]
                                 .active_cmd
                                 .as_mut()
@@ -3701,7 +3698,7 @@ impl OpenCADStudio {
                                 self.tabs[i].dyn_active = 0;
                             }
                         }
-                        self.last_point = Some(world_pt);
+                        self.last_point = Some(world_pt.as_vec3());
                         self.dyn_user_reshaped = false;
                         self.sync_dyn_fields();
                         self.reset_tracking_after_point();
@@ -4510,8 +4507,8 @@ impl OpenCADStudio {
                             handle: popup.handle,
                             grip_id,
                             is_translate,
-                            origin_world: g.world.as_vec3(),
-                            last_world: g.world.as_vec3(),
+                            origin_world: g.world,
+                            last_world: g.world,
                         });
                     }
                     return Task::none();
@@ -4572,8 +4569,8 @@ impl OpenCADStudio {
                             handle: popup.handle,
                             grip_id: new_gid,
                             is_translate: false,
-                            origin_world: g.world.as_vec3(),
-                            last_world: g.world.as_vec3(),
+                            origin_world: g.world,
+                            last_world: g.world,
                         });
                         self.grip_add_provisional = Some((popup.handle, new_gid));
                     }
@@ -8215,9 +8212,9 @@ impl OpenCADStudio {
         self.tabs[i].dyn_guide = spec.guide;
         self.tabs[i].dyn_anchor = match spec.anchor {
             crate::command::DynAnchor::LastPoint => self.last_point,
-            crate::command::DynAnchor::Point(p) => Some(p),
+            crate::command::DynAnchor::Point(p) => Some(p.as_vec3()),
         };
-        self.tabs[i].dyn_ref = spec.ref_point;
+        self.tabs[i].dyn_ref = spec.ref_point.map(|v| v.as_vec3());
     }
 
     /// Track cursor dwell over a selected entity's grip. Sets
@@ -8368,7 +8365,7 @@ impl OpenCADStudio {
         let previews = self.tabs[i]
             .active_cmd
             .as_mut()
-            .map(|c| c.on_preview_wires(cur))
+            .map(|c| c.on_preview_wires(cur.as_dvec3()))
             .unwrap_or_default();
         self.tabs[i].scene.set_preview_wires(previews);
     }
@@ -8647,7 +8644,7 @@ impl OpenCADStudio {
                         self.sync_dyn_fields();
                         self.reset_tracking_after_point();
                         self.push_ucs_to_cmd(i);
-                        let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_point(pt));
+                        let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_point(pt.as_dvec3()));
                         let task = result.map(|r| self.apply_cmd_result(r))?;
                         self.refresh_active_cmd_preview(i);
                         return Some(task);
@@ -8706,7 +8703,7 @@ impl OpenCADStudio {
         self.sync_dyn_fields();
         self.reset_tracking_after_point();
         self.push_ucs_to_cmd(i);
-        let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_point(pt));
+        let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_point(pt.as_dvec3()));
         for f in self.tabs[i].dyn_fields.iter_mut() {
             f.buffer = None;
         }

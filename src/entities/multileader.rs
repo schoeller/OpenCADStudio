@@ -24,7 +24,7 @@ pub(crate) fn mleader_v_anchor(attach: TextAttachmentType) -> MTextVAnchor {
         | TextAttachmentType::BottomOfTopLineUnderlineAll => MTextVAnchor::BottomOfTopLine,
     }
 }
-use glam::Vec3;
+use glam::{DVec3, Vec3};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
@@ -920,9 +920,9 @@ fn apply_transform(ml: &mut MultiLeader, t: &EntityTransform) {
 /// Reflect a direction (not position) vector across the mirror line p1→p2.
 /// Reflecting a direction is the same as reflecting `p1 + dir` then subtracting
 /// the reflection of `p1`, which simplifies to reflecting around the origin.
-fn reflect_xy_direction(dx: &mut f64, dy: &mut f64, p1: Vec3, p2: Vec3) {
-    let zero = Vec3::ZERO;
-    let p2_rel = Vec3::new(p2.x - p1.x, p2.y - p1.y, 0.0);
+fn reflect_xy_direction(dx: &mut f64, dy: &mut f64, p1: DVec3, p2: DVec3) {
+    let zero = DVec3::ZERO;
+    let p2_rel = DVec3::new(p2.x - p1.x, p2.y - p1.y, 0.0);
     let mut tip_x = *dx;
     let mut tip_y = *dy;
     crate::scene::view::transform::reflect_xy_point(&mut tip_x, &mut tip_y, zero, p2_rel);

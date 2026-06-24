@@ -1,7 +1,7 @@
 //! OpenCADStudio-style grip editing.
 
 use acadrust::Handle;
-use glam::Vec3;
+use glam::{DVec3, Vec3};
 use iced::{Point, Rectangle};
 
 use crate::scene::model::object::{GripDef, GripShape};
@@ -23,9 +23,9 @@ pub struct GripEdit {
     /// `true` → midpoint / translate grip; `false` → endpoint / absolute grip.
     pub is_translate: bool,
     /// World-space position of the grip when the drag started (ortho/polar base).
-    pub origin_world: Vec3,
+    pub origin_world: DVec3,
     /// Last world-space cursor position (needed for incremental delta on translate drags).
-    pub last_world: Vec3,
+    pub last_world: DVec3,
 }
 
 // ── Screen-space helpers ───────────────────────────────────────────────────
@@ -83,9 +83,9 @@ pub fn find_hit_grip_paper(
     half_w: f32,
     half_h: f32,
     bounds: Rectangle,
-) -> Option<(usize, bool, Vec3)> {
+) -> Option<(usize, bool, DVec3)> {
     let mut best_dist = GRIP_THRESHOLD_PX;
-    let mut best: Option<(usize, bool, Vec3)> = None;
+    let mut best: Option<(usize, bool, DVec3)> = None;
 
     for g in grips {
         let screen = Point::new(
@@ -97,7 +97,7 @@ pub fn find_hit_grip_paper(
         let d = (dx * dx + dy * dy).sqrt();
         if d < best_dist {
             best_dist = d;
-            best = Some((g.id, g.is_midpoint, g.world.as_vec3()));
+            best = Some((g.id, g.is_midpoint, g.world));
         }
     }
     best
@@ -110,9 +110,9 @@ pub fn find_hit_grip(
     grips: &[GripDef],
     camera: &crate::scene::view::camera::Camera,
     bounds: Rectangle,
-) -> Option<(usize, bool, Vec3)> {
+) -> Option<(usize, bool, DVec3)> {
     let mut best_dist = GRIP_THRESHOLD_PX;
-    let mut best: Option<(usize, bool, Vec3)> = None;
+    let mut best: Option<(usize, bool, DVec3)> = None;
 
     for g in grips {
         let Some(screen) = camera.project_f64(g.world, bounds) else {
@@ -124,7 +124,7 @@ pub fn find_hit_grip(
         let d = (dx * dx + dy * dy).sqrt();
         if d < best_dist {
             best_dist = d;
-            best = Some((g.id, g.is_midpoint, g.world.as_vec3()));
+            best = Some((g.id, g.is_midpoint, g.world));
         }
     }
     best

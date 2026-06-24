@@ -14,7 +14,7 @@
 //   1. Center point → 2. Item count (text) → 3. Total angle in degrees (text)
 
 use acadrust::Handle;
-use glam::{Mat4, Vec3};
+use glam::{DVec3, Mat4, Vec3};
 
 use crate::command::{CadCommand, CmdResult, EntityTransform};
 use crate::modules::draw::defaults;
@@ -94,8 +94,8 @@ impl ArrayRectCommand {
                 if r == 0 && c == 0 {
                     continue;
                 }
-                t.push(EntityTransform::Translate(ucs.transform_vector3(
-                    Vec3::new(col_sp * c as f32, row_sp * r as f32, 0.0),
+                t.push(EntityTransform::Translate(ucs.as_dmat4().transform_vector3(
+                    glam::DVec3::new((col_sp * c as f32) as f64, (row_sp * r as f32) as f64, 0.0),
                 )));
             }
         }
@@ -194,7 +194,7 @@ impl CadCommand for ArrayRectCommand {
         }
     }
 
-    fn on_preview_wires(&mut self, _pt: Vec3) -> Vec<WireModel> {
+    fn on_preview_wires(&mut self, _pt: DVec3) -> Vec<WireModel> {
         let (rows, cols, row_sp, col_sp) = match self.step {
             RectStep::Rows => (
                 self.default_rows,
@@ -219,7 +219,7 @@ impl CadCommand for ArrayRectCommand {
                 if let EntityTransform::Translate(delta) = t {
                     self.wire_models
                         .iter()
-                        .map(|w| w.translated(*delta))
+                        .map(|w| w.translated(delta.as_vec3()))
                         .collect::<Vec<_>>()
                 } else {
                     vec![]
@@ -228,7 +228,7 @@ impl CadCommand for ArrayRectCommand {
             .collect()
     }
 
-    fn on_point(&mut self, _pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, _pt: DVec3) -> CmdResult {
         CmdResult::NeedPoint
     }
 
@@ -331,6 +331,7 @@ impl CadCommand for ArrayPolarCommand {
                     v
                 };
                 let step_rad = total_deg.to_radians() / count as f32;
+                let center = center.as_dvec3();
                 let transforms = (1..count)
                     .map(|n| EntityTransform::Rotate {
                         center,
@@ -343,7 +344,8 @@ impl CadCommand for ArrayPolarCommand {
         }
     }
 
-    fn on_preview_wires(&mut self, pt: Vec3) -> Vec<WireModel> {
+    fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> {
+        let pt = pt.as_vec3();
         let (center, count, total_deg) = match &self.step {
             PolarStep::Center => (pt, self.default_count, self.default_angle),
             PolarStep::Count { center } => (*center, self.default_count, self.default_angle),
@@ -370,7 +372,8 @@ impl CadCommand for ArrayPolarCommand {
         out
     }
 
-    fn on_point(&mut self, pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        let pt = pt.as_vec3();
         if let PolarStep::Center = self.step {
             self.step = PolarStep::Count { center: pt };
         }
@@ -655,13 +658,13 @@ impl ArrayPathCommand {
             .map(|(i, &p)| {
                 let dth = tans[i] - t0;
                 if dth.abs() < 1e-5 {
-                    EntityTransform::Translate(p - p0)
+                    EntityTransform::Translate((p - p0).as_dvec3())
                 } else {
                     // The aligned copy is the rigid motion x' = p + R(x - p0),
                     // which is a pure rotation by `dth` about its fixed point.
                     let center = Self::rigid_center(p0, p, dth);
                     EntityTransform::Rotate {
-                        center,
+                        center: center.as_dvec3(),
                         angle_rad: dth,
                     }
                 }
@@ -720,7 +723,8 @@ impl CadCommand for ArrayPathCommand {
         }
     }
 
-    fn on_entity_pick(&mut self, handle: Handle, pt: Vec3) -> CmdResult {
+    fn on_entity_pick(&mut self, handle: Handle, pt: DVec3) -> CmdResult {
+        let pt = pt.as_vec3();
         if handle.is_null() || self.handles.contains(&handle) {
             return CmdResult::NeedPoint;
         }
@@ -738,7 +742,7 @@ impl CadCommand for ArrayPathCommand {
         CmdResult::NeedPoint
     }
 
-    fn on_hover_entity(&mut self, handle: Handle, _pt: Vec3) -> Vec<WireModel> {
+    fn on_hover_entity(&mut self, handle: Handle, _pt: DVec3) -> Vec<WireModel> {
         if handle.is_null() || self.handles.contains(&handle) {
             return vec![];
         }
@@ -784,7 +788,7 @@ impl CadCommand for ArrayPathCommand {
         Some(CmdResult::BatchCopy(self.handles.clone(), transforms))
     }
 
-    fn on_preview_wires(&mut self, _pt: Vec3) -> Vec<WireModel> {
+    fn on_preview_wires(&mut self, _pt: DVec3) -> Vec<WireModel> {
         let PathStep::Count { path_entity } = &self.step else {
             return vec![];
         };
@@ -796,19 +800,19 @@ impl CadCommand for ArrayPathCommand {
                 EntityTransform::Translate(delta) => self
                     .wire_models
                     .iter()
-                    .map(|w| w.translated(*delta))
+                    .map(|w| w.translated(delta.as_vec3()))
                     .collect::<Vec<_>>(),
                 EntityTransform::Rotate { center, angle_rad } => self
                     .wire_models
                     .iter()
-                    .map(|w| w.rotated(*center, *angle_rad))
+                    .map(|w| w.rotated(center.as_vec3(), *angle_rad))
                     .collect::<Vec<_>>(),
                 _ => vec![],
             })
             .collect()
     }
 
-    fn on_point(&mut self, _pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, _pt: DVec3) -> CmdResult {
         CmdResult::NeedPoint
     }
 
@@ -885,10 +889,10 @@ impl Array3DCommand {
                     }
                     // Drawing plane is world XY: X = col dir, Y = row dir,
                     // Z = level (elevation).
-                    t.push(EntityTransform::Translate(Vec3::new(
-                        col_sp * c as f32,
-                        row_sp * r as f32,
-                        lvl_sp * l as f32,
+                    t.push(EntityTransform::Translate(DVec3::new(
+                        (col_sp * c as f32) as f64,
+                        (row_sp * r as f32) as f64,
+                        (lvl_sp * l as f32) as f64,
                     )));
                 }
             }
@@ -1025,7 +1029,7 @@ impl CadCommand for Array3DCommand {
         }
     }
 
-    fn on_point(&mut self, _pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, _pt: DVec3) -> CmdResult {
         CmdResult::NeedPoint
     }
 
@@ -1037,7 +1041,7 @@ impl CadCommand for Array3DCommand {
         CmdResult::Cancel
     }
 
-    fn on_preview_wires(&mut self, _pt: Vec3) -> Vec<WireModel> {
+    fn on_preview_wires(&mut self, _pt: DVec3) -> Vec<WireModel> {
         vec![]
     }
 }

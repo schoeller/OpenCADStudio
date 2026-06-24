@@ -1,14 +1,14 @@
 use acadrust::types::{Transform, Vector3};
-use glam::Vec3;
+use glam::DVec3;
 
 use crate::command::EntityTransform;
 
 #[inline]
-fn to_v3(v: Vec3) -> Vector3 {
-    Vector3::new(v.x as f64, v.y as f64, v.z as f64)
+fn to_v3(v: DVec3) -> Vector3 {
+    Vector3::new(v.x, v.y, v.z)
 }
 
-pub fn apply_standard_transform<T>(entity: &mut T, center: Vec3, angle_rad: f32)
+pub fn apply_standard_transform<T>(entity: &mut T, center: DVec3, angle_rad: f32)
 where
     T: acadrust::Entity,
 {
@@ -19,7 +19,7 @@ where
     entity.apply_transform(&t);
 }
 
-pub fn apply_standard_scale<T>(entity: &mut T, center: Vec3, factor: f32)
+pub fn apply_standard_scale<T>(entity: &mut T, center: DVec3, factor: f32)
 where
     T: acadrust::Entity,
 {
@@ -31,7 +31,7 @@ where
 pub fn apply_standard_entity_transform<T, F>(entity: &mut T, t: &EntityTransform, mirror: F)
 where
     T: acadrust::Entity,
-    F: FnOnce(&mut T, Vec3, Vec3),
+    F: FnOnce(&mut T, DVec3, DVec3),
 {
     match t {
         EntityTransform::Translate(d) => entity.translate(to_v3(*d)),
@@ -47,7 +47,7 @@ where
 /// `Transform`, for delegating MIRROR to acadrust's entity-aware
 /// `apply_transform` paths (which handle direction flags, stored-angle
 /// conventions and bulges themselves). Degenerate line → identity.
-pub fn reflection_about_xy_line(p1: Vec3, p2: Vec3) -> acadrust::types::Transform {
+pub fn reflection_about_xy_line(p1: DVec3, p2: DVec3) -> acadrust::types::Transform {
     use acadrust::types::{Matrix4, Transform};
     let dx = (p2.x - p1.x) as f64;
     let dy = (p2.y - p1.y) as f64;
@@ -63,7 +63,7 @@ pub fn reflection_about_xy_line(p1: Vec3, p2: Vec3) -> acadrust::types::Transfor
     Transform::from_matrix(m)
 }
 
-pub fn reflect_xy_point(x: &mut f64, y: &mut f64, p1: Vec3, p2: Vec3) {
+pub fn reflect_xy_point(x: &mut f64, y: &mut f64, p1: DVec3, p2: DVec3) {
     let ax = (p2.x - p1.x) as f64;
     let ay = (p2.y - p1.y) as f64;
     let len2 = ax * ax + ay * ay;
@@ -79,7 +79,7 @@ pub fn reflect_xy_point(x: &mut f64, y: &mut f64, p1: Vec3, p2: Vec3) {
     *y = p1.y as f64 + my;
 }
 
-pub fn mirror_xy_line(line: &mut acadrust::entities::Line, p1: Vec3, p2: Vec3) {
+pub fn mirror_xy_line(line: &mut acadrust::entities::Line, p1: DVec3, p2: DVec3) {
     reflect_xy_point(&mut line.start.x, &mut line.start.y, p1, p2);
     reflect_xy_point(&mut line.end.x, &mut line.end.y, p1, p2);
 }
@@ -171,8 +171,8 @@ mod mirror_delegation_tests {
 
         // Mirror across the vertical line x = 5.
         h.apply_transform(&EntityTransform::Mirror {
-            p1: Vec3::new(5.0, 0.0, 0.0),
-            p2: Vec3::new(5.0, 1.0, 0.0),
+            p1: DVec3::new(5.0, 0.0, 0.0),
+            p2: DVec3::new(5.0, 1.0, 0.0),
         });
 
         let edges = &h.paths[0].edges;

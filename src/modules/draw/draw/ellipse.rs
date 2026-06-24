@@ -11,17 +11,17 @@ use acadrust::{Ellipse, EntityType};
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::IconKind;
 use crate::scene::model::wire_model::WireModel;
-use glam::Vec3;
+use glam::DVec3;
 
-fn parse_f32(text: &str) -> Option<f32> {
+fn parse_num(text: &str) -> Option<f64> {
     text.trim().replace(',', ".").parse().ok()
 }
 
-const TAU: f32 = std::f32::consts::TAU;
+const TAU: f64 = std::f64::consts::TAU;
 
 /// Minimum swept angle before the previewed arc may flip CW/CCW — filters the
 /// per-frame cursor jitter that otherwise reverses the sweep on tiny moves.
-const DIR_TOL: f32 = 0.1745; // ~10°
+const DIR_TOL: f64 = 0.1745; // ~10°
 
 // ── Icons ─────────────────────────────────────────────────────────────────
 
@@ -51,33 +51,33 @@ pub const ICON: IconKind = ICON_CTR;
 
 /// Preview wire for a full or partial ellipse.
 fn ellipse_wire(
-    center: Vec3,
-    major: Vec3, // vector from center to major-axis endpoint
-    ratio: f32,  // minor/major
-    t_start: f32,
-    t_end: f32,
+    center: DVec3,
+    major: DVec3, // vector from center to major-axis endpoint
+    ratio: f64,   // minor/major
+    t_start: f64,
+    t_end: f64,
 ) -> WireModel {
     let r_major = major.length();
     if r_major < 1e-9 {
         return WireModel::solid("rubber_band".into(), vec![], WireModel::CYAN, false);
     }
     let major_dir = major / r_major;
-    let v = Vec3::Z.cross(major_dir).normalize();
+    let v = DVec3::Z.cross(major_dir).normalize();
     let segs = 64u32;
     // Unwrap t_end so the arc goes counter-clockwise.
     let t_e = if t_end <= t_start { t_end + TAU } else { t_end };
     let pts: Vec<[f32; 3]> = (0..=segs)
         .map(|i| {
-            let t = t_start + (t_e - t_start) * (i as f32 / segs as f32);
+            let t = t_start + (t_e - t_start) * (i as f64 / segs as f64);
             let p = center + t.cos() * r_major * major_dir + t.sin() * r_major * ratio * v;
-            [p.x, p.y, p.z]
+            [p.x as f32, p.y as f32, p.z as f32]
         })
         .collect();
     WireModel::solid("rubber_band".into(), pts, WireModel::CYAN, false)
 }
 
 /// Convert a world point to the parametric angle on the ellipse.
-fn param_angle(center: Vec3, major_dir: Vec3, v: Vec3, pt: Vec3, ratio: f32) -> f32 {
+fn param_angle(center: DVec3, major_dir: DVec3, v: DVec3, pt: DVec3, ratio: f64) -> f64 {
     let d = pt - center;
     let u_proj = d.dot(major_dir);
     let v_proj = d.dot(v);
@@ -87,13 +87,13 @@ fn param_angle(center: Vec3, major_dir: Vec3, v: Vec3, pt: Vec3, ratio: f32) -> 
 }
 
 /// Build the final Ellipse entity.
-fn make_ellipse(center: Vec3, major: Vec3, ratio: f32, t_start: f32, t_end: f32) -> Ellipse {
+fn make_ellipse(center: DVec3, major: DVec3, ratio: f64, t_start: f64, t_end: f64) -> Ellipse {
     Ellipse {
-        center: Vector3::new(center.x as f64, center.y as f64, center.z as f64),
-        major_axis: Vector3::new(major.x as f64, major.y as f64, major.z as f64),
-        minor_axis_ratio: ratio as f64,
-        start_parameter: t_start as f64,
-        end_parameter: t_end as f64,
+        center: Vector3::new(center.x, center.y, center.z),
+        major_axis: Vector3::new(major.x, major.y, major.z),
+        minor_axis_ratio: ratio,
+        start_parameter: t_start,
+        end_parameter: t_end,
         ..Default::default()
     }
 }
@@ -103,8 +103,8 @@ fn make_ellipse(center: Vec3, major: Vec3, ratio: f32, t_start: f32, t_end: f32)
 
 enum CtrStep {
     Center,
-    MajorAxis { center: Vec3 },
-    MinorRatio { center: Vec3, major: Vec3 },
+    MajorAxis { center: DVec3 },
+    MinorRatio { center: DVec3, major: DVec3 },
 }
 
 pub struct EllipseCommand {
@@ -135,7 +135,7 @@ impl CadCommand for EllipseCommand {
         }
     }
 
-    fn on_point(&mut self, pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match &self.step {
             CtrStep::Center => {
                 self.step = CtrStep::MajorAxis { center: pt };
@@ -165,7 +165,7 @@ impl CadCommand for EllipseCommand {
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         if let CtrStep::MinorRatio { center, major } = &self.step {
-            let r_minor = parse_f32(text)?;
+            let r_minor = parse_num(text)?;
             if r_minor > 0.0 {
                 let ratio = (r_minor / major.length()).clamp(1e-6, 1.0);
                 return Some(CmdResult::CommitAndExit(EntityType::Ellipse(make_ellipse(
@@ -176,7 +176,7 @@ impl CadCommand for EllipseCommand {
         None
     }
 
-    fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         match &self.step {
             CtrStep::MajorAxis { center } => Some(line_wire(*center, pt)),
             CtrStep::MinorRatio { center, major } => {
@@ -204,9 +204,9 @@ impl CadCommand for EllipseCommand {
         }
     }
 
-    fn dyn_live_value(&self, cursor: Vec3) -> Option<f64> {
+    fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
         if let CtrStep::MinorRatio { center, major } = &self.step {
-            Some((minor_ratio(*center, *major, cursor) * major.length()) as f64)
+            Some(minor_ratio(*center, *major, cursor) * major.length())
         } else {
             None
         }
@@ -218,8 +218,8 @@ impl CadCommand for EllipseCommand {
 
 enum AxisStep {
     Pt1,
-    Pt2 { p1: Vec3 },
-    MinorRatio { center: Vec3, major: Vec3 },
+    Pt2 { p1: DVec3 },
+    MinorRatio { center: DVec3, major: DVec3 },
 }
 
 pub struct EllipseAxisCommand {
@@ -250,7 +250,7 @@ impl CadCommand for EllipseAxisCommand {
         }
     }
 
-    fn on_point(&mut self, pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match &self.step {
             AxisStep::Pt1 => {
                 self.step = AxisStep::Pt2 { p1: pt };
@@ -278,7 +278,7 @@ impl CadCommand for EllipseAxisCommand {
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         if let AxisStep::MinorRatio { center, major } = &self.step {
-            let r_minor = parse_f32(text)?;
+            let r_minor = parse_num(text)?;
             if r_minor > 0.0 {
                 let ratio = (r_minor / major.length()).clamp(1e-6, 1.0);
                 return Some(CmdResult::CommitAndExit(EntityType::Ellipse(make_ellipse(
@@ -289,7 +289,7 @@ impl CadCommand for EllipseAxisCommand {
         None
     }
 
-    fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         match &self.step {
             AxisStep::Pt1 => None,
             AxisStep::Pt2 { p1 } => Some(line_wire(*p1, pt)),
@@ -316,9 +316,9 @@ impl CadCommand for EllipseAxisCommand {
         }
     }
 
-    fn dyn_live_value(&self, cursor: Vec3) -> Option<f64> {
+    fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
         if let AxisStep::MinorRatio { center, major } = &self.step {
-            Some((minor_ratio(*center, *major, cursor) * major.length()) as f64)
+            Some(minor_ratio(*center, *major, cursor) * major.length())
         } else {
             None
         }
@@ -331,28 +331,28 @@ impl CadCommand for EllipseAxisCommand {
 enum ArcStep {
     Center,
     MajorAxis {
-        center: Vec3,
+        center: DVec3,
     },
     MinorRatio {
-        center: Vec3,
-        major: Vec3,
+        center: DVec3,
+        major: DVec3,
     },
     StartAngle {
-        center: Vec3,
-        major: Vec3,
-        ratio: f32,
+        center: DVec3,
+        major: DVec3,
+        ratio: f64,
     },
     EndAngle {
-        center: Vec3,
-        major: Vec3,
-        ratio: f32,
-        t_start: f32,
+        center: DVec3,
+        major: DVec3,
+        ratio: f64,
+        t_start: f64,
     },
 }
 
 pub struct EllipseArcCommand {
     step: ArcStep,
-    prev_pt: Option<Vec3>,
+    prev_pt: Option<DVec3>,
     cw: bool,
 }
 
@@ -389,7 +389,7 @@ impl CadCommand for EllipseArcCommand {
         }
     }
 
-    fn on_point(&mut self, pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match &self.step {
             ArcStep::Center => {
                 self.step = ArcStep::MajorAxis { center: pt };
@@ -452,7 +452,7 @@ impl CadCommand for EllipseArcCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        let val = parse_f32(text)?;
+        let val = parse_num(text)?;
         match &self.step {
             ArcStep::MinorRatio { center, major } => {
                 if val > 0.0 {
@@ -499,7 +499,7 @@ impl CadCommand for EllipseArcCommand {
         None
     }
 
-    fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         match &self.step {
             ArcStep::MajorAxis { center } => Some(line_wire(*center, pt)),
             ArcStep::MinorRatio { center, major } => {
@@ -528,10 +528,10 @@ impl CadCommand for EllipseArcCommand {
                     let t_prev = angle_from_point(*center, *major, *ratio, prev);
                     let t_cur = angle_from_point(*center, *major, *ratio, pt);
                     let mut d = t_cur - t_prev;
-                    while d > std::f32::consts::PI {
+                    while d > std::f64::consts::PI {
                         d -= TAU;
                     }
-                    while d <= -std::f32::consts::PI {
+                    while d <= -std::f64::consts::PI {
                         d += TAU;
                     }
                     if d.abs() > DIR_TOL {
@@ -576,9 +576,9 @@ impl CadCommand for EllipseArcCommand {
         }
     }
 
-    fn dyn_live_value(&self, cursor: Vec3) -> Option<f64> {
+    fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
         if let ArcStep::MinorRatio { center, major } = &self.step {
-            Some((minor_ratio(*center, *major, cursor) * major.length()) as f64)
+            Some(minor_ratio(*center, *major, cursor) * major.length())
         } else {
             None
         }
@@ -587,7 +587,7 @@ impl CadCommand for EllipseArcCommand {
 
 // ── Internal helpers ──────────────────────────────────────────────────────
 
-fn minor_ratio(center: Vec3, major: Vec3, pt: Vec3) -> f32 {
+fn minor_ratio(center: DVec3, major: DVec3, pt: DVec3) -> f64 {
     let r_major = major.length();
     if r_major < 1e-9 {
         return 0.5;
@@ -599,20 +599,23 @@ fn minor_ratio(center: Vec3, major: Vec3, pt: Vec3) -> f32 {
     (r_minor / r_major).clamp(1e-6, 1.0)
 }
 
-fn angle_from_point(center: Vec3, major: Vec3, ratio: f32, pt: Vec3) -> f32 {
+fn angle_from_point(center: DVec3, major: DVec3, ratio: f64, pt: DVec3) -> f64 {
     let r_major = major.length();
     if r_major < 1e-9 {
         return 0.0;
     }
     let major_dir = major / r_major;
-    let v = Vec3::Z.cross(major_dir).normalize();
+    let v = DVec3::Z.cross(major_dir).normalize();
     param_angle(center, major_dir, v, pt, ratio)
 }
 
-fn line_wire(from: Vec3, to: Vec3) -> WireModel {
+fn line_wire(from: DVec3, to: DVec3) -> WireModel {
     WireModel {
         name: "rubber_band".into(),
-        points: vec![[from.x, from.y, from.z], [to.x, to.y, to.z]],
+        points: vec![
+            [from.x as f32, from.y as f32, from.z as f32],
+            [to.x as f32, to.y as f32, to.z as f32],
+        ],
         points_low: Vec::new(),
         color: WireModel::CYAN,
         selected: false,

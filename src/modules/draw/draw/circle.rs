@@ -15,9 +15,9 @@ use crate::command::{CadCommand, CmdResult, DynField, TangentObject};
 use crate::modules::draw::defaults;
 use crate::modules::IconKind;
 use crate::scene::model::wire_model::WireModel;
-use glam::Vec3;
+use glam::DVec3;
 
-const TAU: f32 = std::f32::consts::TAU;
+const TAU: f64 = std::f64::consts::TAU;
 
 // ── Per-method SVG icons ───────────────────────────────────────────────────
 
@@ -58,15 +58,15 @@ pub const ICON: IconKind = ICON_CR;
 
 // ── Shared geometry ────────────────────────────────────────────────────────
 
-fn circle_wire(center: Vec3, radius: f32) -> WireModel {
+fn circle_wire(center: DVec3, radius: f64) -> WireModel {
     let segs = 64u32;
     let mut pts: Vec<[f32; 3]> = (0..=segs)
         .map(|i| {
-            let a = (i as f32) * TAU / segs as f32;
+            let a = (i as f64) * TAU / segs as f64;
             [
-                center.x + radius * a.cos(),
-                center.y + radius * a.sin(),
-                center.z,
+                (center.x + radius * a.cos()) as f32,
+                (center.y + radius * a.sin()) as f32,
+                center.z as f32,
             ]
         })
         .collect();
@@ -76,9 +76,9 @@ fn circle_wire(center: Vec3, radius: f32) -> WireModel {
     WireModel::solid("rubber_band".into(), pts, WireModel::CYAN, false)
 }
 
-fn make_circle(center: Vec3, radius: f64) -> EntityType {
+fn make_circle(center: DVec3, radius: f64) -> EntityType {
     EntityType::Circle(Circle {
-        center: Vector3::new(center.x as f64, center.y as f64, center.z as f64),
+        center: Vector3::new(center.x, center.y, center.z),
         radius,
         ..Default::default()
     })
@@ -86,7 +86,7 @@ fn make_circle(center: Vec3, radius: f64) -> EntityType {
 
 /// Circumscribed circle through three points.
 /// Returns `None` if the points are collinear.
-fn circumcircle(a: Vec3, b: Vec3, c: Vec3) -> Option<(Vec3, f32)> {
+fn circumcircle(a: DVec3, b: DVec3, c: DVec3) -> Option<(DVec3, f64)> {
     let ax = a.x;
     let ay = a.y;
     let bx = b.x;
@@ -105,7 +105,7 @@ fn circumcircle(a: Vec3, b: Vec3, c: Vec3) -> Option<(Vec3, f32)> {
         + (bx * bx + by * by) * (ax - cx)
         + (cx * cx + cy * cy) * (bx - ax))
         / d;
-    let center = Vec3::new(ux, uy, a.z);
+    let center = DVec3::new(ux, uy, a.z);
     Some((center, center.distance(a)))
 }
 
@@ -117,7 +117,7 @@ pub struct CircleCommand {
 }
 enum StepCR {
     Center,
-    Radius(Vec3),
+    Radius(DVec3),
 }
 
 impl CircleCommand {
@@ -142,7 +142,7 @@ impl CadCommand for CircleCommand {
             ),
         }
     }
-    fn on_point(&mut self, pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match &self.step {
             StepCR::Center => {
                 self.step = StepCR::Radius(pt);
@@ -150,8 +150,8 @@ impl CadCommand for CircleCommand {
             }
             StepCR::Radius(c) => {
                 let r = c.distance(pt);
-                defaults::set_circle_radius(r);
-                CmdResult::CommitAndExit(make_circle(*c, r as f64))
+                defaults::set_circle_radius(r as f32);
+                CmdResult::CommitAndExit(make_circle(*c, r))
             }
         }
     }
@@ -166,7 +166,7 @@ impl CadCommand for CircleCommand {
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
     }
-    fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         if let StepCR::Radius(c) = &self.step {
             Some(circle_wire(*c, c.distance(pt)))
         } else {
@@ -175,10 +175,10 @@ impl CadCommand for CircleCommand {
     }
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         if let StepCR::Radius(c) = &self.step {
-            let r: f32 = text.trim().replace(',', ".").parse().ok()?;
+            let r: f64 = text.trim().replace(',', ".").parse().ok()?;
             if r > 0.0 {
-                defaults::set_circle_radius(r);
-                return Some(CmdResult::CommitAndExit(make_circle(*c, r as f64)));
+                defaults::set_circle_radius(r as f32);
+                return Some(CmdResult::CommitAndExit(make_circle(*c, r)));
             }
         }
         None
@@ -236,7 +236,7 @@ impl CadCommand for CircleCDCommand {
             ),
         }
     }
-    fn on_point(&mut self, pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match &self.step {
             StepCR::Center => {
                 self.step = StepCR::Radius(pt);
@@ -244,8 +244,8 @@ impl CadCommand for CircleCDCommand {
             }
             StepCR::Radius(c) => {
                 let d = c.distance(pt) * 2.0;
-                defaults::set_circle_diam(d);
-                CmdResult::CommitAndExit(make_circle(*c, (d / 2.0) as f64))
+                defaults::set_circle_diam(d as f32);
+                CmdResult::CommitAndExit(make_circle(*c, d / 2.0))
             }
         }
     }
@@ -260,7 +260,7 @@ impl CadCommand for CircleCDCommand {
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
     }
-    fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         // Preview radius = distance to cursor; on commit that distance becomes the radius (diameter = 2x).
         if let StepCR::Radius(c) = &self.step {
             Some(circle_wire(*c, c.distance(pt)))
@@ -270,10 +270,10 @@ impl CadCommand for CircleCDCommand {
     }
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         if let StepCR::Radius(c) = &self.step {
-            let d: f32 = text.trim().replace(',', ".").parse().ok()?;
+            let d: f64 = text.trim().replace(',', ".").parse().ok()?;
             if d > 0.0 {
-                defaults::set_circle_diam(d);
-                return Some(CmdResult::CommitAndExit(make_circle(*c, (d / 2.0) as f64)));
+                defaults::set_circle_diam(d as f32);
+                return Some(CmdResult::CommitAndExit(make_circle(*c, d / 2.0)));
             }
         }
         None
@@ -298,7 +298,7 @@ impl CadCommand for CircleCDCommand {
 // ── Command: 2-Point ──────────────────────────────────────────────────────
 
 pub struct Circle2PCommand {
-    p1: Option<Vec3>,
+    p1: Option<DVec3>,
 }
 
 impl Circle2PCommand {
@@ -318,7 +318,7 @@ impl CadCommand for Circle2PCommand {
             "CIRCLE 2P  Specify second end of diameter:".into()
         }
     }
-    fn on_point(&mut self, pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match self.p1 {
             None => {
                 self.p1 = Some(pt);
@@ -326,7 +326,7 @@ impl CadCommand for Circle2PCommand {
             }
             Some(p1) => {
                 let center = (p1 + pt) * 0.5;
-                let radius = p1.distance(pt) as f64 / 2.0;
+                let radius = p1.distance(pt) / 2.0;
                 CmdResult::CommitAndExit(make_circle(center, radius))
             }
         }
@@ -337,7 +337,7 @@ impl CadCommand for Circle2PCommand {
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
     }
-    fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         let p1 = self.p1?;
         let center = (p1 + pt) * 0.5;
         let radius = p1.distance(pt) / 2.0;
@@ -348,7 +348,7 @@ impl CadCommand for Circle2PCommand {
 // ── Command: 3-Point ──────────────────────────────────────────────────────
 
 pub struct Circle3PCommand {
-    pts: Vec<Vec3>,
+    pts: Vec<DVec3>,
 }
 
 impl Circle3PCommand {
@@ -368,14 +368,14 @@ impl CadCommand for Circle3PCommand {
             _ => "CIRCLE 3P  Specify third point:".into(),
         }
     }
-    fn on_point(&mut self, pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
         self.pts.push(pt);
         if self.pts.len() < 3 {
             return CmdResult::NeedPoint;
         }
         let (a, b, c) = (self.pts[0], self.pts[1], self.pts[2]);
         match circumcircle(a, b, c) {
-            Some((center, radius)) => CmdResult::CommitAndExit(make_circle(center, radius as f64)),
+            Some((center, radius)) => CmdResult::CommitAndExit(make_circle(center, radius)),
             None => {
                 self.pts.pop();
                 CmdResult::NeedPoint
@@ -388,7 +388,7 @@ impl CadCommand for Circle3PCommand {
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
     }
-    fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         match self.pts.len() {
             0 => None,
             1 => {
@@ -406,7 +406,11 @@ impl CadCommand for Circle3PCommand {
                 } else {
                     Some(WireModel::solid(
                         "rubber_band".into(),
-                        vec![[a.x, a.y, a.z], [b.x, b.y, b.z], [pt.x, pt.y, pt.z]],
+                        vec![
+                            [a.x as f32, a.y as f32, a.z as f32],
+                            [b.x as f32, b.y as f32, b.z as f32],
+                            [pt.x as f32, pt.y as f32, pt.z as f32],
+                        ],
                         WireModel::CYAN,
                         false,
                     ))
@@ -420,13 +424,13 @@ impl CadCommand for Circle3PCommand {
 
 #[derive(Clone, Copy)]
 struct Line2D {
-    a: f32,
-    b: f32,
-    c: f32,
+    a: f64,
+    b: f64,
+    c: f64,
 } // ax + by + c = 0, a²+b²=1
 
 impl Line2D {
-    fn from_obj(p1: Vec3, p2: Vec3) -> Self {
+    fn from_obj(p1: DVec3, p2: DVec3) -> Self {
         let dx = p2.x - p1.x;
         let dy = p2.y - p1.y;
         let len = (dx * dx + dy * dy).sqrt();
@@ -447,17 +451,17 @@ impl Line2D {
     }
 }
 
-fn line_line_isect(l1: Line2D, l2: Line2D) -> Option<Vec3> {
+fn line_line_isect(l1: Line2D, l2: Line2D) -> Option<DVec3> {
     let det = l1.a * l2.b - l2.a * l1.b;
     if det.abs() < 1e-9 {
         return None;
     }
     let x = (-l1.c * l2.b + l2.c * l1.b) / det;
     let y = (-l1.a * l2.c + l2.a * l1.c) / det;
-    Some(Vec3::new(x, y, 0.0))
+    Some(DVec3::new(x, y, 0.0))
 }
 
-fn solve_quadratic(a: f32, b: f32, c: f32) -> Vec<f32> {
+fn solve_quadratic(a: f64, b: f64, c: f64) -> Vec<f64> {
     if a.abs() < 1e-9 {
         if b.abs() < 1e-9 {
             return vec![];
@@ -472,7 +476,7 @@ fn solve_quadratic(a: f32, b: f32, c: f32) -> Vec<f32> {
     vec![(-b - sq) / (2.0 * a), (-b + sq) / (2.0 * a)]
 }
 
-fn best_of(candidates: &[Vec3], hint: Vec3) -> Option<Vec3> {
+fn best_of(candidates: &[DVec3], hint: DVec3) -> Option<DVec3> {
     candidates.iter().copied().min_by(|a, b| {
         a.distance(hint)
             .partial_cmp(&b.distance(hint))
@@ -480,7 +484,7 @@ fn best_of(candidates: &[Vec3], hint: Vec3) -> Option<Vec3> {
     })
 }
 
-fn best_circle_of(candidates: &[(Vec3, f32)], hint: Vec3) -> Option<(Vec3, f32)> {
+fn best_circle_of(candidates: &[(DVec3, f64)], hint: DVec3) -> Option<(DVec3, f64)> {
     candidates
         .iter()
         .copied()
@@ -493,7 +497,7 @@ fn best_circle_of(candidates: &[(Vec3, f32)], hint: Vec3) -> Option<(Vec3, f32)>
 }
 
 /// All candidate circle centers tangent to two objects with radius r.
-fn ttr_candidates(obj1: TangentObject, obj2: TangentObject, r: f32) -> Vec<Vec3> {
+fn ttr_candidates(obj1: TangentObject, obj2: TangentObject, r: f64) -> Vec<DVec3> {
     match (obj1, obj2) {
         (TangentObject::Line { p1: a, p2: b }, TangentObject::Line { p1: c, p2: d }) => {
             let l1 = Line2D::from_obj(a, b);
@@ -540,10 +544,10 @@ fn ttr_candidates(obj1: TangentObject, obj2: TangentObject, r: f32) -> Vec<Vec3>
     }
 }
 
-fn ttr_lc_candidates(l: Line2D, cp: Vec3, cr: f32, r: f32) -> Vec<Vec3> {
+fn ttr_lc_candidates(l: Line2D, cp: DVec3, cr: f64, r: f64) -> Vec<DVec3> {
     let mut out = Vec::new();
-    for s1 in [-1.0f32, 1.0] {
-        for s2 in [-1.0f32, 1.0] {
+    for s1 in [-1.0f64, 1.0] {
+        for s2 in [-1.0f64, 1.0] {
             let rho = cr + s2 * r;
             if rho < 0.0 {
                 continue;
@@ -563,23 +567,23 @@ fn ttr_lc_candidates(l: Line2D, cp: Vec3, cr: f32, r: f32) -> Vec<Vec3> {
             // (-l.b*t + u)^2 + (l.a*t + v)^2 = rho^2
             // (l.b^2 + l.a^2)*t^2 + 2*(-l.b*u + l.a*v)*t + (u^2 + v^2 - rho^2) = 0
             // Since a^2 + b^2 = 1:
-            let qa = 1.0f32;
+            let qa = 1.0f64;
             let qb = 2.0 * (-l.b * u + l.a * v);
             let qc = u * u + v * v - rho * rho;
             for t in solve_quadratic(qa, qb, qc) {
                 let cx = -l.b * t - l.a * c_off;
                 let cy = l.a * t - l.b * c_off;
-                out.push(Vec3::new(cx, cy, 0.0));
+                out.push(DVec3::new(cx, cy, 0.0));
             }
         }
     }
     out
 }
 
-fn ttr_cc_candidates(c1: Vec3, r1: f32, c2: Vec3, r2: f32, r: f32) -> Vec<Vec3> {
+fn ttr_cc_candidates(c1: DVec3, r1: f64, c2: DVec3, r2: f64, r: f64) -> Vec<DVec3> {
     let mut out = Vec::new();
-    for s1 in [-1.0f32, 1.0] {
-        for s2 in [-1.0f32, 1.0] {
+    for s1 in [-1.0f64, 1.0] {
+        for s2 in [-1.0f64, 1.0] {
             let rho1 = r1 + s1 * r;
             let rho2 = r2 + s2 * r;
             if rho1 < 0.0 || rho2 < 0.0 {
@@ -605,10 +609,10 @@ fn ttr_cc_candidates(c1: Vec3, r1: f32, c2: Vec3, r2: f32, r: f32) -> Vec<Vec3> 
                 if disc < 0.0 {
                     continue;
                 }
-                for sign in [-1.0f32, 1.0] {
+                for sign in [-1.0f64, 1.0] {
                     let cx = (-qb + sign * disc.sqrt()) / (2.0 * qa);
                     let cy = (k - ax * cx) * iy;
-                    out.push(Vec3::new(cx, cy, 0.0));
+                    out.push(DVec3::new(cx, cy, 0.0));
                 }
             } else {
                 let ix = 1.0 / ax;
@@ -620,10 +624,10 @@ fn ttr_cc_candidates(c1: Vec3, r1: f32, c2: Vec3, r2: f32, r: f32) -> Vec<Vec3> 
                 if disc < 0.0 {
                     continue;
                 }
-                for sign in [-1.0f32, 1.0] {
+                for sign in [-1.0f64, 1.0] {
                     let cy = (-qb + sign * disc.sqrt()) / (2.0 * qa);
                     let cx = (k - ay * cy) * ix;
-                    out.push(Vec3::new(cx, cy, 0.0));
+                    out.push(DVec3::new(cx, cy, 0.0));
                 }
             }
         }
@@ -636,10 +640,10 @@ fn ttt_candidates(
     obj1: TangentObject,
     obj2: TangentObject,
     obj3: TangentObject,
-) -> Vec<(Vec3, f32)> {
+) -> Vec<(DVec3, f64)> {
     let objs = [obj1, obj2, obj3];
     let mut results = Vec::new();
-    let sign_combos: [[f32; 3]; 8] = [
+    let sign_combos: [[f64; 3]; 8] = [
         [-1., -1., -1.],
         [-1., -1., 1.],
         [-1., 1., -1.],
@@ -661,13 +665,13 @@ fn ttt_candidates(
 
 // LinEq: lx*cx + ly*cy + lr*r = k
 struct LinEq {
-    lx: f32,
-    ly: f32,
-    lr: f32,
-    k: f32,
+    lx: f64,
+    ly: f64,
+    lr: f64,
+    k: f64,
 }
 
-fn ttt_solve_sign(objs: &[TangentObject; 3], eps: &[f32; 3]) -> Vec<(Vec3, f32)> {
+fn ttt_solve_sign(objs: &[TangentObject; 3], eps: &[f64; 3]) -> Vec<(DVec3, f64)> {
     let mut lin_eqs: Vec<LinEq> = Vec::new();
     let mut circle_idx: Vec<usize> = Vec::new();
 
@@ -728,7 +732,7 @@ fn ttt_solve_sign(objs: &[TangentObject; 3], eps: &[f32; 3]) -> Vec<(Vec3, f32)>
     let a_cy = (e0.lx * e1.k - e1.lx * e0.k) / det;
     let b_cy = -(e0.lx * e1.lr - e1.lx * e0.lr) / det;
 
-    let r_vals: Vec<f32> = if lin_eqs.len() >= 3 {
+    let r_vals: Vec<f64> = if lin_eqs.len() >= 3 {
         let e2 = &lin_eqs[2];
         let r_coeff = b_cx * e2.lx + b_cy * e2.ly + e2.lr;
         let r_const = e2.k - a_cx * e2.lx - a_cy * e2.ly;
@@ -766,7 +770,7 @@ fn ttt_solve_sign(objs: &[TangentObject; 3], eps: &[f32; 3]) -> Vec<(Vec3, f32)>
             }
             let cx = a_cx + b_cx * r;
             let cy = a_cy + b_cy * r;
-            Some((Vec3::new(cx, cy, 0.0), r))
+            Some((DVec3::new(cx, cy, 0.0), r))
         })
         .collect()
 }
@@ -781,13 +785,13 @@ enum StepTTR {
     First,
     Second {
         obj1: TangentObject,
-        hit1: Vec3,
+        hit1: DVec3,
     },
     Radius {
         obj1: TangentObject,
         obj2: TangentObject,
-        hit1: Vec3,
-        hit2: Vec3,
+        hit1: DVec3,
+        hit2: DVec3,
     },
 }
 
@@ -828,11 +832,11 @@ impl CadCommand for CircleTTRCommand {
         }
     }
 
-    fn on_point(&mut self, _pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, _pt: DVec3) -> CmdResult {
         CmdResult::NeedPoint
     }
 
-    fn on_tangent_point(&mut self, obj: TangentObject, hit: Vec3) -> CmdResult {
+    fn on_tangent_point(&mut self, obj: TangentObject, hit: DVec3) -> CmdResult {
         match &self.step {
             StepTTR::First => {
                 self.step = StepTTR::Second {
@@ -856,7 +860,7 @@ impl CadCommand for CircleTTRCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        let r: f32 = text.trim().parse().ok()?;
+        let r: f64 = text.trim().parse().ok()?;
         if r <= 0.0 {
             return Some(CmdResult::Cancel);
         }
@@ -870,7 +874,7 @@ impl CadCommand for CircleTTRCommand {
             let hint = (*hit1 + *hit2) * 0.5;
             let candidates = ttr_candidates(*obj1, *obj2, r);
             if let Some(center) = best_of(&candidates, hint) {
-                Some(CmdResult::CommitAndExit(make_circle(center, r as f64)))
+                Some(CmdResult::CommitAndExit(make_circle(center, r)))
             } else {
                 Some(CmdResult::Cancel)
             }
@@ -885,7 +889,7 @@ impl CadCommand for CircleTTRCommand {
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
     }
-    fn on_mouse_move(&mut self, _pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, _pt: DVec3) -> Option<WireModel> {
         None
     }
 }
@@ -894,7 +898,7 @@ impl CadCommand for CircleTTRCommand {
 
 pub struct CircleTTTCommand {
     objs: Vec<TangentObject>,
-    hits: Vec<Vec3>,
+    hits: Vec<DVec3>,
 }
 
 impl CircleTTTCommand {
@@ -923,20 +927,20 @@ impl CadCommand for CircleTTTCommand {
         }
     }
 
-    fn on_point(&mut self, _pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, _pt: DVec3) -> CmdResult {
         CmdResult::NeedPoint
     }
 
-    fn on_tangent_point(&mut self, obj: TangentObject, hit: Vec3) -> CmdResult {
+    fn on_tangent_point(&mut self, obj: TangentObject, hit: DVec3) -> CmdResult {
         self.objs.push(obj);
         self.hits.push(hit);
         if self.objs.len() < 3 {
             return CmdResult::NeedPoint;
         }
-        let hint = self.hits.iter().fold(Vec3::ZERO, |a, &b| a + b) / 3.0;
+        let hint = self.hits.iter().fold(DVec3::ZERO, |a, &b| a + b) / 3.0;
         let candidates = ttt_candidates(self.objs[0], self.objs[1], self.objs[2]);
         match best_circle_of(&candidates, hint) {
-            Some((center, r)) => CmdResult::CommitAndExit(make_circle(center, r as f64)),
+            Some((center, r)) => CmdResult::CommitAndExit(make_circle(center, r)),
             None => {
                 self.objs.pop();
                 self.hits.pop();
@@ -951,7 +955,7 @@ impl CadCommand for CircleTTTCommand {
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
     }
-    fn on_mouse_move(&mut self, _pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, _pt: DVec3) -> Option<WireModel> {
         None
     }
 }

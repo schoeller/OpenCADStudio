@@ -3594,6 +3594,11 @@ impl Scene {
     /// geometry of the currently active viewport.  Returns the input unchanged
     /// when there is no active viewport.
     pub fn paper_to_model(&self, paper_pt: glam::Vec3) -> glam::Vec3 {
+        self.paper_to_model_f64(paper_pt.as_dvec3()).as_vec3()
+    }
+
+    /// f64 variant of [`paper_to_model`] — preserves UTM-scale precision.
+    pub fn paper_to_model_f64(&self, paper_pt: glam::DVec3) -> glam::DVec3 {
         let vp_handle = match self.active_viewport {
             Some(h) => h,
             None => return paper_pt,
@@ -3602,16 +3607,15 @@ impl Scene {
             Some(acadrust::EntityType::Viewport(vp)) => vp,
             _ => return paper_pt,
         };
-        let scale =
-            vp_effective_scale(vp.custom_scale, vp.view_height, vp.height) as f32;
+        let scale = vp_effective_scale(vp.custom_scale, vp.view_height, vp.height);
         if scale.abs() < 1e-9 {
             return paper_pt;
         }
-        let tx = vp.view_target.x as f32;
-        let ty = vp.view_target.y as f32;
-        let pcx = vp.center.x as f32;
-        let pcy = vp.center.y as f32;
-        glam::Vec3::new(
+        let tx = vp.view_target.x;
+        let ty = vp.view_target.y;
+        let pcx = vp.center.x;
+        let pcy = vp.center.y;
+        glam::DVec3::new(
             (paper_pt.x - pcx) / scale + tx,
             (paper_pt.y - pcy) / scale + ty,
             paper_pt.z,

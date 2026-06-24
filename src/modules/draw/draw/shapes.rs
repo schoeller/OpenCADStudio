@@ -17,35 +17,37 @@ use acadrust::{EntityType, LwPolyline};
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::IconKind;
 use crate::scene::model::wire_model::WireModel;
-use glam::{Mat4, Vec3};
+use glam::{DVec3, Mat4};
 
 /// Build the four corners of an axis-aligned box between opposite corners `a`
 /// and `b`, axis-aligned in the active UCS (`ucs` = UCS→wire affine, identity =
 /// world). The two given corners stay put; the other two are placed square to
 /// the UCS axes instead of the world axes.
-fn ucs_box_corners(a: Vec3, b: Vec3, ucs: Mat4) -> [Vec3; 4] {
+fn ucs_box_corners(a: DVec3, b: DVec3, ucs: Mat4) -> [DVec3; 4] {
+    let ucs = ucs.as_dmat4();
     let inv = ucs.inverse();
     let au = inv.transform_point3(a);
     let bu = inv.transform_point3(b);
     [
-        ucs.transform_point3(Vec3::new(au.x, au.y, au.z)),
-        ucs.transform_point3(Vec3::new(bu.x, au.y, au.z)),
-        ucs.transform_point3(Vec3::new(bu.x, bu.y, au.z)),
-        ucs.transform_point3(Vec3::new(au.x, bu.y, au.z)),
+        ucs.transform_point3(DVec3::new(au.x, au.y, au.z)),
+        ucs.transform_point3(DVec3::new(bu.x, au.y, au.z)),
+        ucs.transform_point3(DVec3::new(bu.x, bu.y, au.z)),
+        ucs.transform_point3(DVec3::new(au.x, bu.y, au.z)),
     ]
 }
 
 /// Four corners of a box centred at `c` with half-extents taken from `corner`,
 /// axis-aligned in the active UCS (`ucs` = UCS→wire affine, identity = world).
-fn ucs_box_around_center(c: Vec3, corner: Vec3, ucs: Mat4) -> [Vec3; 4] {
+fn ucs_box_around_center(c: DVec3, corner: DVec3, ucs: Mat4) -> [DVec3; 4] {
+    let ucs = ucs.as_dmat4();
     let d = ucs.inverse().transform_vector3(corner - c);
-    let rx = ucs.transform_vector3(Vec3::new(d.x.abs(), 0.0, 0.0));
-    let ry = ucs.transform_vector3(Vec3::new(0.0, d.y.abs(), 0.0));
+    let rx = ucs.transform_vector3(DVec3::new(d.x.abs(), 0.0, 0.0));
+    let ry = ucs.transform_vector3(DVec3::new(0.0, d.y.abs(), 0.0));
     [c - rx - ry, c + rx - ry, c + rx + ry, c - rx + ry]
 }
 
-const TAU: f32 = std::f32::consts::TAU;
-const PI: f32 = std::f32::consts::PI;
+const TAU: f64 = std::f64::consts::TAU;
+const PI: f64 = std::f64::consts::PI;
 
 // ── Icons ──────────────────────────────────────────────────────────────────
 
@@ -100,10 +102,13 @@ fn wire_loop(pts: Vec<[f32; 3]>) -> WireModel {
     WireModel::solid("rubber_band".into(), p, WireModel::CYAN, false)
 }
 
-fn wire_seg(a: Vec3, b: Vec3) -> WireModel {
+fn wire_seg(a: DVec3, b: DVec3) -> WireModel {
     WireModel::solid(
         "rubber_band".into(),
-        vec![[a.x, a.y, a.z], [b.x, b.y, b.z]],
+        vec![
+            [a.x as f32, a.y as f32, a.z as f32],
+            [b.x as f32, b.y as f32, b.z as f32],
+        ],
         WireModel::CYAN,
         false,
     )
@@ -111,40 +116,40 @@ fn wire_seg(a: Vec3, b: Vec3) -> WireModel {
 
 // ── Polygon geometry ───────────────────────────────────────────────────────
 
-fn poly_verts_xy(center: Vec3, vertex_r: f32, sides: u32, start_angle: f32) -> Vec<[f64; 2]> {
+fn poly_verts_xy(center: DVec3, vertex_r: f64, sides: u32, start_angle: f64) -> Vec<[f64; 2]> {
     (0..sides)
         .map(|i| {
-            let a = start_angle + (i as f32) * TAU / sides as f32;
+            let a = start_angle + (i as f64) * TAU / sides as f64;
             [
-                (center.x + vertex_r * a.cos()) as f64,
-                (center.y + vertex_r * a.sin()) as f64,
+                center.x + vertex_r * a.cos(),
+                center.y + vertex_r * a.sin(),
             ]
         })
         .collect()
 }
 
-fn poly_wire(center: Vec3, vertex_r: f32, sides: u32, start_angle: f32) -> WireModel {
+fn poly_wire(center: DVec3, vertex_r: f64, sides: u32, start_angle: f64) -> WireModel {
     let pts: Vec<[f32; 3]> = (0..sides)
         .map(|i| {
-            let a = start_angle + (i as f32) * TAU / sides as f32;
+            let a = start_angle + (i as f64) * TAU / sides as f64;
             [
-                center.x + vertex_r * a.cos(),
-                center.y + vertex_r * a.sin(),
-                center.z,
+                (center.x + vertex_r * a.cos()) as f32,
+                (center.y + vertex_r * a.sin()) as f32,
+                center.z as f32,
             ]
         })
         .collect();
     wire_loop(pts)
 }
 
-fn angle_xy(from: Vec3, to: Vec3) -> f32 {
+fn angle_xy(from: DVec3, to: DVec3) -> f64 {
     (to.y - from.y).atan2(to.x - from.x)
 }
 
 // ── Command: Rectangle — Two Corners  (RECT) ──────────────────────────────
 
 pub struct RectCommand {
-    a: Option<Vec3>,
+    a: Option<DVec3>,
     ucs: Mat4,
 }
 
@@ -168,7 +173,7 @@ impl CadCommand for RectCommand {
             "RECT  Specify opposite corner:".into()
         }
     }
-    fn on_point(&mut self, pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match self.a {
             None => {
                 self.a = Some(pt);
@@ -177,10 +182,10 @@ impl CadCommand for RectCommand {
             Some(a) => {
                 let c = ucs_box_corners(a, pt, self.ucs);
                 CmdResult::CommitAndExit(make_pline(&[
-                    [c[0].x as f64, c[0].y as f64],
-                    [c[1].x as f64, c[1].y as f64],
-                    [c[2].x as f64, c[2].y as f64],
-                    [c[3].x as f64, c[3].y as f64],
+                    [c[0].x, c[0].y],
+                    [c[1].x, c[1].y],
+                    [c[2].x, c[2].y],
+                    [c[3].x, c[3].y],
                 ]))
             }
         }
@@ -191,14 +196,14 @@ impl CadCommand for RectCommand {
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
     }
-    fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         let a = self.a?;
         let c = ucs_box_corners(a, pt, self.ucs);
         Some(wire_loop(vec![
-            [c[0].x, c[0].y, c[0].z],
-            [c[1].x, c[1].y, c[1].z],
-            [c[2].x, c[2].y, c[2].z],
-            [c[3].x, c[3].y, c[3].z],
+            [c[0].x as f32, c[0].y as f32, c[0].z as f32],
+            [c[1].x as f32, c[1].y as f32, c[1].z as f32],
+            [c[2].x as f32, c[2].y as f32, c[2].z as f32],
+            [c[3].x as f32, c[3].y as f32, c[3].z as f32],
         ]))
     }
     fn dyn_spec(&self) -> Option<crate::command::DynSpec> {
@@ -225,16 +230,16 @@ impl CadCommand for RectCommand {
 
 pub struct RectRotCommand {
     step: u8,
-    a: Vec3,
-    b: Vec3,
+    a: DVec3,
+    b: DVec3,
 }
 
 impl RectRotCommand {
     pub fn new() -> Self {
         Self {
             step: 0,
-            a: Vec3::ZERO,
-            b: Vec3::ZERO,
+            a: DVec3::ZERO,
+            b: DVec3::ZERO,
         }
     }
 }
@@ -250,7 +255,7 @@ impl CadCommand for RectRotCommand {
             _ => "RECT ROT  Specify height (perpendicular pick):".into(),
         }
     }
-    fn on_point(&mut self, pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match self.step {
             0 => {
                 self.a = pt;
@@ -265,15 +270,15 @@ impl CadCommand for RectRotCommand {
             _ => {
                 let (a, b) = (self.a, self.b);
                 let dir = (b - a).normalize_or_zero();
-                let perp = Vec3::new(-dir.y, dir.x, 0.0);
+                let perp = DVec3::new(-dir.y, dir.x, 0.0);
                 let h = (pt - b).dot(perp); // signed height
                 let c = b + perp * h;
                 let d = a + perp * h;
                 CmdResult::CommitAndExit(make_pline(&[
-                    [a.x as f64, a.y as f64],
-                    [b.x as f64, b.y as f64],
-                    [c.x as f64, c.y as f64],
-                    [d.x as f64, d.y as f64],
+                    [a.x, a.y],
+                    [b.x, b.y],
+                    [c.x, c.y],
+                    [d.x, d.y],
                 ]))
             }
         }
@@ -284,21 +289,21 @@ impl CadCommand for RectRotCommand {
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
     }
-    fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         match self.step {
             1 => Some(wire_seg(self.a, pt)),
             2 => {
                 let (a, b) = (self.a, self.b);
                 let dir = (b - a).normalize_or_zero();
-                let perp = Vec3::new(-dir.y, dir.x, 0.0);
+                let perp = DVec3::new(-dir.y, dir.x, 0.0);
                 let h = (pt - b).dot(perp);
                 let c = b + perp * h;
                 let d = a + perp * h;
                 Some(wire_loop(vec![
-                    [a.x, a.y, a.z],
-                    [b.x, b.y, b.z],
-                    [c.x, c.y, c.z],
-                    [d.x, d.y, d.z],
+                    [a.x as f32, a.y as f32, a.z as f32],
+                    [b.x as f32, b.y as f32, b.z as f32],
+                    [c.x as f32, c.y as f32, c.z as f32],
+                    [d.x as f32, d.y as f32, d.z as f32],
                 ]))
             }
             _ => None,
@@ -319,12 +324,12 @@ impl CadCommand for RectRotCommand {
         })
     }
 
-    fn dyn_live_value(&self, cursor: Vec3) -> Option<f64> {
+    fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
         // Live height = perpendicular distance from the cursor to the base edge.
         (self.step == 2).then(|| {
             let dir = (self.b - self.a).normalize_or_zero();
-            let perp = Vec3::new(-dir.y, dir.x, 0.0);
-            (cursor - self.b).dot(perp).abs() as f64
+            let perp = DVec3::new(-dir.y, dir.x, 0.0);
+            (cursor - self.b).dot(perp).abs()
         })
     }
 }
@@ -334,7 +339,7 @@ impl CadCommand for RectRotCommand {
 //   Step 1: pick any corner  (half-width = |cx|, half-height = |cy|)
 
 pub struct RectCenCommand {
-    center: Option<Vec3>,
+    center: Option<DVec3>,
     ucs: Mat4,
 }
 
@@ -358,7 +363,7 @@ impl CadCommand for RectCenCommand {
             "RECT CEN  Specify corner point:".into()
         }
     }
-    fn on_point(&mut self, pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match self.center {
             None => {
                 self.center = Some(pt);
@@ -367,10 +372,10 @@ impl CadCommand for RectCenCommand {
             Some(c) => {
                 let q = ucs_box_around_center(c, pt, self.ucs);
                 CmdResult::CommitAndExit(make_pline(&[
-                    [q[0].x as f64, q[0].y as f64],
-                    [q[1].x as f64, q[1].y as f64],
-                    [q[2].x as f64, q[2].y as f64],
-                    [q[3].x as f64, q[3].y as f64],
+                    [q[0].x, q[0].y],
+                    [q[1].x, q[1].y],
+                    [q[2].x, q[2].y],
+                    [q[3].x, q[3].y],
                 ]))
             }
         }
@@ -381,14 +386,14 @@ impl CadCommand for RectCenCommand {
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
     }
-    fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         let c = self.center?;
         let q = ucs_box_around_center(c, pt, self.ucs);
         Some(wire_loop(vec![
-            [q[0].x, q[0].y, q[0].z],
-            [q[1].x, q[1].y, q[1].z],
-            [q[2].x, q[2].y, q[2].z],
-            [q[3].x, q[3].y, q[3].z],
+            [q[0].x as f32, q[0].y as f32, q[0].z as f32],
+            [q[1].x as f32, q[1].y as f32, q[1].z as f32],
+            [q[2].x as f32, q[2].y as f32, q[2].z as f32],
+            [q[3].x as f32, q[3].y as f32, q[3].z as f32],
         ]))
     }
     fn dyn_spec(&self) -> Option<crate::command::DynSpec> {
@@ -414,7 +419,7 @@ impl CadCommand for RectCenCommand {
 pub struct PolyCommand {
     sides: u32,
     step: u8,
-    center: Vec3,
+    center: DVec3,
 }
 
 impl PolyCommand {
@@ -422,7 +427,7 @@ impl PolyCommand {
         Self {
             sides: 6,
             step: 0,
-            center: Vec3::ZERO,
+            center: DVec3::ZERO,
         }
     }
 }
@@ -479,7 +484,7 @@ impl CadCommand for PolyCommand {
         }
     }
 
-    fn on_point(&mut self, pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match self.step {
             0 => {
                 // User clicked without typing sides: use default, treat click as center.
@@ -511,7 +516,7 @@ impl CadCommand for PolyCommand {
         CmdResult::Cancel
     }
 
-    fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         if self.step < 2 {
             return None;
         }
@@ -528,7 +533,7 @@ impl CadCommand for PolyCommand {
 pub struct PolyCCommand {
     sides: u32,
     step: u8,
-    center: Vec3,
+    center: DVec3,
 }
 
 impl PolyCCommand {
@@ -536,7 +541,7 @@ impl PolyCCommand {
         Self {
             sides: 6,
             step: 0,
-            center: Vec3::ZERO,
+            center: DVec3::ZERO,
         }
     }
 }
@@ -593,7 +598,7 @@ impl CadCommand for PolyCCommand {
         }
     }
 
-    fn on_point(&mut self, pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match self.step {
             0 => {
                 self.center = pt;
@@ -607,11 +612,11 @@ impl CadCommand for PolyCCommand {
             }
             _ => {
                 let inradius = self.center.distance(pt);
-                let vr = inradius / (PI / self.sides as f32).cos();
+                let vr = inradius / (PI / self.sides as f64).cos();
                 // The picked pt is at the midpoint of an edge; the vertex is
                 // offset by half a sector (π/N) from that direction.
                 let edge_angle = angle_xy(self.center, pt);
-                let sa = edge_angle + PI / self.sides as f32;
+                let sa = edge_angle + PI / self.sides as f64;
                 CmdResult::CommitAndExit(make_pline(&poly_verts_xy(
                     self.center,
                     vr,
@@ -633,13 +638,13 @@ impl CadCommand for PolyCCommand {
         CmdResult::Cancel
     }
 
-    fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         if self.step < 2 {
             return None;
         }
         let inradius = self.center.distance(pt);
-        let vr = inradius / (PI / self.sides as f32).cos();
-        let sa = angle_xy(self.center, pt) + PI / self.sides as f32;
+        let vr = inradius / (PI / self.sides as f64).cos();
+        let sa = angle_xy(self.center, pt) + PI / self.sides as f64;
         Some(poly_wire(self.center, vr, self.sides, sa))
     }
 }
@@ -651,7 +656,7 @@ impl CadCommand for PolyCCommand {
 pub struct PolyECommand {
     sides: u32,
     step: u8,
-    a: Vec3,
+    a: DVec3,
 }
 
 impl PolyECommand {
@@ -659,7 +664,7 @@ impl PolyECommand {
         Self {
             sides: 6,
             step: 0,
-            a: Vec3::ZERO,
+            a: DVec3::ZERO,
         }
     }
 }
@@ -705,7 +710,7 @@ impl CadCommand for PolyECommand {
         }
     }
 
-    fn on_point(&mut self, pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match self.step {
             0 => {
                 self.a = pt;
@@ -738,7 +743,7 @@ impl CadCommand for PolyECommand {
         CmdResult::Cancel
     }
 
-    fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         if self.step < 2 {
             return None;
         }
@@ -752,18 +757,18 @@ impl CadCommand for PolyECommand {
 
 /// Compute polygon center, vertex-radius and start-angle from two edge endpoints.
 /// The polygon is placed on the left side of A→B (CCW convention).
-fn edge_poly_params(a: Vec3, b: Vec3, sides: u32) -> Option<(Vec3, f32, f32)> {
+fn edge_poly_params(a: DVec3, b: DVec3, sides: u32) -> Option<(DVec3, f64, f64)> {
     let edge_len = a.distance(b);
     if edge_len < 1e-6 {
         return None;
     }
     // vertex_radius = edge_len / (2 * sin(π/N))
-    let vr = edge_len / (2.0 * (PI / sides as f32).sin());
+    let vr = edge_len / (2.0 * (PI / sides as f64).sin());
     // inradius = vr * cos(π/N) = edge_len / (2 * tan(π/N))
-    let inradius = vr * (PI / sides as f32).cos();
+    let inradius = vr * (PI / sides as f64).cos();
     // Center: on the left perpendicular bisector of A→B
     let dir = (b - a) / edge_len;
-    let perp = Vec3::new(-dir.y, dir.x, 0.0); // CCW left
+    let perp = DVec3::new(-dir.y, dir.x, 0.0); // CCW left
     let mid = (a + b) * 0.5;
     let center = mid + perp * inradius;
     // First vertex = A

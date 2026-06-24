@@ -18,9 +18,9 @@ use acadrust::{Arc as CadArc, EntityType};
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::IconKind;
 use crate::scene::model::wire_model::WireModel;
-use glam::Vec3;
+use glam::DVec3;
 
-const TAU: f32 = std::f32::consts::TAU;
+const TAU: f64 = std::f64::consts::TAU;
 
 // ── Per-method SVG icons ───────────────────────────────────────────────────
 
@@ -67,12 +67,12 @@ pub const ICON: IconKind = ICON_CSE;
 // ── Shared math helpers ────────────────────────────────────────────────────
 
 /// Angle in radians from `center` to `pt`.
-fn angle_xy(center: Vec3, pt: Vec3) -> f32 {
+fn angle_xy(center: DVec3, pt: DVec3) -> f64 {
     (pt.y - center.y).atan2(pt.x - center.x)
 }
 
 /// Build a CCW arc polyline from `start_angle` to `end_angle` (radians).
-fn arc_preview(center: Vec3, radius: f32, start_angle: f32, end_angle: f32) -> WireModel {
+fn arc_preview(center: DVec3, radius: f64, start_angle: f64, end_angle: f64) -> WireModel {
     let mut ea = end_angle;
     while ea < start_angle {
         ea += TAU;
@@ -81,23 +81,23 @@ fn arc_preview(center: Vec3, radius: f32, start_angle: f32, end_angle: f32) -> W
     let segs = ((span / TAU) * 64.0).ceil().max(4.0) as u32;
     let pts: Vec<[f32; 3]> = (0..=segs)
         .map(|i| {
-            let a = start_angle + span * (i as f32 / segs as f32);
+            let a = start_angle + span * (i as f64 / segs as f64);
             [
-                center.x + radius * a.cos(),
-                center.y + radius * a.sin(),
-                center.z,
+                (center.x + radius * a.cos()) as f32,
+                (center.y + radius * a.sin()) as f32,
+                center.z as f32,
             ]
         })
         .collect();
     WireModel::solid("rubber_band".into(), pts, WireModel::CYAN, false)
 }
 
-fn make_arc(center: Vec3, radius: f32, start_angle: f32, end_angle: f32) -> EntityType {
+fn make_arc(center: DVec3, radius: f64, start_angle: f64, end_angle: f64) -> EntityType {
     EntityType::Arc(CadArc {
-        center: Vector3::new(center.x as f64, center.y as f64, center.z as f64),
-        radius: radius as f64,
-        start_angle: start_angle as f64,
-        end_angle: end_angle as f64,
+        center: Vector3::new(center.x, center.y, center.z),
+        radius,
+        start_angle,
+        end_angle,
         ..Default::default()
     })
 }
@@ -105,7 +105,7 @@ fn make_arc(center: Vec3, radius: f32, start_angle: f32, end_angle: f32) -> Enti
 /// Signed rotation from `prev` to `curr` around `center`.
 /// Positive = CCW, negative = CW.
 /// Signed angle (radians) swept from `prev` to `curr` about `center`.
-fn rot_delta(center: Vec3, prev: Vec3, curr: Vec3) -> f32 {
+fn rot_delta(center: DVec3, prev: DVec3, curr: DVec3) -> f64 {
     let p = prev - center;
     let c = curr - center;
     (p.x * c.y - p.y * c.x).atan2(p.x * c.x + p.y * c.y)
@@ -113,19 +113,22 @@ fn rot_delta(center: Vec3, prev: Vec3, curr: Vec3) -> f32 {
 
 /// Minimum swept angle before the previewed arc may flip CW/CCW. Filters the
 /// per-frame cursor jitter that otherwise reverses the sweep on tiny moves.
-const DIR_TOL: f32 = 0.1745; // ~10°
+const DIR_TOL: f64 = 0.1745; // ~10°
 
-fn line_wire(a: Vec3, b: Vec3) -> WireModel {
+fn line_wire(a: DVec3, b: DVec3) -> WireModel {
     WireModel::solid(
         "rubber_band".into(),
-        vec![[a.x, a.y, a.z], [b.x, b.y, b.z]],
+        vec![
+            [a.x as f32, a.y as f32, a.z as f32],
+            [b.x as f32, b.y as f32, b.z as f32],
+        ],
         WireModel::CYAN,
         false,
     )
 }
 
 /// Circumscribed circle through three points.
-fn circumcircle(a: Vec3, b: Vec3, c: Vec3) -> Option<(Vec3, f32)> {
+fn circumcircle(a: DVec3, b: DVec3, c: DVec3) -> Option<(DVec3, f64)> {
     let d = 2.0 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
     if d.abs() < 1e-9 {
         return None;
@@ -138,12 +141,12 @@ fn circumcircle(a: Vec3, b: Vec3, c: Vec3) -> Option<(Vec3, f32)> {
         + (b.x * b.x + b.y * b.y) * (a.x - c.x)
         + (c.x * c.x + c.y * c.y) * (b.x - a.x))
         / d;
-    let center = Vec3::new(ux, uy, a.z);
+    let center = DVec3::new(ux, uy, a.z);
     Some((center, center.distance(a)))
 }
 
 /// True if `angle` lies inside the CCW arc [start..end] (radians).
-fn ccw_contains(angle: f32, start: f32, end: f32) -> bool {
+fn ccw_contains(angle: f64, start: f64, end: f64) -> bool {
     let a = angle.rem_euclid(TAU);
     let s = start.rem_euclid(TAU);
     let e = end.rem_euclid(TAU);
@@ -155,14 +158,14 @@ fn ccw_contains(angle: f32, start: f32, end: f32) -> bool {
 }
 
 /// Arc center+radius from two endpoints and a cursor (sagitta / bow-toward-cursor).
-fn arc_from_sagitta(s: Vec3, e: Vec3, cursor: Vec3) -> Option<(Vec3, f32)> {
+fn arc_from_sagitta(s: DVec3, e: DVec3, cursor: DVec3) -> Option<(DVec3, f64)> {
     let chord_vec = e - s;
     let chord_len = (chord_vec.x * chord_vec.x + chord_vec.y * chord_vec.y).sqrt();
     if chord_len < 1e-6 {
         return None;
     }
-    let unit_chord = Vec3::new(chord_vec.x / chord_len, chord_vec.y / chord_len, 0.0);
-    let perp = Vec3::new(-unit_chord.y, unit_chord.x, 0.0);
+    let unit_chord = DVec3::new(chord_vec.x / chord_len, chord_vec.y / chord_len, 0.0);
+    let perp = DVec3::new(-unit_chord.y, unit_chord.x, 0.0);
     let mid = (s + e) * 0.5;
     let h = (cursor - mid).dot(perp); // signed sagitta
     if h.abs() < 1e-3 {
@@ -176,14 +179,14 @@ fn arc_from_sagitta(s: Vec3, e: Vec3, cursor: Vec3) -> Option<(Vec3, f32)> {
 }
 
 /// Arc center+radius from start, end, and a radius-magnitude point (dist = dist(pt, start)).
-fn arc_from_se_radius(s: Vec3, e: Vec3, radius_pt: Vec3) -> Option<(Vec3, f32)> {
+fn arc_from_se_radius(s: DVec3, e: DVec3, radius_pt: DVec3) -> Option<(DVec3, f64)> {
     let r = s.distance(radius_pt).max(1e-3);
     let chord_len = s.distance(e);
     if r < chord_len * 0.5 {
         return None;
     }
     let unit_chord = (e - s) / chord_len;
-    let perp = Vec3::new(-unit_chord.y, 0.0, unit_chord.x);
+    let perp = DVec3::new(-unit_chord.y, 0.0, unit_chord.x);
     let mid = (s + e) * 0.5;
     let h_sign = (radius_pt - mid).dot(perp).signum();
     let d = (r * r - (chord_len * 0.5) * (chord_len * 0.5))
@@ -193,12 +196,12 @@ fn arc_from_se_radius(s: Vec3, e: Vec3, radius_pt: Vec3) -> Option<(Vec3, f32)> 
 }
 
 /// Arc center+radius from start, end, and a tangent-direction point at start.
-fn arc_from_direction(s: Vec3, e: Vec3, dir_pt: Vec3) -> Option<(Vec3, f32)> {
+fn arc_from_direction(s: DVec3, e: DVec3, dir_pt: DVec3) -> Option<(DVec3, f64)> {
     let t = (dir_pt - s).normalize_or_zero();
     if t.length_squared() < 1e-12 {
         return None;
     }
-    let perp_t = Vec3::new(-t.y, t.x, 0.0); // rotate tangent 90° CCW
+    let perp_t = DVec3::new(-t.y, t.x, 0.0); // rotate tangent 90° CCW
     let chord = e - s;
     let denom = perp_t.x * chord.x + perp_t.y * chord.y;
     if denom.abs() < 1e-9 {
@@ -211,7 +214,7 @@ fn arc_from_direction(s: Vec3, e: Vec3, dir_pt: Vec3) -> Option<(Vec3, f32)> {
 
 /// Compute end_angle from a chord-length pick (SCL / CSL semantics).
 /// `chord_len` is clamped to [0, 2r].
-fn end_angle_from_chord_len(start_angle: f32, chord: f32, r: f32) -> f32 {
+fn end_angle_from_chord_len(start_angle: f64, chord: f64, r: f64) -> f64 {
     let half = (chord.min(2.0 * r) / (2.0 * r)).asin();
     start_angle + 2.0 * half
 }
@@ -220,10 +223,10 @@ fn end_angle_from_chord_len(start_angle: f32, chord: f32, r: f32) -> f32 {
 
 pub struct ArcCommand {
     step: u8,
-    c: Vec3,
-    r: f32,
-    sa: f32,
-    prev_pt: Option<Vec3>,
+    c: DVec3,
+    r: f64,
+    sa: f64,
+    prev_pt: Option<DVec3>,
     cw: bool,
 }
 
@@ -231,7 +234,7 @@ impl ArcCommand {
     pub fn new() -> Self {
         Self {
             step: 0,
-            c: Vec3::ZERO,
+            c: DVec3::ZERO,
             r: 0.0,
             sa: 0.0,
             prev_pt: None,
@@ -254,7 +257,7 @@ impl CadCommand for ArcCommand {
             ),
         }
     }
-    fn on_point(&mut self, pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match self.step {
             0 => {
                 self.c = pt;
@@ -284,7 +287,7 @@ impl CadCommand for ArcCommand {
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
     }
-    fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         match self.step {
             1 => Some(line_wire(self.c, pt)),
             2 => {
@@ -315,7 +318,7 @@ impl CadCommand for ArcCommand {
 // ── Command 2: 3-Point  (ARC_3P) ──────────────────────────────────────────
 
 pub struct Arc3PCommand {
-    pts: Vec<Vec3>,
+    pts: Vec<DVec3>,
 }
 
 impl Arc3PCommand {
@@ -335,7 +338,7 @@ impl CadCommand for Arc3PCommand {
             _ => "ARC 3P  Specify end point:".into(),
         }
     }
-    fn on_point(&mut self, pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
         self.pts.push(pt);
         if self.pts.len() < 3 {
             return CmdResult::NeedPoint;
@@ -366,7 +369,7 @@ impl CadCommand for Arc3PCommand {
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
     }
-    fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         match self.pts.len() {
             0 => None,
             1 => Some(line_wire(self.pts[0], pt)),
@@ -385,7 +388,11 @@ impl CadCommand for Arc3PCommand {
                 } else {
                     Some(WireModel::solid(
                         "rubber_band".into(),
-                        vec![[p1.x, p1.y, p1.z], [p2.x, p2.y, p2.z], [pt.x, pt.y, pt.z]],
+                        vec![
+                            [p1.x as f32, p1.y as f32, p1.z as f32],
+                            [p2.x as f32, p2.y as f32, p2.z as f32],
+                            [pt.x as f32, pt.y as f32, pt.z as f32],
+                        ],
                         WireModel::CYAN,
                         false,
                     ))
@@ -399,11 +406,11 @@ impl CadCommand for Arc3PCommand {
 
 pub struct ArcSCECommand {
     step: u8,
-    s: Vec3,
-    c: Vec3,
-    r: f32,
-    sa: f32,
-    prev_pt: Option<Vec3>,
+    s: DVec3,
+    c: DVec3,
+    r: f64,
+    sa: f64,
+    prev_pt: Option<DVec3>,
     cw: bool,
 }
 
@@ -411,8 +418,8 @@ impl ArcSCECommand {
     pub fn new() -> Self {
         Self {
             step: 0,
-            s: Vec3::ZERO,
-            c: Vec3::ZERO,
+            s: DVec3::ZERO,
+            c: DVec3::ZERO,
             r: 0.0,
             sa: 0.0,
             prev_pt: None,
@@ -432,7 +439,7 @@ impl CadCommand for ArcSCECommand {
             _ => format!("ARC SCE  Specify end point  [r={:.3}]:", self.r),
         }
     }
-    fn on_point(&mut self, pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match self.step {
             0 => {
                 self.s = pt;
@@ -463,7 +470,7 @@ impl CadCommand for ArcSCECommand {
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
     }
-    fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         match self.step {
             1 => Some(line_wire(self.s, pt)),
             2 => {
@@ -496,11 +503,11 @@ impl CadCommand for ArcSCECommand {
 
 pub struct ArcSCACommand {
     step: u8,
-    s: Vec3,
-    c: Vec3,
-    r: f32,
-    sa: f32,
-    prev_pt: Option<Vec3>,
+    s: DVec3,
+    c: DVec3,
+    r: f64,
+    sa: f64,
+    prev_pt: Option<DVec3>,
     cw: bool,
 }
 
@@ -508,8 +515,8 @@ impl ArcSCACommand {
     pub fn new() -> Self {
         Self {
             step: 0,
-            s: Vec3::ZERO,
-            c: Vec3::ZERO,
+            s: DVec3::ZERO,
+            c: DVec3::ZERO,
             r: 0.0,
             sa: 0.0,
             prev_pt: None,
@@ -532,7 +539,7 @@ impl CadCommand for ArcSCACommand {
             ),
         }
     }
-    fn on_point(&mut self, pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match self.step {
             0 => {
                 self.s = pt;
@@ -565,7 +572,7 @@ impl CadCommand for ArcSCACommand {
     }
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         if self.step == 2 {
-            let span: f32 = text.trim().replace(',', ".").parse().ok()?;
+            let span: f64 = text.trim().replace(',', ".").parse().ok()?;
             // Negative span = CW; positive = CCW.
             let ea = self.sa + span.to_radians();
             return Some(CmdResult::CommitAndExit(make_arc(
@@ -582,17 +589,18 @@ impl CadCommand for ArcSCACommand {
             anchor: DynAnchor::Point(self.c),
             fields: vec![DynFieldSpec::new(DynRole::Angle)],
             guide: DynGuide::Polar,
-            ref_point: Some(self.c + Vec3::new(self.sa.cos(), self.sa.sin(), 0.0)),
+            ref_point: Some(self.c + DVec3::new(self.sa.cos(), self.sa.sin(), 0.0)),
         })
     }
     fn dyn_commit_as_text(&self) -> bool {
         self.step == 2
     }
-    fn dyn_live_value(&self, cursor: Vec3) -> Option<f64> {
-        (self.step == 2)
-            .then(|| crate::command::dyn_display_angle_deg(angle_xy(self.c, cursor) - self.sa) as f64)
+    fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
+        (self.step == 2).then(|| {
+            crate::command::dyn_display_angle_deg((angle_xy(self.c, cursor) - self.sa) as f32) as f64
+        })
     }
-    fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         match self.step {
             1 => Some(line_wire(self.s, pt)),
             2 => {
@@ -626,18 +634,18 @@ impl CadCommand for ArcSCACommand {
 
 pub struct ArcSCLCommand {
     step: u8,
-    s: Vec3,
-    c: Vec3,
-    r: f32,
-    sa: f32,
+    s: DVec3,
+    c: DVec3,
+    r: f64,
+    sa: f64,
 }
 
 impl ArcSCLCommand {
     pub fn new() -> Self {
         Self {
             step: 0,
-            s: Vec3::ZERO,
-            c: Vec3::ZERO,
+            s: DVec3::ZERO,
+            c: DVec3::ZERO,
             r: 0.0,
             sa: 0.0,
         }
@@ -658,7 +666,7 @@ impl CadCommand for ArcSCLCommand {
             ),
         }
     }
-    fn on_point(&mut self, pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match self.step {
             0 => {
                 self.s = pt;
@@ -687,7 +695,7 @@ impl CadCommand for ArcSCLCommand {
     }
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         if self.step == 2 {
-            let chord: f32 = text.trim().replace(',', ".").parse().ok()?;
+            let chord: f64 = text.trim().replace(',', ".").parse().ok()?;
             if chord > 0.0 {
                 let ea = end_angle_from_chord_len(self.sa, chord, self.r);
                 return Some(CmdResult::CommitAndExit(make_arc(
@@ -710,10 +718,10 @@ impl CadCommand for ArcSCLCommand {
     fn dyn_commit_as_text(&self) -> bool {
         self.step == 2
     }
-    fn dyn_live_value(&self, cursor: Vec3) -> Option<f64> {
-        (self.step == 2).then(|| self.s.distance(cursor) as f64)
+    fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
+        (self.step == 2).then(|| self.s.distance(cursor))
     }
-    fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         match self.step {
             1 => Some(line_wire(self.s, pt)),
             2 => {
@@ -731,16 +739,16 @@ impl CadCommand for ArcSCLCommand {
 
 pub struct ArcSEACommand {
     step: u8,
-    s: Vec3,
-    e: Vec3,
+    s: DVec3,
+    e: DVec3,
 }
 
 impl ArcSEACommand {
     pub fn new() -> Self {
         Self {
             step: 0,
-            s: Vec3::ZERO,
-            e: Vec3::ZERO,
+            s: DVec3::ZERO,
+            e: DVec3::ZERO,
         }
     }
 }
@@ -756,7 +764,7 @@ impl CadCommand for ArcSEACommand {
             _ => "ARC SEA  Specify angle (move cursor perpendicular to chord):".into(),
         }
     }
-    fn on_point(&mut self, pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match self.step {
             0 => {
                 self.s = pt;
@@ -784,7 +792,7 @@ impl CadCommand for ArcSEACommand {
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
     }
-    fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         match self.step {
             1 => Some(line_wire(self.s, pt)),
             2 => {
@@ -806,16 +814,16 @@ impl CadCommand for ArcSEACommand {
 
 pub struct ArcSERCommand {
     step: u8,
-    s: Vec3,
-    e: Vec3,
+    s: DVec3,
+    e: DVec3,
 }
 
 impl ArcSERCommand {
     pub fn new() -> Self {
         Self {
             step: 0,
-            s: Vec3::ZERO,
-            e: Vec3::ZERO,
+            s: DVec3::ZERO,
+            e: DVec3::ZERO,
         }
     }
 }
@@ -831,7 +839,7 @@ impl CadCommand for ArcSERCommand {
             _ => "ARC SER  Click radius point or type radius value:".into(),
         }
     }
-    fn on_point(&mut self, pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match self.step {
             0 => {
                 self.s = pt;
@@ -861,13 +869,13 @@ impl CadCommand for ArcSERCommand {
     }
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         if self.step == 2 {
-            let r: f32 = text.trim().replace(',', ".").parse().ok()?;
+            let r: f64 = text.trim().replace(',', ".").parse().ok()?;
             let chord = self.s.distance(self.e);
             if r > 0.0 && r >= chord / 2.0 {
                 let mid = (self.s + self.e) * 0.5;
                 let perp = {
                     let cv = (self.e - self.s) / chord;
-                    Vec3::new(-cv.y, cv.x, 0.0)
+                    DVec3::new(-cv.y, cv.x, 0.0)
                 };
                 let d = (r * r - (chord / 2.0) * (chord / 2.0)).max(0.0).sqrt();
                 let center = mid - perp * d;
@@ -891,13 +899,13 @@ impl CadCommand for ArcSERCommand {
     fn dyn_commit_as_text(&self) -> bool {
         self.step == 2
     }
-    fn dyn_live_value(&self, cursor: Vec3) -> Option<f64> {
+    fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
         if self.step != 2 {
             return None;
         }
-        arc_from_se_radius(self.s, self.e, cursor).map(|(_, r)| r as f64)
+        arc_from_se_radius(self.s, self.e, cursor).map(|(_, r)| r)
     }
-    fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         match self.step {
             1 => Some(line_wire(self.s, pt)),
             2 => {
@@ -919,16 +927,16 @@ impl CadCommand for ArcSERCommand {
 
 pub struct ArcSEDCommand {
     step: u8,
-    s: Vec3,
-    e: Vec3,
+    s: DVec3,
+    e: DVec3,
 }
 
 impl ArcSEDCommand {
     pub fn new() -> Self {
         Self {
             step: 0,
-            s: Vec3::ZERO,
-            e: Vec3::ZERO,
+            s: DVec3::ZERO,
+            e: DVec3::ZERO,
         }
     }
 }
@@ -944,7 +952,7 @@ impl CadCommand for ArcSEDCommand {
             _ => "ARC SED  Specify tangent direction at start:".into(),
         }
     }
-    fn on_point(&mut self, pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match self.step {
             0 => {
                 self.s = pt;
@@ -972,7 +980,7 @@ impl CadCommand for ArcSEDCommand {
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
     }
-    fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         match self.step {
             1 => Some(line_wire(self.s, pt)),
             2 => {
@@ -994,10 +1002,10 @@ impl CadCommand for ArcSEDCommand {
 
 pub struct ArcCSACommand {
     step: u8,
-    c: Vec3,
-    r: f32,
-    sa: f32,
-    prev_pt: Option<Vec3>,
+    c: DVec3,
+    r: f64,
+    sa: f64,
+    prev_pt: Option<DVec3>,
     cw: bool,
 }
 
@@ -1005,7 +1013,7 @@ impl ArcCSACommand {
     pub fn new() -> Self {
         Self {
             step: 0,
-            c: Vec3::ZERO,
+            c: DVec3::ZERO,
             r: 0.0,
             sa: 0.0,
             prev_pt: None,
@@ -1028,7 +1036,7 @@ impl CadCommand for ArcCSACommand {
             ),
         }
     }
-    fn on_point(&mut self, pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match self.step {
             0 => {
                 self.c = pt;
@@ -1060,7 +1068,7 @@ impl CadCommand for ArcCSACommand {
     }
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         if self.step == 2 {
-            let span: f32 = text.trim().replace(',', ".").parse().ok()?;
+            let span: f64 = text.trim().replace(',', ".").parse().ok()?;
             let ea = self.sa + span.to_radians();
             return Some(CmdResult::CommitAndExit(make_arc(
                 self.c, self.r, self.sa, ea,
@@ -1074,17 +1082,18 @@ impl CadCommand for ArcCSACommand {
             anchor: DynAnchor::Point(self.c),
             fields: vec![DynFieldSpec::new(DynRole::Angle)],
             guide: DynGuide::Polar,
-            ref_point: Some(self.c + Vec3::new(self.sa.cos(), self.sa.sin(), 0.0)),
+            ref_point: Some(self.c + DVec3::new(self.sa.cos(), self.sa.sin(), 0.0)),
         })
     }
     fn dyn_commit_as_text(&self) -> bool {
         self.step == 2
     }
-    fn dyn_live_value(&self, cursor: Vec3) -> Option<f64> {
-        (self.step == 2)
-            .then(|| crate::command::dyn_display_angle_deg(angle_xy(self.c, cursor) - self.sa) as f64)
+    fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
+        (self.step == 2).then(|| {
+            crate::command::dyn_display_angle_deg((angle_xy(self.c, cursor) - self.sa) as f32) as f64
+        })
     }
-    fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         match self.step {
             1 => Some(line_wire(self.c, pt)),
             2 => {
@@ -1117,18 +1126,18 @@ impl CadCommand for ArcCSACommand {
 
 pub struct ArcCSLCommand {
     step: u8,
-    c: Vec3,
-    s: Vec3,
-    r: f32,
-    sa: f32,
+    c: DVec3,
+    s: DVec3,
+    r: f64,
+    sa: f64,
 }
 
 impl ArcCSLCommand {
     pub fn new() -> Self {
         Self {
             step: 0,
-            c: Vec3::ZERO,
-            s: Vec3::ZERO,
+            c: DVec3::ZERO,
+            s: DVec3::ZERO,
             r: 0.0,
             sa: 0.0,
         }
@@ -1149,7 +1158,7 @@ impl CadCommand for ArcCSLCommand {
             ),
         }
     }
-    fn on_point(&mut self, pt: Vec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match self.step {
             0 => {
                 self.c = pt;
@@ -1178,7 +1187,7 @@ impl CadCommand for ArcCSLCommand {
     }
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         if self.step == 2 {
-            let chord: f32 = text.trim().replace(',', ".").parse().ok()?;
+            let chord: f64 = text.trim().replace(',', ".").parse().ok()?;
             if chord > 0.0 {
                 let ea = end_angle_from_chord_len(self.sa, chord, self.r);
                 return Some(CmdResult::CommitAndExit(make_arc(
@@ -1201,10 +1210,10 @@ impl CadCommand for ArcCSLCommand {
     fn dyn_commit_as_text(&self) -> bool {
         self.step == 2
     }
-    fn dyn_live_value(&self, cursor: Vec3) -> Option<f64> {
-        (self.step == 2).then(|| self.s.distance(cursor) as f64)
+    fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
+        (self.step == 2).then(|| self.s.distance(cursor))
     }
-    fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         match self.step {
             1 => Some(line_wire(self.c, pt)),
             2 => {

@@ -9,7 +9,7 @@ use crate::scene::model::hatch_model::HatchModel;
 use crate::scene::model::wire_model::WireModel;
 use crate::scene::Scene;
 use acadrust::{EntityType, Handle};
-use glam::Vec3;
+use glam::DVec3;
 
 /// Domain object resolved under the cursor for ObjectPick snapping.
 #[derive(Clone, Copy, Debug)]
@@ -26,13 +26,13 @@ pub struct ObjectPickHit {
 #[derive(Clone)]
 pub enum EntityTransform {
     /// Move every point by the given world-space delta (world XY plane).
-    Translate(Vec3),
+    Translate(DVec3),
     /// Rotate around `center` by `angle_rad` in the world XY plane.
-    Rotate { center: Vec3, angle_rad: f32 },
+    Rotate { center: DVec3, angle_rad: f32 },
     /// Uniform scale from `center` by `factor`.
-    Scale { center: Vec3, factor: f32 },
+    Scale { center: DVec3, factor: f32 },
     /// Mirror across the line through `p1`→`p2` in the world XY plane.
-    Mirror { p1: Vec3, p2: Vec3 },
+    Mirror { p1: DVec3, p2: DVec3 },
 }
 
 // ── Tangent object ─────────────────────────────────────────────────────────
@@ -41,9 +41,9 @@ pub enum EntityTransform {
 #[derive(Clone, Copy, Debug)]
 pub enum TangentObject {
     /// Infinite line through two world-space XZ-plane points.
-    Line { p1: Vec3, p2: Vec3 },
+    Line { p1: DVec3, p2: DVec3 },
     /// Circle in the world XY plane.
-    Circle { center: Vec3, radius: f32 },
+    Circle { center: DVec3, radius: f64 },
 }
 
 // ── Result token ──────────────────────────────────────────────────────────
@@ -82,7 +82,7 @@ pub enum CmdResult {
     CreateBlock {
         handles: Vec<Handle>,
         name: String,
-        base: Vec3,
+        base: DVec3,
     },
     /// Apply a transform to selected entities and end the command.
     TransformSelected(Vec<Handle>, EntityTransform),
@@ -117,13 +117,13 @@ pub enum CmdResult {
         thaw: Vec<String>,
     },
     /// Paste clipboard entities translated so their centroid lands at `base_pt`; end command.
-    PasteClipboard { base_pt: Vec3 },
+    PasteClipboard { base_pt: DVec3 },
     /// Zoom the model-space camera to fit the given corner points; end command.
-    ZoomToWindow { p1: Vec3, p2: Vec3 },
+    ZoomToWindow { p1: DVec3, p2: DVec3 },
     /// Print a measurement result to the command line and end the command.
     Measurement(String),
     /// Break `handle` at points `p1` and `p2`; replace with computed fragments.
-    BreakEntity { handle: Handle, p1: Vec3, p2: Vec3 },
+    BreakEntity { handle: Handle, p1: DVec3, p2: DVec3 },
     /// Attempt to join the given entities into fewer merged entities.
     JoinEntities(Vec<Handle>),
     /// Apply a polyline-edit operation to one entity; keep command active.
@@ -138,19 +138,19 @@ pub enum CmdResult {
     /// Extend/trim a Line or Arc by the given mode; end command.
     LengthenEntity {
         handle: Handle,
-        pick_pt: Vec3,
+        pick_pt: DVec3,
         mode: crate::modules::draw::modify::lengthen::LenMode,
     },
     /// Align selected entities: translate to dst1, rotate by angle_rad, optional scale.
     AlignSelected {
         handles: Vec<Handle>,
-        src1: Vec3,
-        dst1: Vec3,
+        src1: DVec3,
+        dst1: DVec3,
         angle_rad: f32,
         scale: f32,
     },
     /// Set the plot window on the active layout's PlotSettings.
-    SetPlotWindow { p1: Vec3, p2: Vec3 },
+    SetPlotWindow { p1: DVec3, p2: DVec3 },
     /// Replace the text content of a Text/MText entity in-place.
     DdeditEntity { handle: Handle, new_text: String },
     /// Open the in-place editor (plain box or rich MText editor, per type) for
@@ -160,7 +160,7 @@ pub enum CmdResult {
     /// area with live viewport preview). `handle` is `Some` when editing an
     /// existing MText, `None` when creating a new one at `pos`.
     OpenMTextEditor {
-        pos: Vec3,
+        pos: DVec3,
         handle: Option<Handle>,
         initial: String,
         height: f64,
@@ -169,7 +169,7 @@ pub enum CmdResult {
     /// formatting toolbar). `handle` is `Some` when editing an existing Text,
     /// `None` when creating a new one at `pos`.
     OpenTextEditor {
-        pos: Vec3,
+        pos: DVec3,
         handle: Option<Handle>,
         initial: String,
         height: f64,
@@ -185,11 +185,11 @@ pub enum CmdResult {
     StretchEntities {
         handles: Vec<Handle>,
         /// Min corner of the crossing window in world XZ (= DXF XY).
-        win_min: Vec3,
+        win_min: DVec3,
         /// Max corner of the crossing window in world XZ (= DXF XY).
-        win_max: Vec3,
+        win_max: DVec3,
         /// Translation vector to apply to vertices inside the window.
-        delta: Vec3,
+        delta: DVec3,
     },
     /// Create a Solid3D placeholder entity + associated MeshModel.
     /// `mesh_fn` is called with the entity's handle string to build the mesh.
@@ -205,8 +205,8 @@ pub enum CmdResult {
     /// Revolve the profile entity `handle` around the given axis by `angle_deg`.
     RevolveEntity {
         handle: Handle,
-        axis_start: glam::Vec3,
-        axis_end: glam::Vec3,
+        axis_start: glam::DVec3,
+        axis_end: glam::DVec3,
         angle_deg: f32,
         color: [f32; 4],
     },
@@ -377,7 +377,7 @@ pub enum DynAnchor {
     #[allow(dead_code)]
     LastPoint,
     /// An explicit world point.
-    Point(Vec3),
+    Point(DVec3),
 }
 
 /// One value box in a [`DynSpec`].
@@ -403,7 +403,7 @@ pub struct DynSpec {
     pub guide: DynGuide,
     /// Far end of a reference line through `anchor` (only used by
     /// [`DynGuide::Perp`]); `None` otherwise.
-    pub ref_point: Option<Vec3>,
+    pub ref_point: Option<DVec3>,
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────
@@ -424,7 +424,7 @@ pub trait CadCommand: Send {
     fn set_ucs(&mut self, _ucs: glam::Mat4) {}
 
     /// Called when the user left-clicks in the viewport (point pick).
-    fn on_point(&mut self, pt: Vec3) -> CmdResult;
+    fn on_point(&mut self, pt: DVec3) -> CmdResult;
 
     /// Called when the user presses Enter (finalize / next option).
     fn on_enter(&mut self) -> CmdResult;
@@ -447,7 +447,7 @@ pub trait CadCommand: Send {
 
     /// Called when the user clicks and `needs_entity_pick()` is true.
     /// `handle` is the nearest wire's entity handle (Handle::NULL if nothing found).
-    fn on_entity_pick(&mut self, _handle: Handle, _pt: Vec3) -> CmdResult {
+    fn on_entity_pick(&mut self, _handle: Handle, _pt: DVec3) -> CmdResult {
         CmdResult::Cancel
     }
 
@@ -467,7 +467,7 @@ pub trait CadCommand: Send {
     }
 
     /// Preview wires while hovering during object-point pick.
-    fn object_pick_hover_previews(&self, _scene: &Scene, _cursor: Vec3) -> Vec<WireModel> {
+    fn object_pick_hover_previews(&self, _scene: &Scene, _cursor: DVec3) -> Vec<WireModel> {
         vec![]
     }
 
@@ -477,7 +477,7 @@ pub trait CadCommand: Send {
     }
 
     /// Called when `needs_structure_point_pick()` is true and a structure is found near the click.
-    fn on_structure_pick(&mut self, _handle: Handle, _pt: Vec3) -> CmdResult {
+    fn on_structure_pick(&mut self, _handle: Handle, _pt: DVec3) -> CmdResult {
         CmdResult::Cancel
     }
 
@@ -502,19 +502,19 @@ pub trait CadCommand: Send {
     /// Called on every mouse-move when `needs_entity_pick()` is true.
     /// Return preview wires showing the operation result under the cursor.
     /// Default: empty (no preview).
-    fn on_hover_entity(&mut self, _handle: Handle, _pt: Vec3) -> Vec<WireModel> {
+    fn on_hover_entity(&mut self, _handle: Handle, _pt: DVec3) -> Vec<WireModel> {
         vec![]
     }
 
     /// Called on every mouse-move in the viewport.
     /// Return `Some(WireModel)` to update the rubber-band preview, `None` to skip.
-    fn on_mouse_move(&mut self, _pt: Vec3) -> Option<WireModel> {
+    fn on_mouse_move(&mut self, _pt: DVec3) -> Option<WireModel> {
         None
     }
 
     /// Called on every mouse-move; return all preview wires to show (object ghosts + rubber-band).
     /// Default: forwards to `on_mouse_move` for backwards compatibility.
-    fn on_preview_wires(&mut self, pt: Vec3) -> Vec<WireModel> {
+    fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> {
         self.on_mouse_move(pt).into_iter().collect()
     }
 
@@ -599,7 +599,7 @@ pub trait CadCommand: Send {
 
     /// Called instead of `on_point` when the command needs a tangent pick
     /// and the snap system found a tangent object.
-    fn on_tangent_point(&mut self, obj: TangentObject, hit: Vec3) -> CmdResult {
+    fn on_tangent_point(&mut self, obj: TangentObject, hit: DVec3) -> CmdResult {
         let _ = obj;
         self.on_point(hit)
     }
@@ -647,7 +647,7 @@ pub trait CadCommand: Send {
     /// Returns `None` when the value can only be typed (a count, or a
     /// distance with no reference yet). The string the host commits is this
     /// value formatted; the command's own `on_text_input` parses it back.
-    fn dyn_live_value(&self, _cursor: Vec3) -> Option<f64> {
+    fn dyn_live_value(&self, _cursor: DVec3) -> Option<f64> {
         None
     }
 }

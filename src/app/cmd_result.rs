@@ -210,7 +210,7 @@ impl OpenCADStudio {
                 self.push_undo_snapshot(i, "BLOCK");
                 match self.tabs[i]
                     .scene
-                    .create_block_from_entities(&handles, &name, base)
+                    .create_block_from_entities(&handles, &name, base.as_vec3())
                 {
                     Ok(insert_handle) => {
                         self.tabs[i].dirty = true;
@@ -611,12 +611,13 @@ impl OpenCADStudio {
                     // offset gap. Zero for a same-drawing paste. (#135)
                     let src_wo = self.clipboard_world_offset;
                     let tgt_wo = [0.0_f64; 3];
-                    let wo_corr = glam::Vec3::new(
-                        (tgt_wo[0] - src_wo[0]) as f32,
-                        (tgt_wo[1] - src_wo[1]) as f32,
-                        (tgt_wo[2] - src_wo[2]) as f32,
+                    let wo_corr = glam::DVec3::new(
+                        tgt_wo[0] - src_wo[0],
+                        tgt_wo[1] - src_wo[1],
+                        tgt_wo[2] - src_wo[2],
                     );
-                    let delta = base_pt - self.clipboard_centroid + wo_corr;
+                    let delta =
+                        base_pt - self.clipboard_centroid.as_dvec3() + wo_corr;
                     let translate = crate::command::EntityTransform::Translate(delta);
                     self.push_undo_snapshot(i, "PASTECLIP");
                     // Recreate any layer / linetype / style the copied entities
@@ -783,7 +784,7 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.tabs[i].scene.clear_preview_wire();
-                self.tabs[i].scene.zoom_to_window(p1, p2);
+                self.tabs[i].scene.zoom_to_window(p1.as_vec3(), p2.as_vec3());
                 self.command_line.push_output("Zoom Window");
             }
             CmdResult::Measurement(msg) => {
@@ -818,7 +819,7 @@ impl OpenCADStudio {
                         self.tabs[i].scene.transform_entities(
                             &handles,
                             &crate::command::EntityTransform::Scale {
-                                center: glam::Vec3::ZERO,
+                                center: glam::DVec3::ZERO,
                                 factor: scale,
                             },
                         );
@@ -828,7 +829,7 @@ impl OpenCADStudio {
                         self.tabs[i].scene.transform_entities(
                             &handles,
                             &crate::command::EntityTransform::Rotate {
-                                center: glam::Vec3::ZERO,
+                                center: glam::DVec3::ZERO,
                                 angle_rad,
                             },
                         );
@@ -861,7 +862,7 @@ impl OpenCADStudio {
                     .scene
                     .document
                     .get_entity(handle)
-                    .and_then(|e| lengthen_entity(e, pick_pt, &mode));
+                    .and_then(|e| lengthen_entity(e, pick_pt.as_vec3(), &mode));
                 match result {
                     Some(new_entity) => {
                         let label = self.history_label_from_active_cmd(i, "LENGTHEN");
@@ -1001,7 +1002,7 @@ impl OpenCADStudio {
                     .scene
                     .document
                     .get_entity(handle)
-                    .and_then(|e| break_entity(e, p1, p2));
+                    .and_then(|e| break_entity(e, p1.as_vec3(), p2.as_vec3()));
                 match replacement {
                     Some(frags) => {
                         let label = self.history_label_from_active_cmd(i, "BREAK");
@@ -1091,9 +1092,7 @@ impl OpenCADStudio {
                 // Helper: is DXF point (x, y) inside the world-space window?
                 // Drawing plane is world XY (= DXF XY).
                 let in_win = |x: f64, y: f64| -> bool {
-                    let wx = x as f32;
-                    let wy = y as f32;
-                    wx >= win_min.x && wx <= win_max.x && wy >= win_min.y && wy <= win_max.y
+                    x >= win_min.x && x <= win_max.x && y >= win_min.y && y <= win_max.y
                 };
 
                 let dx = delta.x as f64;
@@ -1687,7 +1686,7 @@ impl OpenCADStudio {
             } => {
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
-                self.open_mtext_editor(pos, handle, &initial, height);
+                self.open_mtext_editor(pos.as_vec3(), handle, &initial, height);
             }
             CmdResult::OpenTextEditor {
                 pos,
@@ -1698,7 +1697,7 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.open_text_inline(
-                    pos,
+                    pos.as_vec3(),
                     handle,
                     &initial,
                     height,

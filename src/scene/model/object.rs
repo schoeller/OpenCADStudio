@@ -1,7 +1,7 @@
 // Shared value types used by the dispatch and grip systems.
 
 use acadrust::types::{Color as AcadColor, LineWeight};
-use glam::Vec3;
+use glam::{DVec3, Vec3};
 
 /// The kind of value held by a property row.
 #[derive(Clone, Debug, PartialEq)]
@@ -96,9 +96,9 @@ pub struct GripDef {
 #[derive(Clone, Debug)]
 pub enum GripApply {
     /// Move a specific vertex to this absolute world position.
-    Absolute(Vec3),
+    Absolute(DVec3),
     /// Translate the whole object by this delta vector.
-    Translate(Vec3),
+    Translate(DVec3),
 }
 
 /// One entry in the hover-popup menu that opens when the cursor dwells

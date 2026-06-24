@@ -166,11 +166,9 @@ fn apply_grip(circle: &mut Circle, grip_id: usize, apply: GripApply) {
             circle.center.z += d.z as f64;
         }
         (1..=4, GripApply::Absolute(p)) => {
-            let cx = circle.center.x as f32;
-            let cy = circle.center.y as f32;
-            let dx = p.x - cx;
-            let dy = p.y - cy;
-            circle.radius = ((dx * dx + dy * dy) as f64).sqrt();
+            let dx = p.x - circle.center.x;
+            let dy = p.y - circle.center.y;
+            circle.radius = (dx * dx + dy * dy).sqrt();
         }
         _ => {}
     }

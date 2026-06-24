@@ -57,7 +57,7 @@ pub const ALL_SNAP_MODES: &[(SnapType, &str, &str)] = &[
 
 #[derive(Debug, Clone, Copy)]
 pub struct SnapResult {
-    pub world: Vec3,
+    pub world: glam::DVec3,
     pub screen: Point,
     pub snap_type: SnapType,
     /// Set when `snap_type == Tangent`; provides entity geometry for TTR/TTT.
@@ -203,8 +203,8 @@ impl Snapper {
             Some(p) => {
                 // Convert to screen to measure pixel distance.
                 let is_same = if let Some(prev) = self.last_snap_world {
-                    let dp = world_to_screen(p, view_rot, eye, bounds);
-                    let dp2 = world_to_screen(prev, view_rot, eye, bounds);
+                    let dp = world_to_screen(p.as_dvec3(), view_rot, eye, bounds);
+                    let dp2 = world_to_screen(prev.as_dvec3(), view_rot, eye, bounds);
                     let dx = dp.x - dp2.x;
                     let dy = dp.y - dp2.y;
                     (dx * dx + dy * dy).sqrt() < DWELL_PX
@@ -273,11 +273,11 @@ impl Snapper {
             return None;
         }
 
-        let cursor_screen = world_to_screen(cursor_world, view_rot, eye, bounds);
+        let cursor_screen = world_to_screen(cursor_world.as_dvec3(), view_rot, eye, bounds);
         // Use the same aperture as OSNAP so the catch distance is uniform.
         let r = self.osnap_radius_px;
         let screen_dist = |w: Vec3| {
-            let s = world_to_screen(w, view_rot, eye, bounds);
+            let s = world_to_screen(w.as_dvec3(), view_rot, eye, bounds);
             ((s.x - cursor_screen.x).powi(2) + (s.y - cursor_screen.y).powi(2)).sqrt()
         };
 
@@ -499,7 +499,7 @@ impl Snapper {
                 && cursor_world.y - r <= wire.aabb[3]
         };
 
-        let mut try_pt = |world: Vec3, snap_type: SnapType| {
+        let mut try_pt = |world: glam::DVec3, snap_type: SnapType| {
             let screen = world_to_screen(world, view_rot, eye, bounds);
             let d2 = dist2(screen, cursor_screen);
             // `!(d2 < radius2)` (not `d2 >= radius2`) so a NaN distance from
@@ -533,7 +533,7 @@ impl Snapper {
                     SnapHint::Midpoint => SnapType::Midpoint,
                 };
                 if self.is_on(snap_type) {
-                    try_pt(world.as_vec3(), snap_type);
+                    try_pt(world, snap_type);
                 }
             }
         }
@@ -548,18 +548,18 @@ impl Snapper {
                     // Use explicit vertices (Line, LwPolyline): every vertex is an endpoint.
                     for &p in &wire.key_vertices {
                         try_pt(
-                            Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32),
+                            glam::DVec3::new(p[0], p[1], p[2]),
                             SnapType::Endpoint,
                         );
                     }
                 } else {
                     // Tessellated curves (Circle, Arc, Ellipse): only arc endpoints.
                     if let Some(&p) = wire.points.first() {
-                        try_pt(Vec3::from(p), SnapType::Endpoint);
+                        try_pt(glam::DVec3::new(p[0] as f64, p[1] as f64, p[2] as f64), SnapType::Endpoint);
                     }
                     if wire.points.len() > 1 {
                         if let Some(&p) = wire.points.last() {
-                            try_pt(Vec3::from(p), SnapType::Endpoint);
+                            try_pt(glam::DVec3::new(p[0] as f64, p[1] as f64, p[2] as f64), SnapType::Endpoint);
                         }
                     }
                 }
@@ -582,7 +582,7 @@ impl Snapper {
                         let a = Vec3::new(seg[0][0] as f32, seg[0][1] as f32, seg[0][2] as f32);
                         let b = Vec3::new(seg[1][0] as f32, seg[1][1] as f32, seg[1][2] as f32);
                         if a.distance_squared(b) > 1e-12 {
-                            try_pt((a + b) * 0.5, SnapType::Midpoint);
+                            try_pt(((a + b) * 0.5).as_dvec3(), SnapType::Midpoint);
                         }
                     }
                 }
@@ -598,7 +598,7 @@ impl Snapper {
                 for seg in wire.points.windows(2) {
                     let p =
                         nearest_on_segment(cursor_world, Vec3::from(seg[0]), Vec3::from(seg[1]));
-                    try_pt(p, SnapType::Nearest);
+                    try_pt(p.as_dvec3(), SnapType::Nearest);
                 }
             }
         }
@@ -618,7 +618,7 @@ impl Snapper {
                 }
                 for seg in wire.points.windows(2) {
                     if let Some(foot) = perp_foot(q, Vec3::from(seg[0]), Vec3::from(seg[1])) {
-                        try_pt(foot, SnapType::Perpendicular);
+                        try_pt(foot.as_dvec3(), SnapType::Perpendicular);
                     }
                 }
             }
@@ -654,7 +654,7 @@ impl Snapper {
                                 continue;
                             }
                             if let Some(pt) = seg_intersect_xy(a0, a1, b0, b1) {
-                                try_pt(pt, SnapType::Intersection);
+                                try_pt(pt.as_dvec3(), SnapType::Intersection);
                             }
                         }
                     }
@@ -682,7 +682,7 @@ impl Snapper {
                         bounds,
                         self.osnap_radius_px,
                     ) {
-                        try_pt(ext, SnapType::Extension);
+                        try_pt(ext.as_dvec3(), SnapType::Extension);
                     }
                 }
                 // Extend beyond the last point.
@@ -698,7 +698,7 @@ impl Snapper {
                         bounds,
                         self.osnap_radius_px,
                     ) {
-                        try_pt(ext, SnapType::Extension);
+                        try_pt(ext.as_dvec3(), SnapType::Extension);
                     }
                 }
             }
@@ -716,7 +716,7 @@ impl Snapper {
                     Some(
                         w.points
                             .iter()
-                            .map(|&p| world_to_screen(Vec3::from(p), view_rot, eye, bounds))
+                            .map(|&p| world_to_screen(glam::DVec3::new(p[0] as f64, p[1] as f64, p[2] as f64), view_rot, eye, bounds))
                             .collect::<Vec<_>>(),
                     )
                 })
@@ -739,7 +739,7 @@ impl Snapper {
                             if let Some((ta, _)) = seg_intersect_2d(sa0, sa1, sb0, sb1) {
                                 let wa0 = Vec3::from(seg_a[0]);
                                 let wa1 = Vec3::from(seg_a[1]);
-                                try_pt(wa0 + ta * (wa1 - wa0), SnapType::ApparentIntersection);
+                                try_pt((wa0 + ta * (wa1 - wa0)).as_dvec3(), SnapType::ApparentIntersection);
                             }
                         }
                     }
@@ -758,7 +758,7 @@ impl Snapper {
             let ux = (rel.dot(ax) / s).round() * s;
             let uy = (rel.dot(ay) / s).round() * s;
             let uz = (rel.dot(az) / s).round() * s;
-            try_pt(grid_origin + ax * ux + ay * uy + az * uz, SnapType::Grid);
+            try_pt((grid_origin + ax * ux + ay * uy + az * uz).as_dvec3(), SnapType::Grid);
         }
 
         // ── Tangent ────────────────────────────────────────────────────────
@@ -769,8 +769,8 @@ impl Snapper {
                 for tg in &wire.tangent_geoms {
                     let (world_pt, d2) = match tg {
                         TangentGeom::Line { p1, p2 } => {
-                            let sp0 = world_to_screen(Vec3::from(*p1), view_rot, eye, bounds);
-                            let sp1 = world_to_screen(Vec3::from(*p2), view_rot, eye, bounds);
+                            let sp0 = world_to_screen(glam::DVec3::new(p1[0] as f64, p1[1] as f64, p1[2] as f64), view_rot, eye, bounds);
+                            let sp1 = world_to_screen(glam::DVec3::new(p2[0] as f64, p2[1] as f64, p2[2] as f64), view_rot, eye, bounds);
                             let d2 = dist2_to_segment(cursor_screen, sp0, sp1);
                             let t = t_on_segment(cursor_screen, sp0, sp1);
                             let w = Vec3::from(*p1) + t * (Vec3::from(*p2) - Vec3::from(*p1));
@@ -778,9 +778,9 @@ impl Snapper {
                         }
                         TangentGeom::Circle { center, radius } => {
                             let cv = Vec3::from(*center);
-                            let sc = world_to_screen(cv, view_rot, eye, bounds);
+                            let sc = world_to_screen(cv.as_dvec3(), view_rot, eye, bounds);
                             let rim = world_to_screen(
-                                Vec3::new(cv.x + radius, cv.y, cv.z),
+                                glam::DVec3::new((cv.x + radius) as f64, cv.y as f64, cv.z as f64),
                                 view_rot,
                                 eye,
                                 bounds,
@@ -805,19 +805,19 @@ impl Snapper {
                     if d2 < radius2 && (rank < best_rank || (rank == best_rank && d2 < best_d2)) {
                         best_rank = rank;
                         best_d2 = d2;
-                        let screen_pt = world_to_screen(world_pt, view_rot, eye, bounds);
+                        let screen_pt = world_to_screen(world_pt.as_dvec3(), view_rot, eye, bounds);
                         let tangent_obj = match tg {
                             TangentGeom::Line { p1, p2 } => TangentObject::Line {
-                                p1: Vec3::from(*p1),
-                                p2: Vec3::from(*p2),
+                                p1: glam::DVec3::new(p1[0] as f64, p1[1] as f64, p1[2] as f64),
+                                p2: glam::DVec3::new(p2[0] as f64, p2[1] as f64, p2[2] as f64),
                             },
                             TangentGeom::Circle { center, radius } => TangentObject::Circle {
-                                center: Vec3::from(*center),
-                                radius: *radius,
+                                center: glam::DVec3::new(center[0] as f64, center[1] as f64, center[2] as f64),
+                                radius: *radius as f64,
                             },
                         };
                         best = Some(SnapResult {
-                            world: world_pt,
+                            world: world_pt.as_dvec3(),
                             screen: screen_pt,
                             snap_type: SnapType::Tangent,
                             tangent_obj: Some(tangent_obj),
@@ -962,8 +962,8 @@ fn extension_snap(
         return None;
     } // only beyond the endpoint
     let world_pt = Vec3::new(origin.x + t * dir.x, origin.y + t * dir.y, origin.z);
-    let screen_pt = world_to_screen(world_pt, view_rot, eye, bounds);
-    let cursor_screen = world_to_screen(cursor_world, view_rot, eye, bounds);
+    let screen_pt = world_to_screen(world_pt.as_dvec3(), view_rot, eye, bounds);
+    let cursor_screen = world_to_screen(cursor_world.as_dvec3(), view_rot, eye, bounds);
     if dist2(screen_pt, cursor_screen) > radius_px * radius_px {
         return None;
     }
@@ -976,8 +976,8 @@ fn extension_snap(
 /// so the result is precise at UTM-scale absolute coordinates (a full
 /// view-projection with a ~1e7 translation cancels catastrophically in f32).
 /// `view_rot` is the rotation-only view-projection (Camera::view_proj_rte).
-fn world_to_screen(world: Vec3, view_rot: Mat4, eye: glam::DVec3, bounds: Rectangle) -> Point {
-    let rel = (world.as_dvec3() - eye).as_vec3();
+fn world_to_screen(world: glam::DVec3, view_rot: Mat4, eye: glam::DVec3, bounds: Rectangle) -> Point {
+    let rel = (world - eye).as_vec3();
     let ndc = view_rot.project_point3(rel);
     Point::new(
         (ndc.x + 1.0) * 0.5 * bounds.width,

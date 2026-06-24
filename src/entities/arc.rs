@@ -157,37 +157,37 @@ fn apply_geom_prop(arc: &mut Arc, field: &str, value: &str) {
 fn apply_grip(arc: &mut Arc, grip_id: usize, apply: GripApply) {
     match (grip_id, apply) {
         (0, GripApply::Translate(d)) => {
-            arc.center.x += d.x as f64;
-            arc.center.y += d.y as f64;
-            arc.center.z += d.z as f64;
+            arc.center.x += d.x;
+            arc.center.y += d.y;
+            arc.center.z += d.z;
         }
         (0, GripApply::Absolute(p)) => {
-            arc.center.x = p.x as f64;
-            arc.center.y = p.y as f64;
-            arc.center.z = p.z as f64;
+            arc.center.x = p.x;
+            arc.center.y = p.y;
+            arc.center.z = p.z;
         }
         (1, GripApply::Absolute(p)) => {
-            let dx = p.x - arc.center.x as f32;
-            let dy = p.y - arc.center.y as f32;
-            arc.start_angle = (dy as f64).atan2(dx as f64);
+            let dx = p.x - arc.center.x;
+            let dy = p.y - arc.center.y;
+            arc.start_angle = dy.atan2(dx);
         }
         (2, GripApply::Absolute(p)) => {
-            let dx = p.x - arc.center.x as f32;
-            let dy = p.y - arc.center.y as f32;
-            arc.end_angle = (dy as f64).atan2(dx as f64);
+            let dx = p.x - arc.center.x;
+            let dy = p.y - arc.center.y;
+            arc.end_angle = dy.atan2(dx);
         }
         (3, GripApply::Translate(d)) => {
-            let sa = arc.start_angle as f32;
-            let ea = arc.end_angle as f32;
-            let span = angle_span(sa, ea);
+            let sa = arc.start_angle;
+            let ea = arc.end_angle;
+            let span = angle_span(sa as f32, ea as f32) as f64;
             let mid_a = sa + span * 0.5;
-            let current_mid_x = arc.center.x as f32 + arc.radius as f32 * mid_a.cos();
-            let current_mid_y = arc.center.y as f32 + arc.radius as f32 * mid_a.sin();
+            let current_mid_x = arc.center.x + arc.radius * mid_a.cos();
+            let current_mid_y = arc.center.y + arc.radius * mid_a.sin();
             let new_mid_x = current_mid_x + d.x;
             let new_mid_y = current_mid_y + d.y;
-            let dx = new_mid_x - arc.center.x as f32;
-            let dy = new_mid_y - arc.center.y as f32;
-            let new_r = (dx * dx + dy * dy).sqrt() as f64;
+            let dx = new_mid_x - arc.center.x;
+            let dy = new_mid_y - arc.center.y;
+            let new_r = (dx * dx + dy * dy).sqrt();
             if new_r > 1e-6 {
                 arc.radius = new_r;
             }
