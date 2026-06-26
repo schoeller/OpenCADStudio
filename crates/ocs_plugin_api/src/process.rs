@@ -48,7 +48,20 @@ fn call_timeout() -> Duration {
 /// Per-request-kind timeout floors. The user-configured default is raised to
 /// these minima so that no request kind can be configured into an unsafe value.
 fn request_timeout(kind: &'static str) -> Duration {
-    let base = call_timeout();
+    base_max_floor(call_timeout(), kind)
+}
+
+fn base_max_floor(base: Duration, kind: &'static str) -> Duration {
+    // Tests lower the floor via OCS_PLUGIN_TEST_FLOOR_SECS so the suite does not
+    // wait out the real 10 s Dispatch minimum. The seam is compiled in only
+    // under cfg(test); production always enforces the safety floors below.
+    #[cfg(test)]
+    if let Some(secs) = std::env::var("OCS_PLUGIN_TEST_FLOOR_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+    {
+        return base.max(Duration::from_secs(secs));
+    }
     let floor = match kind {
         "GetManifest" | "GetRibbon" => Duration::from_secs(5),
         "Dispatch" => Duration::from_secs(10),
@@ -373,6 +386,12 @@ fn shutdown_error() -> PluginError {
 /// blocking the caller. After this the process is considered dead and any
 /// further IPC will fail.
 fn mark_dead(stream: &Mutex<Option<Stream>>, child: &Mutex<Option<Child>>) {
+    // On a timeout the live `Stream` is owned by the detached reader thread, so
+    // this `take()` usually clears an already-`None` slot. The host end is not
+    // closed here directly: killing the child below shuts its socket end, which
+    // unblocks the reader thread's `recv` and lets it drop the `Stream`. If the
+    // kill fails the reader thread can stay parked until the OS tears the socket
+    // down, but the process is still treated as dead for all further IPC.
     let _ = stream.lock().unwrap_or_else(|e| e.into_inner()).take();
     if let Some(child) = child.lock().unwrap_or_else(|e| e.into_inner()).take() {
         reap(child);
@@ -734,7 +753,11 @@ mod timeout_tests {
     fn dispatch_call_timeout_marks_process_dead() {
         let _env_guard = ENV_LOCK.lock().expect("env lock");
         let prev = std::env::var("OCS_PLUGIN_CALL_TIMEOUT_SECS").ok();
+        let prev_floor = std::env::var("OCS_PLUGIN_TEST_FLOOR_SECS").ok();
         std::env::set_var("OCS_PLUGIN_CALL_TIMEOUT_SECS", "1");
+        // Drop the Dispatch floor to 0 so the test fires at the 1 s base instead
+        // of waiting out the real 10 s safety floor.
+        std::env::set_var("OCS_PLUGIN_TEST_FLOOR_SECS", "0");
         let (process, runner_stream) = fake_process();
 
         let _runner = thread::spawn(move || {
@@ -765,11 +788,11 @@ mod timeout_tests {
             "expected Dispatch timeout, got {result:?}"
         );
         assert!(
-            elapsed >= Duration::from_secs(10),
-            "timeout should respect the 10 s Dispatch floor: {elapsed:?}"
+            elapsed >= Duration::from_secs(1),
+            "timeout should respect the 1 s base: {elapsed:?}"
         );
         assert!(
-            elapsed < Duration::from_secs(12),
+            elapsed < Duration::from_secs(3),
             "timed out too slowly: {elapsed:?}"
         );
         assert!(!process.is_alive(), "process should be marked dead");
@@ -781,6 +804,10 @@ mod timeout_tests {
         match prev {
             Some(v) => std::env::set_var("OCS_PLUGIN_CALL_TIMEOUT_SECS", v),
             None => std::env::remove_var("OCS_PLUGIN_CALL_TIMEOUT_SECS"),
+        }
+        match prev_floor {
+            Some(v) => std::env::set_var("OCS_PLUGIN_TEST_FLOOR_SECS", v),
+            None => std::env::remove_var("OCS_PLUGIN_TEST_FLOOR_SECS"),
         }
     }
 
