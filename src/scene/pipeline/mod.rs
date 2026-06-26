@@ -1676,12 +1676,18 @@ impl Pipeline {
             if scissor_active {
                 pass.set_scissor_rect(0, 0, vp.width, vp.height);
             }
-            // Live overlay wires (command preview / interim / grip drag) on top
-            // of the base pass, same pipeline + depth test. No scissor.
-            for pw in &self.gpu_preview_wires {
-                if pw.instance_count > 0 {
-                    pass.set_vertex_buffer(0, pw.instance_buffer.slice(..));
-                    pass.draw(0..6, 0..pw.instance_count);
+            // Live overlay wires (command preview / interim / grip drag) always
+            // on top: the xray pipeline (depth_compare=Always, no depth write)
+            // keeps them visible through any occluding geometry — a 3D solid, or
+            // 2D geometry drawn in front — so a command preview is never hidden.
+            // No scissor.
+            if self.gpu_preview_wires.iter().any(|pw| pw.instance_count > 0) {
+                pass.set_pipeline(&self.wire_xray_pipeline);
+                for pw in &self.gpu_preview_wires {
+                    if pw.instance_count > 0 {
+                        pass.set_vertex_buffer(0, pw.instance_buffer.slice(..));
+                        pass.draw(0..6, 0..pw.instance_count);
+                    }
                 }
             }
         }
