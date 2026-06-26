@@ -15,6 +15,8 @@
 
 use std::path::PathBuf;
 
+use serde::Deserialize;
+
 /// One entry in the curated plugin registry (`plugins/registry.json`).
 #[derive(Debug, Clone)]
 pub struct RegistryEntry {
@@ -33,6 +35,7 @@ pub struct ExternalPlugin {
     pub api_version: u32,
     pub ribbon_order: i32,
     pub command_prefixes: Vec<String>,
+    pub xdata_apps: Vec<String>,
     /// The package directory under the plugins folder.
     pub dir: PathBuf,
     /// Whether a native library for this platform sits beside `plugin.toml`.
@@ -124,10 +127,13 @@ pub fn discover() -> Vec<ExternalPlugin> {
         let Ok(text) = std::fs::read_to_string(&toml_path) else {
             continue;
         };
-        if let Some(mut p) = parse_plugin_toml(&text) {
-            p.lib_present = lib_present_in(&dir);
-            p.dir = dir;
-            found.push(p);
+        match parse_plugin_toml(&text) {
+            Ok(mut p) => {
+                p.lib_present = lib_present_in(&dir);
+                p.dir = dir;
+                found.push(p);
+            }
+            Err(e) => eprintln!("[plugin] {}: {e}", toml_path.display()),
         }
     }
     found.sort_by(|a, b| a.ribbon_order.cmp(&b.ribbon_order).then(a.id.cmp(&b.id)));
@@ -146,78 +152,62 @@ fn lib_present_in(dir: &std::path::Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Minimal `plugin.toml` reader for the documented `[plugin]` / `[opencad]`
-/// keys. Deliberately small (string / integer / string-array values) so the
-/// host doesn't pull in a full TOML parser for a fixed, host-defined schema.
-/// Returns `None` when the required `id` is missing. `dir` / `lib_present` are
-/// filled in by the caller.
-pub(crate) fn parse_plugin_toml(text: &str) -> Option<ExternalPlugin> {
-    let mut id = None;
-    let mut name = String::new();
-    let mut version = String::new();
-    let mut description = String::new();
-    let mut api_version: u32 = 0;
-    let mut ribbon_order: i32 = 0;
-    let mut command_prefixes: Vec<String> = Vec::new();
+/// `plugin.toml` manifest for an external add-on package.
+///
+/// Kept in the host crate (rather than `ocs_plugin_api`) because it is an
+/// on-disk, host-owned schema: it uses owned `String`s and mirrors the
+/// documented `[plugin]` / `[opencad]` sections. Deserializing with serde/toml
+/// replaces the previous hand-rolled parser and gives precise error messages
+/// for missing keys or type mismatches.
+#[derive(Debug, Clone, Deserialize)]
+struct PluginManifest {
+    plugin: PluginSection,
+    #[serde(default = "OpenCadSection::default")]
+    opencad: OpenCadSection,
+}
 
-    for raw in text.lines() {
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with('#') || line.starts_with('[') {
-            continue;
-        }
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
-        let key = key.trim();
-        let value = value.trim();
-        match key {
-            "id" => id = Some(unquote(value)),
-            "name" => name = unquote(value),
-            "version" => version = unquote(value),
-            "description" => description = unquote(value),
-            "api_version" => api_version = value.parse().unwrap_or(0),
-            "ribbon_order" => ribbon_order = value.parse().unwrap_or(0),
-            "command_prefixes" => command_prefixes = parse_string_array(value),
-            _ => {}
-        }
-    }
+#[derive(Debug, Clone, Deserialize)]
+struct PluginSection {
+    id: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    version: String,
+    #[serde(default)]
+    description: String,
+}
 
-    Some(ExternalPlugin {
-        id: id?,
-        name,
-        version,
-        description,
-        api_version,
-        ribbon_order,
-        command_prefixes,
+#[derive(Debug, Clone, Default, Deserialize)]
+struct OpenCadSection {
+    #[serde(default)]
+    api_version: u32,
+    #[serde(default)]
+    ribbon_order: i32,
+    #[serde(default)]
+    command_prefixes: Vec<String>,
+    #[serde(default)]
+    xdata_apps: Vec<String>,
+}
+
+/// Parse a `plugin.toml` into an [`ExternalPlugin`].
+///
+/// `dir` / `lib_present` are left empty and must be filled in by the caller.
+/// Returns a descriptive error when the file is malformed or missing required
+/// keys such as `plugin.id`.
+pub(crate) fn parse_plugin_toml(text: &str) -> Result<ExternalPlugin, String> {
+    let manifest: PluginManifest = toml::from_str(text).map_err(|e| e.to_string())?;
+    Ok(ExternalPlugin {
+        id: manifest.plugin.id,
+        name: manifest.plugin.name,
+        version: manifest.plugin.version,
+        description: manifest.plugin.description,
+        api_version: manifest.opencad.api_version,
+        ribbon_order: manifest.opencad.ribbon_order,
+        command_prefixes: manifest.opencad.command_prefixes,
+        xdata_apps: manifest.opencad.xdata_apps,
         dir: PathBuf::new(),
         lib_present: false,
     })
-}
-
-/// Strip surrounding single or double quotes from a TOML scalar.
-fn unquote(s: &str) -> String {
-    let s = s.trim();
-    let bytes = s.as_bytes();
-    if bytes.len() >= 2
-        && (bytes[0] == b'"' || bytes[0] == b'\'')
-        && bytes[bytes.len() - 1] == bytes[0]
-    {
-        s[1..s.len() - 1].to_string()
-    } else {
-        s.to_string()
-    }
-}
-
-/// Parse `["a", "b"]` into `["a", "b"]`. Tolerant of spacing and missing
-/// brackets; ignores empty entries.
-fn parse_string_array(s: &str) -> Vec<String> {
-    s.trim_start_matches('[')
-        .trim_end_matches(']')
-        .split(',')
-        .map(unquote)
-        .filter(|e| !e.is_empty())
-        .collect()
 }
 
 // ── Runtime loading (desktop only) ──────────────────────────────────────────
@@ -336,12 +326,19 @@ xdata_apps = ["MYPLUGIN_RECORD"]
 
     #[test]
     fn missing_id_is_rejected() {
-        assert!(parse_plugin_toml("name = \"x\"").is_none());
+        assert!(parse_plugin_toml("name = \"x\"").is_err());
     }
 
     #[test]
     fn incompatible_api_flagged() {
-        let p = parse_plugin_toml("id=\"a\"\napi_version = 9999").unwrap();
+        let toml = r#"
+[plugin]
+id = "a"
+
+[opencad]
+api_version = 9999
+"#;
+        let p = parse_plugin_toml(toml).unwrap();
         assert!(!p.api_compatible());
         assert!(!p.loadable());
     }

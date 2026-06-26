@@ -180,7 +180,8 @@ pub fn install(release: &Release) -> Result<String, String> {
     let toml = release.toml_asset().ok_or("release has no plugin.toml")?;
 
     let toml_text = download_string(&toml.url)?;
-    let manifest = external::parse_plugin_toml(&toml_text).ok_or("plugin.toml is missing an id")?;
+    let manifest = external::parse_plugin_toml(&toml_text)
+        .map_err(|e| format!("plugin.toml is invalid: {e}"))?;
     if !ocs_plugin_api::host_accepts_plugin_version(manifest.api_version) {
         return Err(format!(
             "API version {} is incompatible (host supports {}-{})",

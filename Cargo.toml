@@ -47,6 +47,9 @@ clap = { version = "4", features = ["derive"] }
 env_logger = "0.11"
 acadrust = "0.4"
 flate2 = "1"
+# plugin.toml manifest parsing. serde is also used by marketplace JSON.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tiff"] }
 inventory = "0.3"
 truck-shapeops = { version = "0.4", optional = true }
