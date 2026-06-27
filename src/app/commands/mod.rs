@@ -99,46 +99,22 @@ impl OpenCADStudio {
             // tool was a one-shot and we must turn the ribbon highlight off here —
             // normally apply_cmd_result does that, but plugin dispatch can return
             // without producing a CmdResult.
+            self.command_line.record_recent(cmd);
             if self.tabs[i].active_cmd.is_none() {
                 self.ribbon.deactivate_tool();
             }
             return Task::none();
         }
 
-        // Command families are dispatched in source order; the first family
-        // whose `match` arm matches `cmd` handles it. Each handler returns
-        // `Some(task)` when it handled the command (either an early-returning
-        // arm or a state-mutating arm that falls through to `finish_dispatch`),
-        // or `None` to fall through to the next family — exactly as a single
-        // sequential `match` over all arms would behave.
-        if let Some(t) = self.dispatch_fileops(cmd, i) {
-            return t;
-        }
-        if let Some(t) = self.dispatch_layers(cmd, i) {
-            return t;
-        }
-        if let Some(t) = self.dispatch_blocks(cmd, i) {
-            return t;
-        }
-        if let Some(t) = self.dispatch_draw(cmd, i) {
-            return t;
-        }
-        if let Some(t) = self.dispatch_dim(cmd, i) {
-            return t;
-        }
-        if let Some(t) = self.dispatch_inquiry(cmd, i) {
-            return t;
-        }
-        if let Some(t) = self.dispatch_view(cmd, i) {
-            return t;
-        }
-        if let Some(t) = self.dispatch_layerprops(cmd, i) {
-            return t;
-        }
-        if let Some(t) = self.dispatch_styleprops(cmd, i) {
-            return t;
-        }
-        if let Some(t) = self.dispatch_display(cmd, i) {
+        // Command families are dispatched in source order (see
+        // `dispatch_families`); the first whose `match` arm matches handles it.
+        if let Some(t) = self.dispatch_families(cmd, i) {
+            // A command resolved — record it for the right-click Repeat menu so
+            // commands from every source (command line, ribbon, context menu,
+            // shortcuts) appear there, not only typed ones. Recorded after
+            // resolution so a partial verb completed via the suggestion
+            // fallback (`BAC`) stores the real command (`BACKGROUND`).
+            self.command_line.record_recent(cmd);
             return t;
         }
 
@@ -156,6 +132,45 @@ impl OpenCADStudio {
         self.command_line
             .push_error(&format!("Unknown command: {cmd}"));
         self.finish_dispatch(cmd)
+    }
+
+    /// Try each command family in source order, returning the first that
+    /// handles `cmd`, or `None` when none match. Each family returns
+    /// `Some(task)` for an arm it owns (early-returning or falling through to
+    /// `finish_dispatch`), or `None` to defer to the next — equivalent to one
+    /// sequential `match` over all arms.
+    fn dispatch_families(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
+        if let Some(t) = self.dispatch_fileops(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_layers(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_blocks(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_draw(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_dim(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_inquiry(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_view(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_layerprops(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_styleprops(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_display(cmd, i) {
+            return Some(t);
+        }
+        None
     }
 
     /// Shared tail run after a `dispatch_*` family handler whose matched arm
@@ -193,7 +208,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "P", "PAN", "PAGESETUP", "PERF", "PERSP", "PLOT", "PLOTSTYLE", "PLOTSTYLEEDITOR",
         "PLOTSTYLEPANEL", "PR",
         "PRINT", "PROPERTIES", "PROPS", "PSPACE", "PURGE", "QS", "QSAVE", "QSELECT",
-        "QUIT", "REDO", "REDRAW", "REDRWALL", "REGEN", "REGENALL", "RENAME", "REPORT",
+        "QUIT", "REDO", "REDRAW", "REDRWALL", "REGEN", "REGENALL", "RENAME", "REPORT", "RMBENTER",
         "SA", "SAVE", "SAVEAS", "SCALETEXT", "SELECTALL", "SELECTSIMILAR", "SELSIM", "SHEETSET",
         "SHORTCUTS", "SOLID", "SSM", "STEPOUT", "STLOUT", "STPOUT", "STYLE", "STYLESMANAGER",
         "TABLESTYLE", "TOOLPALETTES", "TP", "TS", "U", "UCS", "UCSICON", "UNDERLAY",

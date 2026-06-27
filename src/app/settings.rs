@@ -103,6 +103,10 @@ pub struct UserSettings {
     pub plugin_repos: Vec<String>,
     /// Controls whether the TEXTEDIT command repeats automatically (0 = Multiple, 1 = Single).
     pub texteditmode: bool,
+    /// When true, a right-click in the viewport acts as Enter (commit / close)
+    /// while a command is active; when idle it still opens the context menu.
+    /// Toggled by the `RMBENTER` command. Right-drag always orbits.
+    pub rmb_enter: bool,
     /// Persisted viewport background colours (0–255 RGB); `None` = app default
     /// (dark grey model / off-white paper). Applied to every drawing tab on
     /// launch and to tabs opened later, so a chosen background survives restarts
@@ -133,6 +137,7 @@ impl Default for UserSettings {
             disabled_plugins: Vec::new(),
             plugin_repos: Vec::new(),
             texteditmode: false,
+            rmb_enter: false,
             bg_color: None,
             paper_bg_color: None,
         }
@@ -170,6 +175,7 @@ impl UserSettings {
                 "bg_color" => s.bg_color = parse_rgb(val),
                 "paper_bg_color" => s.paper_bg_color = parse_rgb(val),
                 "default_assoc_prompted" => s.default_assoc_prompted = val == "1",
+                "rmb_enter" => s.rmb_enter = val == "1",
                 "texteditmode" => {
                     if let Some(v) =
                         crate::modules::annotate::textedit::parse_texteditmode(val)
@@ -218,7 +224,7 @@ impl UserSettings {
             .collect::<Vec<_>>()
             .join(",");
         let body = format!(
-            "dyn={}\northo={}\npolar={}\npolar_increment_deg={}\nosnap={}\notrack={}\ndefault_assoc_prompted={}\nsnap_modes={}\ndisabled_plugins={}\nplugin_repos={}\ntexteditmode={}\nbg_color={}\npaper_bg_color={}\n",
+            "dyn={}\northo={}\npolar={}\npolar_increment_deg={}\nosnap={}\notrack={}\ndefault_assoc_prompted={}\nsnap_modes={}\ndisabled_plugins={}\nplugin_repos={}\ntexteditmode={}\nrmb_enter={}\nbg_color={}\npaper_bg_color={}\n",
             b(self.dyn_input),
             b(self.ortho),
             b(self.polar),
@@ -230,6 +236,7 @@ impl UserSettings {
             self.disabled_plugins.join(","),
             self.plugin_repos.join(","),
             self.texteditmode,
+            b(self.rmb_enter),
             rgb_to_str(self.bg_color),
             rgb_to_str(self.paper_bg_color),
         );

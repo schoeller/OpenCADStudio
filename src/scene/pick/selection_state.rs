@@ -24,6 +24,7 @@ pub struct SelectionState {
     pub left_dragging: bool,
     pub right_down: bool,
     pub right_press_pos: Option<Point>,
+    pub right_press_time: Option<Instant>,
     pub right_dragging: bool,
     pub right_last_pos: Option<Point>,
     pub middle_down: bool,

@@ -1036,7 +1036,7 @@ impl OpenCADStudio {
                 let isolation_active = tab.scene.is_isolation_active();
                 let last_cmds: Vec<String> = self
                     .command_line
-                    .cmd_recall
+                    .recent_commands
                     .iter()
                     .rev()
                     .take(3)

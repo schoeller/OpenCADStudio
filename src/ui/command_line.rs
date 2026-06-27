@@ -25,8 +25,13 @@ const MAX_HISTORY: usize = 64;
 pub struct CommandLine {
     pub input: String,
     pub history: Vec<HistoryEntry>,
-    /// Commands the user has typed (for ↑/↓ recall).
+    /// Commands the user has typed (for ↑/↓ recall). Holds the raw typed
+    /// strings so the line can be re-edited; distinct from `recent_commands`.
     pub cmd_recall: Vec<String>,
+    /// Commands actually dispatched, from any source (command line, ribbon,
+    /// context menu, shortcuts), newest last. Drives the right-click "Repeat"
+    /// menu so it reflects every command source, not only typed ones.
+    pub recent_commands: Vec<String>,
     /// Current position in `cmd_recall` while navigating (None = not navigating).
     recall_cursor: Option<usize>,
     /// Saved draft input before the user started navigating history.
@@ -98,6 +103,22 @@ impl CommandLine {
         self.push_command(&self.input.clone());
         self.input.clear();
         Some(cmd)
+    }
+
+    /// Record a dispatched command for the right-click "Repeat" menu, skipping
+    /// a consecutive duplicate and capping the list. Called from the dispatch
+    /// choke point so commands from every source are captured.
+    pub fn record_recent(&mut self, cmd: &str) {
+        let cmd = cmd.trim();
+        if cmd.is_empty() {
+            return;
+        }
+        if self.recent_commands.last().map(|s| s.as_str()) != Some(cmd) {
+            self.recent_commands.push(cmd.to_string());
+            if self.recent_commands.len() > 50 {
+                self.recent_commands.remove(0);
+            }
+        }
     }
 
     /// Navigate to the previous command in recall history (↑).

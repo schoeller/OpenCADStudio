@@ -17,6 +17,27 @@ impl OpenCADStudio {
                     .push_output("PAN: drag with the left mouse button. Press Esc to exit.");
             }
 
+            // RMBENTER [ON|OFF] — toggle whether a viewport right-click acts as
+            // Enter (commit / close) while a command is active. Idle right-click
+            // still opens the context menu and right-drag still orbits. The
+            // preference is persisted across runs.
+            cmd if cmd == "RMBENTER" || cmd.starts_with("RMBENTER ") => {
+                let arg = cmd
+                    .split_once(' ')
+                    .map(|(_, r)| r.trim().to_uppercase())
+                    .unwrap_or_default();
+                self.rmb_enter = match arg.as_str() {
+                    "ON" | "1" => true,
+                    "OFF" | "0" => false,
+                    _ => !self.rmb_enter,
+                };
+                self.command_line.push_output(if self.rmb_enter {
+                    "RMBENTER on: right-click acts as Enter while a command is active."
+                } else {
+                    "RMBENTER off: right-click opens the context menu."
+                });
+            }
+
             // ── TABLE cell editing ─────────────────────────────────────────────
             // TABLE CELL <row> <col> <text> — set text for a cell in the selected Table
             cmd if cmd.starts_with("TABLE ") => {

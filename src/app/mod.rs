@@ -247,6 +247,9 @@ pub(super) struct OpenCADStudio {
     dyn_input: bool,
     /// Controls whether the TEXTEDIT command repeats automatically (0 = Multiple, 1 = Single).
     pub texteditmode: bool,
+    /// When true, a viewport right-click acts as Enter while a command is active
+    /// (idle right-click still opens the context menu). Toggled by `RMBENTER`.
+    pub rmb_enter: bool,
     /// Persisted default viewport background, restored from settings and applied
     /// to every drawing tab (new and opened) so a chosen background survives
     /// restarts (#188). `None` = the built-in dark-grey / off-white defaults.
@@ -1823,6 +1826,7 @@ impl OpenCADStudio {
             show_grid: false,
             dyn_input: true,
             texteditmode: false,
+            rmb_enter: false,
             default_bg_color: None,
             default_paper_bg_color: None,
             awaiting_vports: false,

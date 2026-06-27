@@ -20,6 +20,10 @@ use acadrust::{EntityType as AcadEntityType, Handle};
 use iced::time::Instant;
 use iced::{mouse, Point, Task};
 
+/// How long the right button must be held (ms) before a right-drag is treated
+/// as an orbit. A press + release inside this window stays a click (context
+/// menu / Enter), so quick right-clicks aren't lost to slight pointer jitter.
+const RIGHT_HOLD_MS: u128 = 150;
 /// Pixel radius for grabbing a UCS-icon grip (origin dot or an axis tip).
 const UCS_GRIP_HIT_PX: f32 = 9.0;
 /// Pixel reach for hovering/clicking the icon body (origin, tips, or an arm).
@@ -559,16 +563,31 @@ pub(super) fn on_tick(&mut self, t: Instant) -> Task<Message> {
                 }
 
                 if sel.right_down {
-                    if let Some(press) = sel.right_press_pos {
-                        let dx = p.x - press.x;
-                        let dy = p.y - press.y;
-                        // 8 px (64 squared) threshold so normal hand jitter
-                        // between a right-button press and release doesn't
-                        // promote a click-and-release to an orbit drag, which
-                        // would suppress the context menu on release.
-                        if !sel.right_dragging && (dx * dx + dy * dy) > 64.0 {
+                    // Time-based click-vs-orbit split: a quick right-click
+                    // (press + release within RIGHT_HOLD_MS) is always a click —
+                    // it opens the context menu / fires Enter on release, even if
+                    // the pointer drifted a little. Orbit only engages once the
+                    // button has been *held* past the threshold and the pointer
+                    // is actually moving, so hand jitter during a click never
+                    // promotes it to an orbit drag.
+                    if !sel.right_dragging {
+                        let held = sel
+                            .right_press_time
+                            .map(|t| t.elapsed().as_millis() >= RIGHT_HOLD_MS)
+                            .unwrap_or(false);
+                        let moved = sel
+                            .right_press_pos
+                            .map(|press| {
+                                let (dx, dy) = (p.x - press.x, p.y - press.y);
+                                dx * dx + dy * dy > 4.0
+                            })
+                            .unwrap_or(false);
+                        if held && moved {
                             sel.right_dragging = true;
                             sel.context_menu = None;
+                            // Start the orbit from the current position so the
+                            // view doesn't jump by the pre-threshold movement.
+                            sel.right_last_pos = Some(p);
                         }
                     }
                     if sel.right_dragging {
@@ -1204,6 +1223,7 @@ pub(super) fn on_tick(&mut self, t: Instant) -> Task<Message> {
                 sel.left_dragging = false;
                 sel.right_down = false;
                 sel.right_press_pos = None;
+                sel.right_press_time = None;
                 sel.right_last_pos = None;
                 sel.right_dragging = false;
                 sel.middle_down = false;

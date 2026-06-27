@@ -1095,6 +1095,7 @@ impl OpenCADStudio {
                 sel.context_menu = None;
                 sel.right_down = true;
                 sel.right_press_pos = Some(p);
+                sel.right_press_time = Some(iced::time::Instant::now());
                 sel.right_last_pos = Some(p);
                 sel.right_dragging = false;
                 Task::none()
@@ -1103,19 +1104,31 @@ impl OpenCADStudio {
             Message::ViewportRightRelease => {
                 let i = self.active_tab;
                 let mut sel = self.tabs[i].scene.selection.borrow_mut();
-                let Some(_p) = sel.last_move_pos else {
+                let Some(click_pos) = sel.last_move_pos else {
                     return Task::none();
                 };
-                if sel.right_down {
-                    if !sel.right_dragging {
-                        sel.context_menu = sel.last_move_pos;
-                        sel.draworder_submenu = false;
-                    }
-                    sel.right_down = false;
-                    sel.right_press_pos = None;
-                    sel.right_last_pos = None;
-                    sel.right_dragging = false;
+                if !sel.right_down {
+                    return Task::none();
                 }
+                let was_click = !sel.right_dragging;
+                sel.right_down = false;
+                sel.right_press_pos = None;
+                sel.right_press_time = None;
+                sel.right_last_pos = None;
+                sel.right_dragging = false;
+                if !was_click {
+                    return Task::none();
+                }
+                // A right-click (no orbit). With "RMB = Enter" enabled, a click
+                // while a command is active fires Enter (commit/close) instead
+                // of the menu; when idle — or the option is off — it opens the
+                // context menu as before, so the menu is never lost.
+                if self.rmb_enter && self.tabs[i].active_cmd.is_some() {
+                    drop(sel);
+                    return self.update(Message::CommandFinalize);
+                }
+                sel.context_menu = Some(click_pos);
+                sel.draworder_submenu = false;
                 Task::none()
             }
 

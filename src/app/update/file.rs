@@ -40,6 +40,7 @@ impl OpenCADStudio {
             },
             plugin_repos: self.plugin_repos.clone(),
             texteditmode: self.texteditmode,
+            rmb_enter: self.rmb_enter,
             bg_color: self.default_bg_color.map(f4_to_u3),
             paper_bg_color: self.default_paper_bg_color.map(f4_to_u3),
         }
@@ -58,6 +59,7 @@ impl OpenCADStudio {
         self.disabled_plugins = s.disabled_plugins.iter().cloned().collect();
         self.plugin_repos = s.plugin_repos.clone();
         self.texteditmode = s.texteditmode;
+        self.rmb_enter = s.rmb_enter;
         self.default_bg_color = s.bg_color.map(u3_to_f4);
         self.default_paper_bg_color = s.paper_bg_color.map(u3_to_f4);
         // Push the restored background onto every drawing tab that exists now
