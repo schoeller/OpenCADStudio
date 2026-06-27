@@ -142,16 +142,10 @@ impl Scene {
                 t.snap_on = snap_on;
             }
         }
-        // Prefer our named View entry — survives DWG save without being overridden.
-        let saved_view = self
-            .document
-            .views
-            .iter()
-            .find(|v| v.name == "OpenCADStudio_Camera_Model")
-            .cloned();
-        if let Some(view) = saved_view {
-            return self.apply_camera_from_view_entry(&view, true);
-        }
+        // Restore from the standard *Active VPORT entry. (Earlier builds also
+        // wrote an app-specific "OpenCADStudio_Camera_Model" View record and
+        // preferred it here — that polluted the file for other CAD programs and
+        // is no longer written or read; the view round-trips fine via VPORT.)
         let vp = match self.document.vports.iter().find(|v| v.name == "*Active") {
             Some(v) => v.clone(),
             None => return false,
@@ -556,16 +550,9 @@ impl Scene {
             }
 
             // Persist the tiled layout as duplicate `*Active` VPort entries.
+            // The view lives entirely in the standard VPORT table now — no
+            // app-specific View record.
             self.save_model_tiles_to_vports();
-
-            // Also write to View table — survives DWG save without override.
-            self.write_camera_view_entry(
-                "OpenCADStudio_Camera_Model",
-                target_wcs,
-                vd3,
-                view_height,
-                twist,
-            );
             true
         } else {
             let target_wcs = acadrust::types::Vector3 {
@@ -613,31 +600,6 @@ impl Scene {
         }
     }
 
-    /// Upsert a named View entry with the given camera fields.
-    fn write_camera_view_entry(
-        &mut self,
-        name: &str,
-        target: acadrust::types::Vector3,
-        direction: acadrust::types::Vector3,
-        height: f32,
-        twist: f64,
-    ) {
-        let existing_handle = self
-            .document
-            .views
-            .iter()
-            .find(|v| v.name == name)
-            .map(|v| v.handle);
-        let mut entry = acadrust::tables::View::new(name);
-        entry.handle = existing_handle.unwrap_or_else(|| self.document.allocate_handle());
-        entry.target = target;
-        entry.direction = direction;
-        entry.height = height as f64;
-        entry.width = height as f64;
-        entry.center = acadrust::types::Vector3::ZERO;
-        entry.twist_angle = twist;
-        self.document.views.add_or_replace(entry);
-    }
 
     /// Restore the camera from the file's saved view (called once on open).
     /// Falls back to fit_all() if no saved view is available.
