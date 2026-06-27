@@ -423,6 +423,25 @@ pub fn parse_save_format(format: &str) -> (&'static str, acadrust::DxfVersion) {
     (ext, version)
 }
 
+/// Reverse of [`parse_save_format`]: the Save-dialog format string for a
+/// version + DXF/DWG choice (e.g. `AC1018, is_dxf=false` -> `"DWG 2004"`).
+/// Used to default the Save-As dropdown to the loaded file's version so a
+/// round-trip preserves it instead of silently offering "DWG 2018".
+pub fn format_for_version(version: acadrust::DxfVersion, is_dxf: bool) -> String {
+    use acadrust::DxfVersion::*;
+    let year = match version {
+        AC1032 => "2018",
+        AC1027 => "2013",
+        AC1024 => "2010",
+        AC1021 => "2007",
+        AC1018 => "2004",
+        AC1015 => "2000",
+        AC1014 => "R14",
+        _ => "2018",
+    };
+    format!("{} {}", if is_dxf { "DXF" } else { "DWG" }, year)
+}
+
 // ── Plot Style Table ──────────────────────────────────────────────────────
 
 /// Show a file-open dialog and load the selected CTB or STB file.
