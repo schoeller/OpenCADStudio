@@ -36,6 +36,22 @@ impl OpenCADStudio {
     }
 
     pub(super) fn dispatch_command(&mut self, cmd: &str) -> Task<Message> {
+        self.dispatch_command_inner(cmd, false)
+    }
+
+    /// Dispatch a verb typed at the interactive command line, falling back to
+    /// the closest autocomplete suggestion when the verb matches no command
+    /// family. Lets a partial command run on Enter (`BAC` → `BACKGROUND`),
+    /// the standard DWG command-line behavior. The fallback only fires for
+    /// genuinely unknown verbs, so complete aliases that resolve through a
+    /// dispatch family (`LT`, `ZO`, …) still run as typed. Programmatic
+    /// callers (ribbon, plugins, headless automation) use `dispatch_command`
+    /// and never get silent substitution.
+    pub(super) fn dispatch_command_or_suggest(&mut self, cmd: &str) -> Task<Message> {
+        self.dispatch_command_inner(cmd, true)
+    }
+
+    fn dispatch_command_inner(&mut self, cmd: &str, allow_suggest: bool) -> Task<Message> {
         let i = self.active_tab;
         // Starting a command closes any open ribbon dropdown (e.g. a style
         // combo left open) so it does not stay stuck behind the new tool.
@@ -126,7 +142,17 @@ impl OpenCADStudio {
             return t;
         }
 
-        // No family matched.
+        // No family matched. From the interactive command line, run the
+        // closest autocomplete suggestion instead of erroring, so a partial
+        // command completes on Enter (`BAC` → `BACKGROUND`). The verb's own
+        // input was already cleared, so rank against `cmd` directly.
+        if allow_suggest {
+            if let Some(top) = crate::ui::command_line::ranked_matches(cmd).first().copied() {
+                if !top.eq_ignore_ascii_case(cmd) {
+                    return self.dispatch_command_inner(top, false);
+                }
+            }
+        }
         self.command_line
             .push_error(&format!("Unknown command: {cmd}"));
         self.finish_dispatch(cmd)

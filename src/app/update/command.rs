@@ -338,7 +338,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     return self.focus_cmd_input();
                 }
                 if let Some(cmd) = self.command_line.submit() {
-                    return self.dispatch_command(&cmd);
+                    return self.dispatch_command_or_suggest(&cmd);
                 }
                 // Empty Enter / Space with no active command repeats the
                 // last dispatched command — same shortcut `CommandFinalize`

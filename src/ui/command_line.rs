@@ -210,11 +210,10 @@ impl CommandLine {
         if len == 0 {
             return false;
         }
-        let next = match self.autocomplete_cursor {
-            None => len - 1,
-            Some(0) => len - 1,
-            Some(i) => i - 1,
-        };
+        // No explicit cursor means the top match (index 0) is highlighted,
+        // so ↑ from there wraps to the last entry.
+        let cur = self.autocomplete_cursor.unwrap_or(0);
+        let next = if cur == 0 { len - 1 } else { cur - 1 };
         self.autocomplete_cursor = Some(next);
         true
     }
@@ -226,11 +225,10 @@ impl CommandLine {
         if len == 0 {
             return false;
         }
-        let next = match self.autocomplete_cursor {
-            None => 0,
-            Some(i) if i + 1 < len => i + 1,
-            Some(_) => 0,
-        };
+        // No explicit cursor means the top match (index 0) is highlighted,
+        // so ↓ from there advances to the next entry (wrapping at the end).
+        let cur = self.autocomplete_cursor.unwrap_or(0);
+        let next = if cur + 1 < len { cur + 1 } else { 0 };
         self.autocomplete_cursor = Some(next);
         true
     }
@@ -243,31 +241,10 @@ impl CommandLine {
             .and_then(|i| matches.get(i).copied())
     }
 
-    /// Autocomplete suggestions for the current input, capped at
-    /// [`AUTOCOMPLETE_LIMIT`]. Match is substring-anywhere (typing
-    /// `LEADER` surfaces `LEADER` and `MLEADER` and `QLEADER`); the
-    /// list is sorted so prefix matches come first.
-    ///
-    /// Names come from `crate::command::all_registered_command_names()`
-    /// which collects every `inventory::submit!` block placed next to a
-    /// `CadCommand` impl — no central list to maintain.
+    /// Autocomplete suggestions for the current input — see
+    /// [`ranked_matches`].
     pub fn autocomplete_matches(&self) -> Vec<&'static str> {
-        let typed = self.input.trim();
-        if typed.is_empty() {
-            return Vec::new();
-        }
-        let needle = typed.to_uppercase();
-        let mut matches: Vec<&'static str> = crate::command::all_registered_command_names()
-            .into_iter()
-            .filter(|cmd| cmd.contains(&needle))
-            .collect();
-        matches.sort();
-        matches.dedup();
-        // Prefix matches rank above mid-string ones, then alphabetical
-        // so the order is stable as the user keeps typing.
-        matches.sort_by_key(|cmd| (!cmd.starts_with(&needle), *cmd));
-        matches.truncate(AUTOCOMPLETE_LIMIT);
-        matches
+        ranked_matches(self.input.trim())
     }
 
     pub fn view(&self, show_autocomplete: bool, dyn_capturing: bool) -> Element<'_, Message> {
@@ -341,10 +318,13 @@ impl CommandLine {
             if matches.is_empty() {
                 container(column![]).height(0).into()
             } else {
-                let cursor = self.autocomplete_cursor;
+                // Before any arrow-key navigation, the top match is
+                // highlighted so it's visible that Enter runs it — the
+                // standard DWG command-line behavior.
+                let cursor = self.autocomplete_cursor.unwrap_or(0);
                 let mut col = column![].spacing(0).width(Length::Fill);
                 for (idx, cmd) in matches.iter().enumerate() {
-                    let is_selected = cursor == Some(idx);
+                    let is_selected = cursor == idx;
                     let row = button(text(*cmd).size(11).color(CMD_COLOR))
                         .on_press(Message::CommandSuggestionPick(cmd.to_string()))
                         .width(Length::Fill)
@@ -494,6 +474,33 @@ impl CommandLine {
         .width(Length::Fixed(720.0))
         .into()
     }
+}
+
+/// Command names matching `needle`, ranked for autocomplete: case-insensitive
+/// substring match (typing `LEADER` surfaces `LEADER`, `MLEADER`, `QLEADER`),
+/// prefix matches first, then alphabetical, capped at [`AUTOCOMPLETE_LIMIT`].
+/// Shared by the suggestion popup and the Enter-key closest-match fallback so
+/// both agree on the top suggestion.
+///
+/// Names come from `crate::command::all_registered_command_names()` which
+/// collects every `inventory::submit!` block placed next to a `CadCommand`
+/// impl — no central list to maintain.
+pub fn ranked_matches(needle: &str) -> Vec<&'static str> {
+    let needle = needle.trim().to_uppercase();
+    if needle.is_empty() {
+        return Vec::new();
+    }
+    let mut matches: Vec<&'static str> = crate::command::all_registered_command_names()
+        .into_iter()
+        .filter(|cmd| cmd.contains(&needle))
+        .collect();
+    matches.sort();
+    matches.dedup();
+    // Prefix matches rank above mid-string ones, then alphabetical so the
+    // order is stable as the user keeps typing.
+    matches.sort_by_key(|cmd| (!cmd.starts_with(&needle), *cmd));
+    matches.truncate(AUTOCOMPLETE_LIMIT);
+    matches
 }
 
 const PANEL_BG: Color = Color {
