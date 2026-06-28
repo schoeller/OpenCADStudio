@@ -1,0 +1,31 @@
+{
+  "name": "step_json/cube_1x2x3",
+  "recipe_cadrum_rust": "let r = Solid::read_step(&mut std::fs::File::open(\"C:\\Users\\SebastianSchoeller\\Documents\\GitHub\\OpenCADStudio\\crates\\test_step_occt_truck\\input_brep\\cube_1x2x3.stp\")?)?.pop();",
+  "expected": {
+    "volume": 6.0,
+    "surface_area": 22.0,
+    "centroid": [
+      -0.5,
+      -0.5,
+      1.5
+    ],
+    "bbox_min": [
+      -1.0000001,
+      -1.5000001,
+      -1e-7
+    ],
+    "bbox_max": [
+      1e-7,
+      0.5000001,
+      3.0000001
+    ],
+    "triangle_count": 12
+  },
+  "tolerances": {
+    "abs": 0.001,
+    "rel": 0.01,
+    "hausdorff_abs": 0.001,
+    "hausdorff_rel": 0.05
+  },
+  "note": "STEP file: cube_1x2x3.stp"
+}

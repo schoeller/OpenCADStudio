@@ -1,0 +1,31 @@
+{
+  "name": "step_json/l_profile_2x3x4",
+  "recipe_cadrum_rust": "let r = Solid::read_step(&mut std::fs::File::open(\"C:\\Users\\SebastianSchoeller\\Documents\\GitHub\\OpenCADStudio\\crates\\test_step_occt_truck\\input_brep\\l_profile_2x3x4.stp\")?)?.pop();",
+  "expected": {
+    "volume": 9.0,
+    "surface_area": 44.5,
+    "centroid": [
+      0.5833333333333334,
+      2.0,
+      1.0833333333333333
+    ],
+    "bbox_min": [
+      -1e-7,
+      -1e-7,
+      -1e-7
+    ],
+    "bbox_max": [
+      2.0000001,
+      4.0000001,
+      3.0000001
+    ],
+    "triangle_count": 20
+  },
+  "tolerances": {
+    "abs": 0.001,
+    "rel": 0.01,
+    "hausdorff_abs": 0.001,
+    "hausdorff_rel": 0.05
+  },
+  "note": "STEP file: l_profile_2x3x4.stp"
+}

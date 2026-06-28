@@ -1,0 +1,31 @@
+{
+  "name": "step_json/hex_prism_r2_h6",
+  "recipe_cadrum_rust": "let r = Solid::read_step(&mut std::fs::File::open(\"C:\\Users\\SebastianSchoeller\\Documents\\GitHub\\OpenCADStudio\\crates\\test_step_occt_truck\\input_brep\\hex_prism_r2_h6.stp\")?)?.pop();",
+  "expected": {
+    "volume": 62.35382907248699,
+    "surface_area": 92.78460969083353,
+    "centroid": [
+      3.608047766377029e-14,
+      3.0000000000000004,
+      2.643236753044708e-17
+    ],
+    "bbox_min": [
+      -2.000000100000433,
+      -1e-7,
+      -1.732050907569
+    ],
+    "bbox_max": [
+      2.000000100000433,
+      6.0000001,
+      1.732050907569
+    ],
+    "triangle_count": 20
+  },
+  "tolerances": {
+    "abs": 0.001,
+    "rel": 0.01,
+    "hausdorff_abs": 0.001,
+    "hausdorff_rel": 0.05
+  },
+  "note": "STEP file: hex_prism_r2_h6.stp"
+}

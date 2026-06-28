@@ -1,0 +1,19 @@
+{
+  "name": "surface/trj4_k1_geo-pe-203",
+  "recipe_cadrum_rust": "let r = Solid::read_step(&mut std::fs::File::open(\"C:\\Users\\SebastianSchoeller\\Documents\\GitHub\\OpenCADStudio\\crates\\test_step_occt_truck\\input_brep_surface\\trj4_k1_geo-pe-203.stp\")?)?.pop();",
+  "expected": {
+    "volume": null,
+    "surface_area": 6805.254652112033,
+    "centroid": null,
+    "bbox_min": null,
+    "bbox_max": null,
+    "triangle_count": 12728
+  },
+  "tolerances": {
+    "abs": 0.001,
+    "rel": 0.01,
+    "hausdorff_abs": 0.001,
+    "hausdorff_rel": 0.05
+  },
+  "note": "Converted planar B-rep: trj4_k1_geo-pe-203.stp; original surface: trj4_k1_geo-pe-203.stp"
+}

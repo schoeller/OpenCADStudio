@@ -1,0 +1,19 @@
+[package]
+name = "test_step_occt_truck"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+truck-stepio = "0.3"
+truck-topology = "0.6"
+
+[dependencies.cadrum]
+version = "0.8"
+optional = true
+
+[features]
+default = []
+cadrum-reference = ["dep:cadrum"]

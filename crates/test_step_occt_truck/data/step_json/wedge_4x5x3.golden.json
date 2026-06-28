@@ -1,0 +1,31 @@
+{
+  "name": "step_json/wedge_4x5x3",
+  "recipe_cadrum_rust": "let r = Solid::read_step(&mut std::fs::File::open(\"C:\\Users\\SebastianSchoeller\\Documents\\GitHub\\OpenCADStudio\\crates\\test_step_occt_truck\\input_brep\\wedge_4x5x3.stp\")?)?.pop();",
+  "expected": {
+    "volume": 30.0,
+    "surface_area": 72.0,
+    "centroid": [
+      1.333333333333333,
+      2.5,
+      1.0
+    ],
+    "bbox_min": [
+      -1e-7,
+      -1e-7,
+      -1e-7
+    ],
+    "bbox_max": [
+      4.0000001,
+      5.0000001,
+      3.0000001
+    ],
+    "triangle_count": 8
+  },
+  "tolerances": {
+    "abs": 0.001,
+    "rel": 0.01,
+    "hausdorff_abs": 0.001,
+    "hausdorff_rel": 0.05
+  },
+  "note": "STEP file: wedge_4x5x3.stp"
+}
