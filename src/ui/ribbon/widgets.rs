@@ -163,6 +163,63 @@ pub(super) const LABEL_OFF: Color = Color {
     a: 1.0,
 };
 
+// ── Combo / dropdown colors ───────────────────────────────────────────────
+
+pub(super) const COMBO_BG: Color = Color {
+    r: 0.18,
+    g: 0.18,
+    b: 0.18,
+    a: 1.0,
+};
+pub(super) const COMBO_HOVER_BG: Color = Color {
+    r: 0.26,
+    g: 0.26,
+    b: 0.26,
+    a: 1.0,
+};
+pub(super) const COMBO_OPEN_BG: Color = Color {
+    r: 0.14,
+    g: 0.14,
+    b: 0.14,
+    a: 1.0,
+};
+pub(super) const COMBO_BORDER: Color = Color {
+    r: 0.35,
+    g: 0.35,
+    b: 0.35,
+    a: 1.0,
+};
+pub(super) const COMBO_ACTIVE_BORDER: Color = Color {
+    r: 0.45,
+    g: 0.65,
+    b: 0.90,
+    a: 1.0,
+};
+pub(super) const COMBO_ARROW: Color = Color {
+    r: 0.70,
+    g: 0.70,
+    b: 0.70,
+    a: 1.0,
+};
+pub(super) const SWATCH_BORDER: Color = Color {
+    r: 0.0,
+    g: 0.0,
+    b: 0.0,
+    a: 0.5,
+};
+pub(super) const TIP_BG: Color = Color {
+    r: 0.13,
+    g: 0.13,
+    b: 0.13,
+    a: 0.97,
+};
+pub(super) const HIST_INACTIVE_BG: Color = Color {
+    r: 0.20,
+    g: 0.20,
+    b: 0.20,
+    a: 1.0,
+};
+
 // ── Style context (passed from Ribbon to render_large) ────────────────────
 
 pub(super) struct StyleContext {
@@ -263,19 +320,9 @@ pub(super) fn make_tip(tip: String) -> Element<'static, Message> {
 
 pub(super) fn tip_style(_theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(Background::Color(Color {
-            r: 0.13,
-            g: 0.13,
-            b: 0.13,
-            a: 0.97,
-        })),
-        border: Border {
-            color: Color {
-                r: 0.35,
-                g: 0.35,
-                b: 0.35,
-                a: 1.0,
-            },
+                background: Some(Background::Color(TIP_BG)),
+                border: Border {
+                    color: COMBO_BORDER,
             width: 1.0,
             radius: 3.0.into(),
         },
@@ -572,19 +619,14 @@ pub(super) fn render_large<'a>(
                 .style(move |_: &Theme| container::Style {
                     background: Some(Background::Color(lc)),
                     border: Border {
-                        color: Color {
-                            r: 0.0,
-                            g: 0.0,
-                            b: 0.0,
-                            a: 0.5,
-                        },
-                        width: 1.0,
-                        radius: 1.0.into(),
-                    },
-                    ..Default::default()
-                })
-                .width(12)
-                .height(12);
+                    color: SWATCH_BORDER,
+                    width: 1.0,
+                    radius: 1.0.into(),
+                },
+                ..Default::default()
+            })
+            .width(12)
+            .height(12);
 
             const ICONS_USED: f32 = 14.0 + 14.0 + 14.0 + 12.0 + 10.0 + 5.0 * 4.0 + 16.0 + 16.0;
             let name_w = (COMBO_W - ICONS_USED).max(40.0);
@@ -598,15 +640,7 @@ pub(super) fn render_large<'a>(
                     container(text(active_layer).size(11).color(Color::WHITE))
                         .width(name_w)
                         .clip(true),
-                    icons::arrow_down(
-                        9.0,
-                        Color {
-                            r: 0.7,
-                            g: 0.7,
-                            b: 0.7,
-                            a: 1.0,
-                        },
-                    ),
+                    icons::arrow_down(9.0, COMBO_ARROW),
                 ]
                 .spacing(4)
                 .align_y(iced::Center),
@@ -614,34 +648,14 @@ pub(super) fn render_large<'a>(
             .on_press(Message::ToggleRibbonDropdown(LAYER_COMBO_ID.to_string()))
             .style(move |_: &Theme, status| button::Style {
                 background: Some(Background::Color(match (is_open, status) {
-                    (true, _) => Color {
-                        r: 0.14,
-                        g: 0.14,
-                        b: 0.14,
-                        a: 1.0,
-                    },
-                    (_, button::Status::Hovered) => Color {
-                        r: 0.26,
-                        g: 0.26,
-                        b: 0.26,
-                        a: 1.0,
-                    },
-                    _ => Color {
-                        r: 0.18,
-                        g: 0.18,
-                        b: 0.18,
-                        a: 1.0,
-                    },
+                    (true, _) => COMBO_OPEN_BG,
+                    (_, button::Status::Hovered) => COMBO_HOVER_BG,
+                    _ => COMBO_BG,
                 })),
                 border: Border {
                     radius: 3.0.into(),
                     width: 1.0,
-                    color: Color {
-                        r: 0.35,
-                        g: 0.35,
-                        b: 0.35,
-                        a: 1.0,
-                    },
+                    color: COMBO_BORDER,
                 },
                 ..Default::default()
             })
@@ -742,12 +756,7 @@ pub(super) fn render_large<'a>(
                         .style(move |_: &Theme| container::Style {
                             background: Some(Background::Color(c)),
                             border: Border {
-                                color: Color {
-                                    r: 0.0,
-                                    g: 0.0,
-                                    b: 0.0,
-                                    a: 0.5,
-                                },
+                                color: SWATCH_BORDER,
                                 width: 1.0,
                                 radius: 1.0.into(),
                             },
@@ -782,43 +791,14 @@ pub(super) fn render_large<'a>(
                 .on_press(Message::ToggleRibbonDropdown(dd_id.to_string()))
                 .style(move |_: &Theme, status| button::Style {
                     background: Some(Background::Color(match (is_open, status) {
-                        (true, _) => Color {
-                            r: 0.14,
-                            g: 0.14,
-                            b: 0.14,
-                            a: 1.0,
-                        },
-                        (_, button::Status::Hovered) => Color {
-                            r: 0.26,
-                            g: 0.26,
-                            b: 0.26,
-                            a: 1.0,
-                        },
-                        _ => Color {
-                            r: 0.18,
-                            g: 0.18,
-                            b: 0.18,
-                            a: 1.0,
-                        },
+                        (true, _) => COMBO_OPEN_BG,
+                        (_, button::Status::Hovered) => COMBO_HOVER_BG,
+                        _ => COMBO_BG,
                     })),
                     border: Border {
                         radius: 2.0.into(),
                         width: 1.0,
-                        color: if is_open {
-                            Color {
-                                r: 0.45,
-                                g: 0.65,
-                                b: 0.90,
-                                a: 1.0,
-                            }
-                        } else {
-                            Color {
-                                r: 0.35,
-                                g: 0.35,
-                                b: 0.35,
-                                a: 1.0,
-                            }
-                        },
+                        color: if is_open { COMBO_ACTIVE_BORDER } else { COMBO_BORDER },
                     },
                     ..Default::default()
                 })
@@ -872,16 +852,7 @@ pub(super) fn render_large<'a>(
                     container(text(active.clone()).size(11).color(Color::WHITE))
                         .width(Fill)
                         .clip(true),
-                    icons::arrow_toggle(
-                        is_open,
-                        9.0,
-                        Color {
-                            r: 0.7,
-                            g: 0.7,
-                            b: 0.7,
-                            a: 1.0,
-                        },
-                    ),
+                    icons::arrow_toggle(is_open, 9.0, COMBO_ARROW),
                 ]
                 .spacing(4)
                 .align_y(iced::Center),
@@ -889,43 +860,14 @@ pub(super) fn render_large<'a>(
             .on_press(Message::ToggleRibbonDropdown(combo_id.to_string()))
             .style(move |_: &Theme, status| button::Style {
                 background: Some(Background::Color(match (is_open, status) {
-                    (true, _) => Color {
-                        r: 0.14,
-                        g: 0.14,
-                        b: 0.14,
-                        a: 1.0,
-                    },
-                    (_, button::Status::Hovered) => Color {
-                        r: 0.26,
-                        g: 0.26,
-                        b: 0.26,
-                        a: 1.0,
-                    },
-                    _ => Color {
-                        r: 0.18,
-                        g: 0.18,
-                        b: 0.18,
-                        a: 1.0,
-                    },
+                    (true, _) => COMBO_OPEN_BG,
+                    (_, button::Status::Hovered) => COMBO_HOVER_BG,
+                    _ => COMBO_BG,
                 })),
                 border: Border {
                     radius: 3.0.into(),
                     width: 1.0,
-                    color: if is_open {
-                        Color {
-                            r: 0.45,
-                            g: 0.65,
-                            b: 0.90,
-                            a: 1.0,
-                        }
-                    } else {
-                        Color {
-                            r: 0.35,
-                            g: 0.35,
-                            b: 0.35,
-                            a: 1.0,
-                        }
-                    },
+                    color: if is_open { COMBO_ACTIVE_BORDER } else { COMBO_BORDER },
                 },
                 ..Default::default()
             })
@@ -1218,12 +1160,7 @@ pub(super) fn top_hist_btn_style(
 ) -> button::Style {
     button::Style {
         background: Some(Background::Color(match (active, open, status) {
-            (false, _, _) => Color {
-                r: 0.20,
-                g: 0.20,
-                b: 0.20,
-                a: 1.0,
-            },
+            (false, _, _) => HIST_INACTIVE_BG,
             (_, true, _) => TOOL_ACTIVE,
             (_, _, button::Status::Hovered) => TOOL_HOVER,
             (_, _, button::Status::Pressed) => TOOL_ACTIVE,
