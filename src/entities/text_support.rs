@@ -880,8 +880,18 @@ pub fn run_scale(state: &RunState, entity_h: f32, base_wf: f32) -> f32 {
     (state.height_mul * entity_h / 9.0) * (state.width_mul * base_wf.abs())
 }
 
-pub fn resolve_font<'a>(state: &'a RunState, base: &'a str) -> &'a str {
-    state.font.as_deref().unwrap_or(base)
+pub fn resolve_font<'a>(state: &'a RunState, base: &'a str) -> std::borrow::Cow<'a, str> {
+    let Some(font) = state.font.as_deref().map(str::trim).filter(|f| !f.is_empty()) else {
+        return std::borrow::Cow::Borrowed(base);
+    };
+    if lff::is_builtin(font) {
+        return std::borrow::Cow::Borrowed(font);
+    }
+    if let Some(canonical) = crate::scene::text::sysfont::canonical_family_name(font) {
+        std::borrow::Cow::Owned(canonical)
+    } else {
+        std::borrow::Cow::Borrowed(base)
+    }
 }
 
 pub fn measure_word(
@@ -893,7 +903,7 @@ pub fn measure_word(
 ) -> f32 {
     let scale = run_scale(state, entity_h, base_wf);
     let font_name = resolve_font(state, base_font);
-    let face = Face::resolve(font_name);
+    let face = Face::resolve(&font_name);
     let mut w = 0.0_f32;
     for ch in text.chars() {
         w += match face.glyph(ch) {
@@ -907,7 +917,7 @@ pub fn measure_word(
 pub fn measure_space(state: &RunState, entity_h: f32, base_wf: f32, base_font: &str) -> f32 {
     let scale = run_scale(state, entity_h, base_wf);
     let font_name = resolve_font(state, base_font);
-    Face::resolve(font_name).word_spacing() * scale
+    Face::resolve(&font_name).word_spacing() * scale
 }
 
 pub fn atom_width(atom: &LayoutAtom, entity_h: f32, base_wf: f32, base_font: &str) -> f32 {
@@ -1431,7 +1441,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                         signed_wf,
                         oblique,
                         tracking,
-                        font_name,
+                        &font_name,
                         &body,
                     );
                     all_strokes.push(TextStroke {
@@ -1444,7 +1454,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                         // Per-character boxes, advancing exactly as
                         // `measure_word` does so they track the glyphs.
                         let scale = run_scale(&atom.state, entity_h, base_wf);
-                        let face = Face::resolve(font_name);
+                        let face = Face::resolve(&font_name);
                         let mut cx = cursor_x;
                         for ch in text.chars() {
                             let adv = match face.glyph(ch) {
@@ -1835,3 +1845,75 @@ pub(crate) fn text_greek_obb_tris(
     tris
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn style(font_name: &str) -> ResolvedTextStyle {
+        ResolvedTextStyle {
+            font_name: font_name.to_string(),
+            width_factor: 1.0,
+            oblique_angle: 0.0,
+            is_backward: false,
+            is_upside_down: false,
+        }
+    }
+
+    fn stroke_point_count(layout: &MTextLayout) -> usize {
+        layout
+            .strokes
+            .iter()
+            .map(|s| s.strokes.iter().map(Vec::len).sum::<usize>() + s.fill_tris.len())
+            .sum()
+    }
+
+    #[test]
+    fn unresolved_inline_font_falls_back_to_style_font() {
+        let base = "txt";
+        let mut state = RunState::default();
+        state.font = Some("__definitely_not_an_installed_font__".to_string());
+
+        assert_eq!(resolve_font(&state, base), base);
+
+        let layout = layout_mtext(&MTextRenderOpts {
+            value: "{\\f__definitely_not_an_installed_font__|b0|i0|c0|p34;Storage Units}",
+            insertion: [0.0, 0.0, 0.0],
+            height: 2.5,
+            rect_w: 0.0,
+            rotation: 0.0,
+            style: &style(base),
+            attach_h_anchor: 0.0,
+            v_anchor: MTextVAnchor::Top,
+            line_spacing_factor: 1.0,
+            vertical_text: false,
+            want_glyph_boxes: false,
+        });
+
+        assert!(
+            stroke_point_count(&layout) > 0,
+            "unresolvable inline \\f should render through the style font"
+        );
+    }
+
+    #[test]
+    fn block_style_font_name_from_ttf_file_renders_mtext() {
+        let layout = layout_mtext(&MTextRenderOpts {
+            value: "FERRAGAMO",
+            insertion: [0.0, 0.0, 0.0],
+            height: 20.0,
+            rect_w: 0.0,
+            rotation: 0.0,
+            style: &style("arial"),
+            attach_h_anchor: 0.0,
+            v_anchor: MTextVAnchor::Top,
+            line_spacing_factor: 1.0,
+            vertical_text: false,
+            want_glyph_boxes: false,
+        });
+
+        assert!(
+            stroke_point_count(&layout) > 0,
+            "style font derived from arial.ttf should produce drawable block text"
+        );
+    }
+}
