@@ -346,6 +346,10 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::XrefsResolved(i, doc, infos, dropped) => {
+                self.on_xrefs_resolved(i, doc, infos, dropped)
+            }
+
             Message::WblockSave(block_name) => {
                 let name = block_name.clone();
                 Task::perform(

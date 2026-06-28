@@ -278,49 +278,42 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                     1.0
                 };
 
-                // Auto-resolve XREFs relative to the opened file's directory.
-                let mut xref_ms = 0u32;
-                if let Some(base_dir) = path.parent() {
-                    // xref content arrives un-purged: parser-garbage entities
-                    // inside the referenced file can trigger infinite loops in
-                    // tessellation. `resolve_xrefs` runs the corrupt-entity
-                    // guard inline as it merges each xref, so no second
-                    // full-document walk is needed here.
-                    let t_xref = Instant::now();
-                    let (xrefs, extra_dropped) =
-                        crate::io::xref::resolve_xrefs(&mut self.tabs[i].scene.document, base_dir);
-                    xref_ms = t_xref.elapsed().as_millis() as u32;
-                    if extra_dropped > 0 {
-                        self.command_line.push_error(&format!(
-                            "Warning: {extra_dropped} corrupt xref entities dropped"
-                        ));
-                    }
-                    for info in &xrefs {
-                        match info.status {
-                            crate::io::xref::XrefStatus::Loaded => {
-                                self.command_line
-                                    .push_output(&format!("XREF  Loaded \"{}\"", info.name));
-                            }
-                            crate::io::xref::XrefStatus::NotFound => {
-                                self.command_line.push_error(&format!(
-                                    "XREF  Not found: \"{}\" ({})",
-                                    info.name, info.path
-                                ));
-                            }
-                            crate::io::xref::XrefStatus::Unloaded => {
-                                self.command_line.push_info(&format!(
-                                    "XREF  Unloaded (skipped): \"{}\"",
-                                    info.name
-                                ));
-                            }
+                // Auto-resolve XREFs has already happened on the file-open worker
+                // thread; the resolved status and any dropped corrupt xref
+                // entities are carried back in `caches`.
+                let xref_ms = timings.xref_ms;
+                let xrefs = caches.xref_infos;
+                let extra_dropped = caches.xref_dropped;
+                if extra_dropped > 0 {
+                    self.command_line.push_error(&format!(
+                        "Warning: {extra_dropped} corrupt xref entities dropped"
+                    ));
+                }
+                for info in &xrefs {
+                    match info.status {
+                        crate::io::xref::XrefStatus::Loaded => {
+                            self.command_line
+                                .push_output(&format!("XREF  Loaded \"{}\"", info.name));
+                        }
+                        crate::io::xref::XrefStatus::NotFound => {
+                            self.command_line.push_error(&format!(
+                                "XREF  Not found: \"{}\" ({})",
+                                info.name, info.path
+                            ));
+                        }
+                        crate::io::xref::XrefStatus::Unloaded => {
+                            self.command_line.push_info(&format!(
+                                "XREF  Unloaded (skipped): \"{}\"",
+                                info.name
+                            ));
                         }
                     }
                 }
 
                 // Open-time breakdown so regressions are visible immediately.
                 // `total` is wall time from the Open click to here (post-xref,
-                // pre-first-frame); the phase figures are the background-thread
-                // parse/purge/cache spans plus the UI-thread xref resolve.
+                // pre-first-frame); the phase figures are all produced on the
+                // background thread, including xref resolution.
                 let total_ms = open_started
                     .map(|s| s.elapsed().as_millis() as u32)
                     .unwrap_or(0);
@@ -385,6 +378,53 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                 self.tabs[i].history = crate::app::document::HistoryState::default();
                 self.refresh_selected_grips();
                 Task::none()
+    }
+
+    /// Apply the result of a background XREF resolution to tab `i`. This is
+    /// used by `XRELOAD` and `XATTACH` after the worker thread finishes merging
+    /// the referenced file. No-op when the tab no longer exists or was closed
+    /// while the resolve was in flight.
+    pub(in crate::app) fn on_xrefs_resolved(
+        &mut self,
+        i: usize,
+        doc: acadrust::CadDocument,
+        infos: Vec<crate::io::xref::XrefInfo>,
+        dropped: usize,
+    ) -> Task<Message> {
+        if i >= self.tabs.len() || self.tabs[i].is_start {
+            return Task::none();
+        }
+        if dropped > 0 {
+            self.command_line.push_error(&format!(
+                "Warning: {dropped} corrupt xref entities dropped"
+            ));
+        }
+        for info in &infos {
+            match info.status {
+                crate::io::xref::XrefStatus::Loaded => {
+                    self.command_line
+                        .push_output(&format!("XREF  Loaded \"{}\"", info.name));
+                }
+                crate::io::xref::XrefStatus::NotFound => {
+                    self.command_line.push_error(&format!(
+                        "XREF  Not found: \"{}\" ({})",
+                        info.name, info.path
+                    ));
+                }
+                crate::io::xref::XrefStatus::Unloaded => {
+                    self.command_line.push_info(&format!(
+                        "XREF  Unloaded (skipped): \"{}\"",
+                        info.name
+                    ));
+                }
+            }
+        }
+        self.tabs[i].scene.document = doc;
+        self.tabs[i].scene.populate_hatches_from_document();
+        self.tabs[i].scene.populate_images_from_document();
+        self.tabs[i].scene.populate_meshes_from_document();
+        self.tabs[i].scene.bump_geometry();
+        Task::none()
     }
 
     pub(super) fn on_wblock_save_result_some(&mut self, block_name: String, path: std::path::PathBuf) -> Task<Message> {

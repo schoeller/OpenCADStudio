@@ -1753,6 +1753,9 @@ pub enum Message {
     XAttachPick,
     /// Result of the XATTACH file picker.
     XAttachPickResult(Result<std::path::PathBuf, String>),
+    /// Background XREF resolution (open / XRELOAD / XATTACH) completed.
+    /// `usize` is the tab index, `usize` is the corrupt-entity drop count.
+    XrefsResolved(usize, CadDocument, Vec<crate::io::xref::XrefInfo>, usize),
     // ── WBLOCK ────────────────────────────────────────────────────────────
     /// Trigger the WBLOCK save dialog for `block_name` (or `*` = selection).
     WblockSave(String),

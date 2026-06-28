@@ -170,6 +170,7 @@ impl OpenCADStudio {
 
     fn apply_cmd_result_inner(&mut self, result: CmdResult) -> Task<Message> {
         let i = self.active_tab;
+        let mut task = Task::none();
         match result {
             CmdResult::NeedPoint => {
                 // If ATTEDIT just completed entity pick, inject attribute data.
@@ -295,6 +296,27 @@ impl OpenCADStudio {
                         &mut self.tabs[i].scene,
                         &path,
                     );
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        // Resolve the referenced file on a worker thread so the
+                        // UI stays responsive while large xrefs parse.
+                        let doc = self.tabs[i].scene.document.clone();
+                        let base_dir = std::path::PathBuf::from(&path)
+                            .parent()
+                            .map(|p| p.to_path_buf())
+                            .unwrap_or_default();
+                        let tab_idx = self.active_tab;
+                        task = Task::perform(
+                            async move {
+                                let (doc, infos, dropped) =
+                                    crate::io::xref::resolve_xrefs_on_thread(doc, base_dir);
+                                (tab_idx, doc, infos, dropped)
+                            },
+                            |(tab_idx, doc, infos, dropped)| {
+                                Message::XrefsResolved(tab_idx, doc, infos, dropped)
+                            },
+                        );
+                    }
                 }
                 let label = self.history_label_from_active_cmd(i, "ENTITY");
                 self.push_undo_snapshot(i, label);
@@ -1937,11 +1959,14 @@ impl OpenCADStudio {
         }
         // The in-place TEXT editor needs keyboard focus on its own field.
         if self.text_inline.is_some() {
-            return iced::widget::operation::focus(iced::widget::Id::new(
-                super::view::TEXT_INLINE_ID,
-            ));
+            return Task::batch([
+                task,
+                iced::widget::operation::focus(iced::widget::Id::new(
+                    super::view::TEXT_INLINE_ID,
+                )),
+            ]);
         }
-        self.focus_cmd_input()
+        Task::batch([task, self.focus_cmd_input()])
     }
 
     /// Restore the tangent-snap / ortho state that was in effect before the command started.

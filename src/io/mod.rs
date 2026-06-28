@@ -76,13 +76,26 @@ pub async fn open_path_with_phase(
         phase2.store(PHASE_CACHING, Ordering::Relaxed);
         let t_caches = Instant::now();
         let mut caches = crate::scene::build_derived_caches(&doc);
+        let caches_ms = t_caches.elapsed().as_millis() as u32;
+        phase2.store(PHASE_FINALIZING, Ordering::Relaxed);
+        let t_xref = Instant::now();
+        let (xrefs, xref_dropped) = if let Some(base_dir) = path2.parent() {
+            crate::io::xref::resolve_xrefs(&mut doc, base_dir, false)
+        } else {
+            (Vec::new(), 0)
+        };
+        let xref_ms = t_xref.elapsed().as_millis() as u32;
         caches.timings = crate::scene::OpenTimings {
             parse_ms,
             purge_ms,
-            caches_ms: t_caches.elapsed().as_millis() as u32,
+            caches_ms,
+            xref_ms,
         };
         caches.corrupt_dropped = dropped;
-        phase2.store(PHASE_FINALIZING, Ordering::Relaxed);
+        caches.xref_dropped = xref_dropped;
+        // Retain the xref info so the UI can print the loaded/not-found list
+        // without a second scan of the block table.
+        caches.xref_infos = xrefs;
         Ok((doc, caches))
     })
     .join()

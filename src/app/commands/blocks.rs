@@ -244,33 +244,55 @@ impl OpenCADStudio {
                 // Reload all xrefs for the current drawing.
                 if let Some(path) = &self.tabs[i].current_path.clone() {
                     if let Some(base_dir) = path.parent() {
-                        let (infos, _dropped) = crate::io::xref::resolve_xrefs(
-                            &mut self.tabs[i].scene.document,
-                            base_dir,
-                        );
-                        for info in &infos {
-                            match info.status {
-                                crate::io::xref::XrefStatus::Loaded => {
-                                    self.command_line
-                                        .push_output(&format!("XREF  Reloaded \"{}\"", info.name));
-                                }
-                                crate::io::xref::XrefStatus::NotFound => {
-                                    self.command_line.push_error(&format!(
-                                        "XREF  Not found: \"{}\" ({})",
-                                        info.name, info.path
-                                    ));
-                                }
-                                crate::io::xref::XrefStatus::Unloaded => {
-                                    self.command_line.push_info(&format!(
-                                        "XREF  Unloaded (skipped): \"{}\"",
-                                        info.name
-                                    ));
+                        #[cfg(not(target_arch = "wasm32"))]
+                        {
+                            // Resolve xrefs on a worker thread so the main window
+                            // stays responsive while large referenced files parse.
+                            let doc = self.tabs[i].scene.document.clone();
+                            let base_dir = base_dir.to_path_buf();
+                            let i = self.active_tab;
+                            return Some(Task::perform(
+                                async move {
+                                    let (doc, infos, dropped) =
+                                        crate::io::xref::resolve_xrefs_on_thread(doc, base_dir);
+                                    (i, doc, infos, dropped)
+                                },
+                                |(i, doc, infos, dropped)| {
+                                    Message::XrefsResolved(i, doc, infos, dropped)
+                                },
+                            ));
+                        }
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            let (infos, _dropped) = crate::io::xref::resolve_xrefs(
+                                &mut self.tabs[i].scene.document,
+                                base_dir,
+                                true,
+                            );
+                            for info in &infos {
+                                match info.status {
+                                    crate::io::xref::XrefStatus::Loaded => {
+                                        self.command_line
+                                            .push_output(&format!("XREF  Reloaded \"{}\"", info.name));
+                                    }
+                                    crate::io::xref::XrefStatus::NotFound => {
+                                        self.command_line.push_error(&format!(
+                                            "XREF  Not found: \"{}\" ({})",
+                                            info.name, info.path
+                                        ));
+                                    }
+                                    crate::io::xref::XrefStatus::Unloaded => {
+                                        self.command_line.push_info(&format!(
+                                            "XREF  Unloaded (skipped): \"{}\"",
+                                            info.name
+                                        ));
+                                    }
                                 }
                             }
+                            self.tabs[i].scene.populate_hatches_from_document();
+                            self.tabs[i].scene.populate_images_from_document();
+                            self.tabs[i].scene.populate_meshes_from_document();
                         }
-                        self.tabs[i].scene.populate_hatches_from_document();
-                        self.tabs[i].scene.populate_images_from_document();
-                        self.tabs[i].scene.populate_meshes_from_document();
                     }
                 } else {
                     self.command_line

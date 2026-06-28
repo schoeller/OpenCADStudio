@@ -125,9 +125,18 @@ pub struct DerivedCaches {
     /// Reported back to the UI so the user knows when a file had parser-junk
     /// entities silently dropped.
     pub corrupt_dropped: usize,
+    /// Number of corrupt entities dropped while merging external references.
+    /// Carried back from the background xref resolution pass so the UI can
+    /// surface the warning without re-scanning the document.
+    pub xref_dropped: usize,
+    /// XREF resolution status returned by the background thread. The UI uses
+    /// this to print the loaded/not-found/unloaded list without re-scanning
+    /// the block table.
+    pub xref_infos: Vec<crate::io::xref::XrefInfo>,
     /// Background-thread open-phase timings in milliseconds (parse, purge,
-    /// derived-cache build). Filled in by `open_path_with_phase`; surfaced in
-    /// the open-complete breakdown log so open-time regressions are visible.
+    /// derived-cache build, xref resolution). Filled in by `open_path_with_phase`;
+    /// surfaced in the open-complete breakdown log so open-time regressions
+    /// are visible.
     pub timings: OpenTimings,
 }
 
@@ -137,6 +146,8 @@ pub struct OpenTimings {
     pub parse_ms: u32,
     pub purge_ms: u32,
     pub caches_ms: u32,
+    /// Time spent resolving external references on the background thread.
+    pub xref_ms: u32,
 }
 
 /// Build hatch / image / mesh caches from a document without needing `&mut Scene`.
@@ -291,6 +302,8 @@ pub fn build_derived_caches(doc: &CadDocument) -> DerivedCaches {
         meshes,
         block_meshes,
         corrupt_dropped: 0,
+        xref_dropped: 0,
+        xref_infos: Vec::new(),
         timings: OpenTimings::default(),
     }
 }

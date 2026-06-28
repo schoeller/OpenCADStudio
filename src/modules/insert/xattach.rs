@@ -81,16 +81,19 @@ pub fn path_to_block_name(path: &str) -> String {
 }
 
 /// Create the XREF BlockRecord + Block/EndBlock entities in the scene document
-/// for a given file path.  Returns the block name.
+/// for a given file path.
 ///
 /// This must be called before committing the INSERT so that the block
-/// definition exists when the renderer looks it up.
-pub fn prepare_xref_block(scene: &mut Scene, path: &str) -> String {
+/// definition exists when the renderer looks it up. On native builds the
+/// actual external-file resolution is kicked off asynchronously by the caller
+/// (see `command_driver.rs`); on wasm the file is resolved synchronously here
+/// because worker threads are not available.
+pub fn prepare_xref_block(scene: &mut Scene, path: &str) {
     let block_name = path_to_block_name(path);
 
     // If a BlockRecord already exists with this name, skip creation.
     if scene.document.block_records.get(&block_name).is_some() {
-        return block_name;
+        return;
     }
 
     // Create the BlockRecord.
@@ -113,11 +116,13 @@ pub fn prepare_xref_block(scene: &mut Scene, path: &str) -> String {
         .document
         .add_entity(EntityType::BlockEnd(BlockEnd::new()));
 
-    // Resolve the XREF content immediately.
-    let path_buf = std::path::PathBuf::from(path);
-    if let Some(base_dir) = path_buf.parent() {
-        let _ = crate::io::xref::resolve_xrefs(&mut scene.document, base_dir);
+    // On web/wasm there are no worker threads; resolve immediately so the
+    // xref geometry is available before the first frame.
+    #[cfg(target_arch = "wasm32")]
+    {
+        let path_buf = std::path::PathBuf::from(path);
+        if let Some(base_dir) = path_buf.parent() {
+            let _ = crate::io::xref::resolve_xrefs(&mut scene.document, base_dir, true);
+        }
     }
-
-    block_name
 }

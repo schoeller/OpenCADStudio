@@ -7,6 +7,8 @@ use acadrust::types::{Handle, Vector3};
 use acadrust::{CadDocument, EntityType};
 use rustc_hash::FxHashMap as HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+use std::time::SystemTime;
 
 /// Status of an external reference block.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +33,77 @@ pub struct XrefInfo {
     pub status: XrefStatus,
 }
 
+// ── Parsed-XREF cache ───────────────────────────────────────────────────────
+//
+// Large xref host files often reference the same set of external drawings.
+// Re-parsing them on every open / reload / attach is a major source of visible
+// freezes. We cache parsed `CadDocument`s keyed by (absolute path, mtime)
+// with a small LRU eviction policy so memory stays bounded.
+
+type CacheKey = (PathBuf, SystemTime);
+
+/// Maximum number of parsed xref documents kept in the process-wide cache.
+const PARSED_XREF_CACHE_CAP: usize = 16;
+
+struct ParsedXrefCache {
+    entries: HashMap<CacheKey, CadDocument>,
+    order: std::collections::VecDeque<CacheKey>,
+    cap: usize,
+}
+
+impl ParsedXrefCache {
+    fn with_capacity(cap: usize) -> Self {
+        Self {
+            entries: HashMap::default(),
+            order: std::collections::VecDeque::with_capacity(cap + 1),
+            cap,
+        }
+    }
+
+    fn get(&mut self, key: &CacheKey) -> Option<CadDocument> {
+        if let Some(doc) = self.entries.get(key) {
+            // Move to most-recently-used position. The capacity is small
+            // (16), so the O(n) removal is cheaper than a linked-hash-map.
+            let pos = self.order.iter().position(|k| k == key)?;
+            let k = self.order.remove(pos).unwrap();
+            self.order.push_front(k);
+            Some(doc.clone())
+        } else {
+            None
+        }
+    }
+
+    fn put(&mut self, key: CacheKey, doc: CadDocument) {
+        if self.entries.contains_key(&key) {
+            self.entries.insert(key.clone(), doc);
+            if let Some(pos) = self.order.iter().position(|k| k == &key) {
+                let k = self.order.remove(pos).unwrap();
+                self.order.push_front(k);
+            }
+            return;
+        }
+        while self.order.len() >= self.cap {
+            if let Some(old) = self.order.pop_back() {
+                self.entries.remove(&old);
+            } else {
+                break;
+            }
+        }
+        self.entries.insert(key.clone(), doc);
+        self.order.push_front(key);
+    }
+}
+
+static PARSED_XREF_CACHE: OnceLock<std::sync::Mutex<ParsedXrefCache>> = OnceLock::new();
+
+fn parsed_xref_cache() -> &'static std::sync::Mutex<ParsedXrefCache> {
+    PARSED_XREF_CACHE.get_or_init(|| {
+        std::sync::Mutex::new(ParsedXrefCache::with_capacity(PARSED_XREF_CACHE_CAP))
+    })
+}
+
+// ── Resolution ─────────────────────────────────────────────────────────────
+
 /// Scan `doc` for XREF block-records, resolve their paths relative to
 /// `base_dir`, and populate each xref block with entities from the
 /// referenced file.
@@ -40,7 +113,15 @@ pub struct XrefInfo {
 /// inline as each xref's entities are merged — xref content is parser output
 /// just like the host doc, so it gets the same corrupt-entity guard. Folding
 /// it in here avoids a second full-document `entities()` walk after resolve.
-pub fn resolve_xrefs(doc: &mut CadDocument, base_dir: &Path) -> (Vec<XrefInfo>, usize) {
+///
+/// When `force_reload` is true the cache is bypassed and the file is read from
+/// disk; use this for explicit `XRELOAD` / `XATTACH` operations so edits to
+/// the referenced file are picked up even if the mtime key hasn't changed.
+pub fn resolve_xrefs(
+    doc: &mut CadDocument,
+    base_dir: &Path,
+    force_reload: bool,
+) -> (Vec<XrefInfo>, usize) {
     // Auto-resolve every xref — frustum + LOD culling keep GPU cost bounded.
     let xref_entries: Vec<(String, String, Handle)> = doc
         .block_records
@@ -57,14 +138,41 @@ pub fn resolve_xrefs(doc: &mut CadDocument, base_dir: &Path) -> (Vec<XrefInfo>, 
 
         let status = match &resolved {
             None => XrefStatus::NotFound,
-            Some(p) => match super::load_file(p) {
-                Err(_) => XrefStatus::NotFound,
-                Ok(xref_doc) => {
-                    ensure_block_entities(doc, &block_name);
-                    dropped += merge_xref_into_block(doc, &block_name, br_handle, xref_doc);
-                    XrefStatus::Loaded
+            Some(p) => {
+                let metadata = std::fs::metadata(p).ok();
+                let mtime = metadata
+                    .and_then(|m| m.modified().ok())
+                    .unwrap_or(SystemTime::UNIX_EPOCH);
+                let key = (p.clone(), mtime);
+
+                let cached = if force_reload {
+                    None
+                } else {
+                    parsed_xref_cache().lock().unwrap().get(&key)
+                };
+
+                match cached {
+                    Some(xref_doc) => {
+                        ensure_block_entities(doc, &block_name);
+                        dropped += merge_xref_into_block(doc, &block_name, br_handle, xref_doc);
+                        XrefStatus::Loaded
+                    }
+                    None => match super::load_file(p) {
+                        Err(_) => XrefStatus::NotFound,
+                        Ok(xref_doc) => {
+                            ensure_block_entities(doc, &block_name);
+                            dropped += merge_xref_into_block(
+                                doc,
+                                &block_name,
+                                br_handle,
+                                xref_doc.clone(),
+                            );
+                            parsed_xref_cache().lock().unwrap().put(key, xref_doc);
+                            XrefStatus::Loaded
+                        }
+                    },
                 }
-            },
+            }
         };
 
         result.push(XrefInfo {
@@ -77,6 +185,23 @@ pub fn resolve_xrefs(doc: &mut CadDocument, base_dir: &Path) -> (Vec<XrefInfo>, 
     }
 
     (result, dropped)
+}
+
+/// Native-only background entry point: clone `doc`, resolve xrefs on a worker
+/// thread, and return the merged document. Used by `XRELOAD` and `XATTACH`
+/// so the UI thread stays responsive.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn resolve_xrefs_on_thread(
+    doc: CadDocument,
+    base_dir: PathBuf,
+) -> (CadDocument, Vec<XrefInfo>, usize) {
+    std::thread::spawn(move || {
+        let mut doc = doc;
+        let (infos, dropped) = resolve_xrefs(&mut doc, &base_dir, true);
+        (doc, infos, dropped)
+    })
+    .join()
+    .expect("xref resolve thread panicked")
 }
 
 /// Try to build an absolute path from a raw xref path string.
