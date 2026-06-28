@@ -871,9 +871,11 @@ impl Ribbon {
                 button(
                     row![
                         checkmark,
-                        text(name.clone())
-                            .size(11)
-                            .color(if is_sel { LABEL_ON } else { LABEL_OFF }),
+                        text(name.clone()).size(11).color(if is_sel {
+                            LABEL_ON
+                        } else {
+                            LABEL_OFF
+                        }),
                     ]
                     .spacing(4)
                     .align_y(iced::Center),

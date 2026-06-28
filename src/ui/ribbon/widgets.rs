@@ -320,9 +320,9 @@ pub(super) fn make_tip(tip: String) -> Element<'static, Message> {
 
 pub(super) fn tip_style(_theme: &Theme) -> container::Style {
     container::Style {
-                background: Some(Background::Color(TIP_BG)),
-                border: Border {
-                    color: COMBO_BORDER,
+        background: Some(Background::Color(TIP_BG)),
+        border: Border {
+            color: COMBO_BORDER,
             width: 1.0,
             radius: 3.0.into(),
         },
@@ -619,14 +619,14 @@ pub(super) fn render_large<'a>(
                 .style(move |_: &Theme| container::Style {
                     background: Some(Background::Color(lc)),
                     border: Border {
-                    color: SWATCH_BORDER,
-                    width: 1.0,
-                    radius: 1.0.into(),
-                },
-                ..Default::default()
-            })
-            .width(12)
-            .height(12);
+                        color: SWATCH_BORDER,
+                        width: 1.0,
+                        radius: 1.0.into(),
+                    },
+                    ..Default::default()
+                })
+                .width(12)
+                .height(12);
 
             const ICONS_USED: f32 = 14.0 + 14.0 + 14.0 + 12.0 + 10.0 + 5.0 * 4.0 + 16.0 + 16.0;
             let name_w = (COMBO_W - ICONS_USED).max(40.0);
@@ -798,7 +798,11 @@ pub(super) fn render_large<'a>(
                     border: Border {
                         radius: 2.0.into(),
                         width: 1.0,
-                        color: if is_open { COMBO_ACTIVE_BORDER } else { COMBO_BORDER },
+                        color: if is_open {
+                            COMBO_ACTIVE_BORDER
+                        } else {
+                            COMBO_BORDER
+                        },
                     },
                     ..Default::default()
                 })
@@ -867,7 +871,11 @@ pub(super) fn render_large<'a>(
                 border: Border {
                     radius: 3.0.into(),
                     width: 1.0,
-                    color: if is_open { COMBO_ACTIVE_BORDER } else { COMBO_BORDER },
+                    color: if is_open {
+                        COMBO_ACTIVE_BORDER
+                    } else {
+                        COMBO_BORDER
+                    },
                 },
                 ..Default::default()
             })
