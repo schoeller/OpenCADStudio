@@ -178,4 +178,4 @@ fn angular_preview(vertex: Vec3, first: Vec3, second: Vec3, arc_pt: Vec3) -> Vec
 
 
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["DIMANGULAR"] });  // AngularDimensionCommand
+inventory::submit!(crate::command::CommandRegistration { names: &["DIMANGULAR", "DAN"] });  // AngularDimensionCommand

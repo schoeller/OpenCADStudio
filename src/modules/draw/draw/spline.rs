@@ -30,7 +30,7 @@ impl SplineCommand {
         Self { pts: Vec::new() }
     }
 
-    fn build(&self) -> Option<EntityType> {
+    fn build(&self, closed: bool) -> Option<EntityType> {
         if self.pts.len() < 2 {
             return None;
         }
@@ -43,12 +43,15 @@ impl SplineCommand {
         // Uniform open knot vector for degree-3 clamped B-spline
         let degree = 3_i32.min((n - 1) as i32);
         let knots = uniform_knots(n, degree as usize);
-        let spline = Spline {
+        let mut spline = Spline {
             degree,
             control_points,
             knots,
             ..Default::default()
         };
+        // Closed splines render with a segment bridging the last point back to
+        // the first (tessellation honours `flags.closed`).
+        spline.flags.closed = closed;
         Some(EntityType::Spline(spline))
     }
 }
@@ -78,7 +81,7 @@ impl CadCommand for SplineCommand {
             "SPLINE  Specify first control point:".into()
         } else {
             format!(
-                "SPLINE  Specify next point  [{} pts | Enter=done]:",
+                "SPLINE  Specify next point  [{} pts | Close/Undo | Enter=done]:",
                 self.pts.len()
             )
         }
@@ -90,16 +93,39 @@ impl CadCommand for SplineCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
-        match self.build() {
+        match self.build(false) {
             Some(e) => CmdResult::CommitEntity(e),
             None => CmdResult::Cancel,
         }
     }
 
     fn on_escape(&mut self) -> CmdResult {
-        match self.build() {
+        match self.build(false) {
             Some(e) => CmdResult::CommitEntity(e),
             None => CmdResult::Cancel,
+        }
+    }
+
+    fn wants_text_input(&self) -> bool {
+        // Accept Close / Undo once a control point exists.
+        !self.pts.is_empty()
+    }
+
+    fn point_step_accepts_keywords(&self) -> bool {
+        !self.pts.is_empty()
+    }
+
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        match text.trim().to_uppercase().as_str() {
+            "C" | "CLOSE" => match self.build(true) {
+                Some(e) => Some(CmdResult::CommitAndExit(e)),
+                None => Some(CmdResult::NeedPoint),
+            },
+            "U" | "UNDO" => {
+                self.pts.pop();
+                Some(CmdResult::NeedPoint)
+            }
+            _ => None,
         }
     }
 

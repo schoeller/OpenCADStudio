@@ -3,6 +3,44 @@ use super::*;
 impl OpenCADStudio {
     pub(super) fn dispatch_blocks(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         match cmd {
+            // ── BASE — drawing insertion base point ───────────────────────
+            // Bare BASE picks a point interactively; BASE <x> <y> [z] sets it
+            // directly. The base point is stored per active space (model/paper).
+            cmd if cmd == "BASE" || cmd.starts_with("BASE ") => {
+                let rest = cmd.strip_prefix("BASE").unwrap_or("").trim();
+                if rest.is_empty() {
+                    use crate::modules::insert::base_point::BaseCommand;
+                    let c = BaseCommand::new();
+                    self.command_line.push_info(&c.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(c));
+                } else {
+                    let nums: Vec<f64> = rest
+                        .split(|ch| ch == ' ' || ch == ',')
+                        .filter(|s| !s.is_empty())
+                        .filter_map(|s| s.parse::<f64>().ok())
+                        .collect();
+                    if nums.len() >= 2 {
+                        let z = nums.get(2).copied().unwrap_or(0.0);
+                        let pt = acadrust::types::Vector3::new(nums[0], nums[1], z);
+                        let is_paper = self.tabs[i].scene.current_layout != "Model";
+                        self.push_undo_snapshot(i, "BASE");
+                        if is_paper {
+                            self.tabs[i].scene.document.header.paper_space_insertion_base = pt;
+                        } else {
+                            self.tabs[i].scene.document.header.model_space_insertion_base = pt;
+                        }
+                        self.tabs[i].dirty = true;
+                        let space = if is_paper { "paper space" } else { "model space" };
+                        self.command_line.push_output(&format!(
+                            "Base point ({}, {}, {}) set for {space}.",
+                            nums[0], nums[1], z
+                        ));
+                    } else {
+                        self.command_line.push_error("Usage: BASE <x> <y> [z]");
+                    }
+                }
+            }
+
             "COPYCLIP" | "CC" => {
                 let handles: Vec<_> = self.tabs[i]
                     .scene
@@ -154,7 +192,7 @@ impl OpenCADStudio {
                 }
             }
 
-            "BLOCK" => {
+            "BLOCK" | "BMAKE" => {
                 let handles: Vec<_> = self.tabs[i]
                     .scene
                     .selected_entities()

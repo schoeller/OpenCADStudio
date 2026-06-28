@@ -84,6 +84,58 @@ impl OpenCADStudio {
                 }
             }
 
+            // DBLIST — list data for every entity in the drawing (LIST over the
+            // whole database rather than the current selection).
+            "DBLIST" => {
+                // Format every entity first so the immutable document borrow is
+                // released before writing to the command line.
+                let lines: Vec<String> = self.tabs[i]
+                    .scene
+                    .document
+                    .entities()
+                    .map(|entity| {
+                        let type_name = crate::entities::names::dxf_name(entity);
+                        let common = entity.common();
+                        let color_str = common
+                            .color
+                            .index()
+                            .map(|c| c.to_string())
+                            .unwrap_or_else(|| "ByLayer".to_string());
+                        let linetype =
+                            if common.linetype.is_empty() || common.linetype == "ByLayer" {
+                                "ByLayer".to_string()
+                            } else {
+                                common.linetype.clone()
+                            };
+                        let details = entity_list_details(entity);
+                        format!(
+                            "{type_name}  Handle:{:X}  Layer:{}  Color:{}  LT:{}{}",
+                            common.handle.value(),
+                            common.layer,
+                            color_str,
+                            linetype,
+                            if details.is_empty() {
+                                String::new()
+                            } else {
+                                format!("\n    {details}")
+                            }
+                        )
+                    })
+                    .collect();
+                if lines.is_empty() {
+                    self.command_line.push_info("DBLIST: drawing has no entities.");
+                } else {
+                    let count = lines.len();
+                    for l in lines {
+                        self.command_line.push_output(&l);
+                    }
+                    self.command_line.push_output(&format!(
+                        "DBLIST: {count} entit{}.",
+                        if count == 1 { "y" } else { "ies" }
+                    ));
+                }
+            }
+
             // ── Break / Join ─────────────────────────────────────────────────
             "JOIN" | "J" => {
                 use crate::modules::draw::modify::join::JoinCommand;
@@ -120,7 +172,9 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
             }
 
-            "ATTEDIT" | "ATE" | "-ATTEDIT" => {
+            // Bare ATTEDIT (and the ATE alias) launch the interactive attribute
+            // editor; the command-line -ATTEDIT form is handled in the draw family.
+            "ATTEDIT" | "ATE" => {
                 use crate::modules::draw::modify::attedit::AtteditCommand;
                 let cmd_obj = AtteditCommand::new();
                 self.command_line.push_info(&cmd_obj.prompt());

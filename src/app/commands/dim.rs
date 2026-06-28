@@ -17,21 +17,21 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            "DIMLINEAR" => {
+            "DIMLINEAR" | "DLI" => {
                 use crate::modules::annotate::linear_dim::LinearDimensionCommand;
                 let new_cmd = LinearDimensionCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "DIMRADIUS" => {
+            "DIMRADIUS" | "DRA" => {
                 use crate::modules::annotate::radius_dim::RadiusDimensionCommand;
                 let new_cmd = RadiusDimensionCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "DIMANGULAR" => {
+            "DIMANGULAR" | "DAN" => {
                 use crate::modules::annotate::angular_dim::AngularDimensionCommand;
                 let new_cmd = AngularDimensionCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());

@@ -52,12 +52,21 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            // ATTEDIT — list or edit attribute values on selected Insert entities.
+            // Command-line attribute editing on selected Insert entities. Bare
+            // ATTEDIT and the ATE alias launch the interactive editor instead
+            // (see the ATTEDIT arm in the inquiry family); the dash form is the
+            // command-line entry point.
             // Usage:
-            //   ATTEDIT           — list all attributes on selected Insert(s)
-            //   ATTEDIT <tag> <v> — set the value of attribute <tag> to <v>
-            cmd if cmd == "ATTEDIT" || cmd.starts_with("ATTEDIT ") => {
-                let rest = cmd.trim_start_matches("ATTEDIT").trim();
+            //   -ATTEDIT          — list all attributes on selected Insert(s)
+            //   ATTEDIT <tag> <v> — quick-set attribute <tag> to <v>
+            cmd if cmd.starts_with("ATTEDIT ")
+                || cmd == "-ATTEDIT"
+                || cmd.starts_with("-ATTEDIT ") =>
+            {
+                let rest = cmd
+                    .trim_start_matches("-ATTEDIT")
+                    .trim_start_matches("ATTEDIT")
+                    .trim();
                 let parts: Vec<&str> = rest.splitn(2, char::is_whitespace).collect();
                 let selected_handles: Vec<acadrust::Handle> = self.tabs[i]
                     .scene
@@ -336,6 +345,64 @@ impl OpenCADStudio {
             "PLINE" | "PL" => {
                 use crate::modules::draw::draw::polyline::PlineCommand;
                 let new_cmd = PlineCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
+            "3DPOLY" => {
+                use crate::modules::draw::draw::poly3d::Poly3dCommand;
+                let new_cmd = Poly3dCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
+            // 2D filled solid. Reached via SO / SOLID2D — the bare SOLID verb is
+            // currently the shaded-display toggle (token collision tracked).
+            "SO" | "SOLID2D" => {
+                use crate::modules::draw::draw::solid2d::Solid2dCommand;
+                let new_cmd = Solid2dCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
+            "HELIX" => {
+                use crate::modules::draw::draw::helix::HelixCommand;
+                let new_cmd = HelixCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
+            "TRACE" => {
+                use crate::modules::draw::draw::trace::TraceCommand;
+                let new_cmd = TraceCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
+            "DIMCENTER" | "DCE" | "CENTERMARK" => {
+                use crate::modules::draw::draw::dimcenter::DimCenterCommand;
+                let new_cmd = DimCenterCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
+            "SKETCH" => {
+                use crate::modules::draw::draw::sketch::SketchCommand;
+                let new_cmd = SketchCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
+            "REVERSE" => {
+                use crate::modules::draw::modify::reverse::ReverseCommand;
+                let new_cmd = ReverseCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
+            "MEASUREGEOM" | "MEA" => {
+                use crate::modules::draw::inquiry::measuregeom::MeasureGeomCommand;
+                let new_cmd = MeasureGeomCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }

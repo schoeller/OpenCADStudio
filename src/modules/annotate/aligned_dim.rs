@@ -28,11 +28,25 @@ enum Step {
 
 pub struct AlignedDimensionCommand {
     step: Step,
+    /// Optional text that replaces the measured value (None = measurement).
+    text_override: Option<String>,
+    /// True while the next typed line is captured as the text override.
+    awaiting_text: bool,
+    /// Explicit text rotation in radians (None = follow the UCS/style).
+    text_angle: Option<f64>,
+    /// True while the next typed value is captured as the text angle.
+    awaiting_angle: bool,
 }
 
 impl AlignedDimensionCommand {
     pub fn new() -> Self {
-        Self { step: Step::First }
+        Self {
+            step: Step::First,
+            text_override: None,
+            awaiting_text: false,
+            text_angle: None,
+            awaiting_angle: false,
+        }
     }
 }
 
@@ -42,10 +56,20 @@ impl CadCommand for AlignedDimensionCommand {
     }
 
     fn prompt(&self) -> String {
+        if self.awaiting_text {
+            return "DIMALIGNED  Enter dimension text (blank = measured value):".into();
+        }
+        if self.awaiting_angle {
+            return "DIMALIGNED  Specify text angle (degrees):".into();
+        }
         match self.step {
             Step::First => "DIMALIGNED  Specify first extension line origin:".into(),
-            Step::Second(_) => "DIMALIGNED  Specify second extension line origin:".into(),
-            Step::DimLine { .. } => "DIMALIGNED  Specify dimension line location:".into(),
+            Step::Second(_) => {
+                "DIMALIGNED  Specify second extension line origin  [Text/Angle]:".into()
+            }
+            Step::DimLine { .. } => {
+                "DIMALIGNED  Specify dimension line location  [Text/Angle]:".into()
+            }
         }
     }
 
@@ -76,13 +100,78 @@ impl CadCommand for AlignedDimensionCommand {
                 dim.base.text_middle_point = v3((d1 + d2) * 0.5);
                 dim.base.insertion_point = dim.base.text_middle_point;
                 dim.base.actual_measurement = dim.measurement();
+                dim.base.user_text = self.text_override.clone();
+                // An explicit text angle overrides the default rotation.
+                if let Some(a) = self.text_angle {
+                    dim.base.text_rotation = a;
+                }
                 CmdResult::CommitAndExit(EntityType::Dimension(Dimension::Aligned(dim)))
             }
         }
     }
 
     fn on_enter(&mut self) -> CmdResult {
+        // A bare Enter while entering override text/angle accepts the default.
+        if self.awaiting_text {
+            self.awaiting_text = false;
+            return CmdResult::NeedPoint;
+        }
+        if self.awaiting_angle {
+            self.awaiting_angle = false;
+            return CmdResult::NeedPoint;
+        }
         CmdResult::Cancel
+    }
+
+    fn wants_text_input(&self) -> bool {
+        true
+    }
+
+    fn point_step_accepts_keywords(&self) -> bool {
+        // While entering the override text or angle it is a value, not a point
+        // step.
+        !self.awaiting_text && !self.awaiting_angle
+    }
+
+    fn wants_text_with_spaces(&self) -> bool {
+        // The override text may contain spaces.
+        self.awaiting_text
+    }
+
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        if self.awaiting_text {
+            let t = text.trim();
+            // Blank (or the "<>" placeholder) keeps the measured value.
+            self.text_override = if t.is_empty() || t == "<>" {
+                None
+            } else {
+                Some(t.to_string())
+            };
+            self.awaiting_text = false;
+            return Some(CmdResult::NeedPoint);
+        }
+        if self.awaiting_angle {
+            let t = text.trim();
+            // Blank clears any explicit angle (follow the default again).
+            self.text_angle = if t.is_empty() {
+                None
+            } else {
+                t.parse::<f64>().ok().map(f64::to_radians)
+            };
+            self.awaiting_angle = false;
+            return Some(CmdResult::NeedPoint);
+        }
+        match text.trim().to_uppercase().as_str() {
+            "T" | "TEXT" | "M" | "MTEXT" => {
+                self.awaiting_text = true;
+                Some(CmdResult::NeedPoint)
+            }
+            "A" | "ANGLE" => {
+                self.awaiting_angle = true;
+                Some(CmdResult::NeedPoint)
+            }
+            _ => None,
+        }
     }
 
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> { let pt = pt.as_vec3();

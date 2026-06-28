@@ -4,7 +4,7 @@ mod attdef;
 mod attedit;
 mod attman;
 mod attsync;
-mod base_point;
+pub mod base_point;
 mod content_browser;
 pub(crate) mod create_block;
 mod design_center;

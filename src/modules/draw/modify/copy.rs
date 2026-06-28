@@ -35,6 +35,10 @@ pub struct CopyCommand {
     wire_models: Vec<WireModel>,
     step: Step,
     count: usize,
+    /// Number of items for an Array copy (None = place copies one at a time).
+    array_count: Option<usize>,
+    /// True while the next typed value is captured as the array item count.
+    awaiting_count: bool,
 }
 
 impl CopyCommand {
@@ -44,6 +48,8 @@ impl CopyCommand {
             wire_models,
             step: Step::Base,
             count: 0,
+            array_count: None,
+            awaiting_count: false,
         }
     }
 }
@@ -54,15 +60,27 @@ impl CadCommand for CopyCommand {
     }
 
     fn prompt(&self) -> String {
+        if self.awaiting_count {
+            return "COPY  Enter number of items to array:".to_string();
+        }
         match &self.step {
             Step::Base => format!(
                 "COPY  Specify base point  [{} objects]:",
                 self.handles.len()
             ),
-            Step::Placing(base) => format!(
-                "COPY  Specify destination  [{} copies so far | Enter=done | base {:.3},{:.3}]:",
-                self.count, base.x, base.y
-            ),
+            Step::Placing(base) => {
+                if let Some(n) = self.array_count {
+                    format!(
+                        "COPY  Specify second point for {n}-item array  [base {:.3},{:.3}]:",
+                        base.x, base.y
+                    )
+                } else {
+                    format!(
+                        "COPY  Specify destination  [{} copies so far | Array | Enter=done | base {:.3},{:.3}]:",
+                        self.count, base.x, base.y
+                    )
+                }
+            }
         }
     }
 
@@ -74,17 +92,63 @@ impl CadCommand for CopyCommand {
             }
             Step::Placing(base) => {
                 let delta = pt - *base;
-                self.count += 1;
-                CmdResult::CopySelected(self.handles.clone(), EntityTransform::Translate(delta))
+                if let Some(n) = self.array_count {
+                    // Array: place n-1 copies at delta, 2·delta, … so the result
+                    // is n evenly spaced items including the original. Ends here.
+                    let transforms: Vec<EntityTransform> = (1..n)
+                        .map(|k| EntityTransform::Translate(delta * k as f64))
+                        .collect();
+                    CmdResult::BatchCopy(self.handles.clone(), transforms)
+                } else {
+                    self.count += 1;
+                    CmdResult::CopySelected(
+                        self.handles.clone(),
+                        EntityTransform::Translate(delta),
+                    )
+                }
             }
         }
     }
 
     fn on_enter(&mut self) -> CmdResult {
+        // Cancel an in-progress Array count entry; otherwise finish.
+        if self.awaiting_count {
+            self.awaiting_count = false;
+            return CmdResult::NeedPoint;
+        }
         CmdResult::Cancel
     }
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
+    }
+
+    fn wants_text_input(&self) -> bool {
+        matches!(self.step, Step::Placing(_))
+    }
+
+    fn point_step_accepts_keywords(&self) -> bool {
+        // Accept the Array keyword while placing, but route the typed item
+        // count straight through on_text_input.
+        matches!(self.step, Step::Placing(_)) && !self.awaiting_count
+    }
+
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        if self.awaiting_count {
+            if let Ok(n) = text.trim().parse::<usize>() {
+                if n >= 2 {
+                    self.array_count = Some(n);
+                }
+            }
+            self.awaiting_count = false;
+            return Some(CmdResult::NeedPoint);
+        }
+        match text.trim().to_uppercase().as_str() {
+            "A" | "ARRAY" => {
+                self.awaiting_count = true;
+                Some(CmdResult::NeedPoint)
+            }
+            _ => None,
+        }
     }
 
     fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> {

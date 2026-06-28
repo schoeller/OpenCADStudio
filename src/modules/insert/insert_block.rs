@@ -32,9 +32,24 @@ enum Step {
     },
 }
 
+/// Which numeric value the insertion-point step is currently waiting for after
+/// a Scale / Rotate keyword.
+#[derive(Clone, Copy)]
+enum AwaitKind {
+    Scale,
+    Rotation,
+}
+
 pub struct InsertBlockCommand {
     available: Vec<String>,
     step: Step,
+    /// Uniform X/Y scale applied to the placed block (default 1).
+    x_scale: f64,
+    y_scale: f64,
+    /// Rotation applied to the placed block, in radians (default 0).
+    rotation_rad: f64,
+    /// Set while a Scale/Rotate value is being typed at the insertion step.
+    awaiting: Option<AwaitKind>,
     /// Pending Insert entity stored while attr-filling is in progress.
     pending_insert: Option<Insert>,
     /// Optional drag preview: the block's wire geometry plus the base point it
@@ -48,6 +63,10 @@ impl InsertBlockCommand {
         Self {
             available,
             step: Step::Name,
+            x_scale: 1.0,
+            y_scale: 1.0,
+            rotation_rad: 0.0,
+            awaiting: None,
             pending_insert: None,
             preview: None,
         }
@@ -61,6 +80,10 @@ impl InsertBlockCommand {
         Self {
             available: vec![name.clone()],
             step: Step::Point { name },
+            x_scale: 1.0,
+            y_scale: 1.0,
+            rotation_rad: 0.0,
+            awaiting: None,
             pending_insert: None,
             preview: Some((preview_wires, base)),
         }
@@ -82,7 +105,14 @@ impl CadCommand for InsertBlockCommand {
                 };
                 format!("INSERT  Enter block name:{hint}")
             }
-            Step::Point { name } => format!("INSERT  Specify insertion point for \"{}\":", name),
+            Step::Point { name } => match self.awaiting {
+                Some(AwaitKind::Scale) => "INSERT  Specify scale factor <1>:".to_string(),
+                Some(AwaitKind::Rotation) => "INSERT  Specify rotation angle <0>:".to_string(),
+                None => format!(
+                    "INSERT  Specify insertion point for \"{}\"  [Scale/Rotate]:",
+                    name
+                ),
+            },
             Step::FillAttr { attdefs, idx, .. } => {
                 if let Some((tag, prompt, default)) = attdefs.get(*idx) {
                     let default_hint = if default.is_empty() {
@@ -107,10 +137,13 @@ impl CadCommand for InsertBlockCommand {
         match &self.step {
             Step::Name => CmdResult::NeedPoint,
             Step::Point { name } => {
-                let ins = Insert::new(
+                let mut ins = Insert::new(
                     name.clone(),
                     Vector3::new(pt.x as f64, pt.y as f64, pt.z as f64),
                 );
+                ins.set_x_scale(self.x_scale);
+                ins.set_y_scale(self.y_scale);
+                ins.rotation = self.rotation_rad;
                 let block_name = name.clone();
                 self.pending_insert = Some(ins);
                 // Signal the host to check for attdefs.
@@ -122,6 +155,12 @@ impl CadCommand for InsertBlockCommand {
 
     fn on_enter(&mut self) -> CmdResult {
         match &self.step {
+            // A bare Enter while a scale/rotation value is awaited keeps the
+            // current default instead of cancelling the command.
+            Step::Point { .. } if self.awaiting.is_some() => {
+                self.awaiting = None;
+                CmdResult::NeedPoint
+            }
             Step::Name | Step::Point { .. } => CmdResult::Cancel,
             Step::FillAttr { .. } => {
                 // Treat Enter as accepting the default.
@@ -131,7 +170,17 @@ impl CadCommand for InsertBlockCommand {
     }
 
     fn wants_text_input(&self) -> bool {
-        matches!(self.step, Step::Name | Step::FillAttr { .. })
+        matches!(
+            self.step,
+            Step::Name | Step::FillAttr { .. } | Step::Point { .. }
+        )
+    }
+
+    fn point_step_accepts_keywords(&self) -> bool {
+        // The insertion-point step also takes Scale / Rotate keywords while
+        // still accepting a point pick. Once a value is being typed (awaiting),
+        // route the whole number through `on_text_input` instead.
+        matches!(self.step, Step::Point { .. }) && self.awaiting.is_none()
     }
 
     fn wants_text_with_spaces(&self) -> bool {
@@ -152,7 +201,34 @@ impl CadCommand for InsertBlockCommand {
                 Some(CmdResult::NeedPoint)
             }
             Step::FillAttr { .. } => Some(self.accept_attr_value(text)),
-            Step::Point { .. } => None,
+            Step::Point { .. } => {
+                // Typing the value awaited after a Scale / Rotate keyword.
+                if let Some(kind) = self.awaiting {
+                    if let Ok(v) = text.trim().parse::<f64>() {
+                        match kind {
+                            AwaitKind::Scale if v != 0.0 => {
+                                self.x_scale = v;
+                                self.y_scale = v;
+                            }
+                            AwaitKind::Scale => {}
+                            AwaitKind::Rotation => self.rotation_rad = v.to_radians(),
+                        }
+                    }
+                    self.awaiting = None;
+                    return Some(CmdResult::NeedPoint);
+                }
+                match text.trim().to_uppercase().as_str() {
+                    "S" | "SCALE" => {
+                        self.awaiting = Some(AwaitKind::Scale);
+                        Some(CmdResult::NeedPoint)
+                    }
+                    "R" | "ROTATE" => {
+                        self.awaiting = Some(AwaitKind::Rotation);
+                        Some(CmdResult::NeedPoint)
+                    }
+                    _ => None,
+                }
+            }
         }
     }
 

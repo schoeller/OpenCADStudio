@@ -7,6 +7,19 @@ impl OpenCADStudio {
             "OPEN" => return Some(Task::done(Message::OpenFile)),
             "SAVE" | "QSAVE" => return Some(Task::done(Message::SaveFile)),
             "SAVEAS" => return Some(Task::done(Message::SaveAs)),
+            // UNDO <n> — step back n operations at once; bare UNDO / U is one step.
+            cmd if cmd.starts_with("UNDO ") => {
+                let arg = cmd["UNDO ".len()..].trim();
+                match arg.parse::<usize>() {
+                    Ok(0) => return Some(Task::none()),
+                    Ok(n) => return Some(Task::done(Message::UndoMany(n))),
+                    Err(_) => {
+                        self.command_line
+                            .push_error("Usage: UNDO [number of steps]");
+                        return Some(Task::none());
+                    }
+                }
+            }
             "UNDO" | "U" => return Some(Task::done(Message::Undo)),
             "REDO" => return Some(Task::done(Message::Redo)),
             "CLEAR" | "CLR" => return Some(Task::done(Message::ClearScene)),
@@ -100,6 +113,44 @@ impl OpenCADStudio {
             "ORTHO" => return Some(Task::done(Message::SetProjection(true))),
             "PERSP" => return Some(Task::done(Message::SetProjection(false))),
             "LAYERS" | "LA" => return Some(Task::done(Message::ToggleLayers)),
+
+            // SCRIPT <path> — run a command script: each non-blank, non-comment
+            // line is fed through the same command path the `--script` startup
+            // flag uses, so the behaviour matches headless automation exactly.
+            cmd if cmd == "SCRIPT"
+                || cmd == "SCR"
+                || cmd.starts_with("SCRIPT ")
+                || cmd.starts_with("SCR ") =>
+            {
+                let path = cmd.split_once(' ').map(|(_, r)| r.trim().to_string());
+                match path {
+                    Some(p) if !p.is_empty() => match std::fs::read_to_string(&p) {
+                        Ok(text) => {
+                            let cmds: Vec<Task<Message>> = text
+                                .lines()
+                                .map(str::trim)
+                                .filter(|l| {
+                                    !l.is_empty() && !l.starts_with('#') && !l.starts_with(';')
+                                })
+                                .map(|l| Task::done(Message::Command(l.to_string())))
+                                .collect();
+                            self.command_line.push_output(&format!(
+                                "SCRIPT: running {} command(s) from {p}.",
+                                cmds.len()
+                            ));
+                            return Some(Task::batch(cmds));
+                        }
+                        Err(e) => {
+                            self.command_line
+                                .push_error(&format!("SCRIPT: cannot read {p}: {e}"));
+                        }
+                    },
+                    _ => {
+                        self.command_line
+                            .push_info("Usage: SCRIPT <path to .scr file>");
+                    }
+                }
+            }
 
             _ => return None,
         }

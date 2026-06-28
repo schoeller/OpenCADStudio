@@ -12,6 +12,7 @@ pub mod mirror;
 pub mod offset;
 pub mod pedit;
 pub mod refedit;
+pub mod reverse;
 pub mod rotate;
 pub mod scale;
 pub mod spline_ops;

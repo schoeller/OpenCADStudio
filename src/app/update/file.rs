@@ -518,43 +518,6 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                 Task::none()
     }
 
-    /// Resolve the effective DWG save version for `tab`.
-    ///
-    /// A drawing that carries data locked to its source DWG version (e.g.
-    /// AEC/Civil3D objects with no published spec, raw MLEADER/Surface records,
-    /// EED) can only be written losslessly in that version. When the requested
-    /// version is in a different encoding family, fall back to the source
-    /// version so nothing is dropped and the file opens cleanly elsewhere, and
-    /// note it on the command line. Non-DWG / convertible saves are unchanged.
-    /// Shared by every save path (Save, Save As, save-before-close).
-    pub(crate) fn dwg_save_version(
-        &mut self,
-        tab: usize,
-        ext: &str,
-        requested: acadrust::DxfVersion,
-    ) -> acadrust::DxfVersion {
-        if ext != "dwg" {
-            return requested;
-        }
-        let fallback = {
-            let doc = &self.tabs[tab].scene.document;
-            match doc.dwg_source_version {
-                Some(src) if src != requested && doc.has_version_locked_data(requested) => Some(src),
-                _ => None,
-            }
-        };
-        match fallback {
-            Some(src) => {
-                self.command_line.push_output(&format!(
-                    "Saved in source DWG version ({src:?}) to preserve objects that cannot be \
-                     converted to the selected version."
-                ));
-                src
-            }
-            None => requested,
-        }
-    }
-
     pub(super) fn on_save_file(&mut self) -> Task<Message> {
                 if self.read_only {
                     self.command_line
@@ -572,17 +535,8 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                 if let Some(path) = self.tabs[i].current_path.clone() {
                     self.tabs[i].scene.document.header.user_real1 =
                         self.tabs[i].scene.annotation_scale as f64;
-                    // Preserve the document's version, but fall back to the
-                    // source version if it carries version-locked data (so a
-                    // direct Save can't silently drop AEC/Civil3D objects).
-                    let ext = path
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        .unwrap_or("")
-                        .to_ascii_lowercase();
-                    let requested = self.tabs[i].scene.document.version;
-                    let version = self.dwg_save_version(i, &ext, requested);
-                    match crate::io::save_as_version(&self.tabs[i].scene.document, &path, version) {
+                    // A direct Save preserves the document's current version.
+                    match crate::io::save(&self.tabs[i].scene.document, &path) {
                         Ok(()) => {
                             self.command_line
                                 .push_output(&format!("Saved: {}", path.display()));
@@ -613,10 +567,6 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                 let close = self.close_save_dialog_window();
                 let i = self.active_tab;
                 sync_annotation_scale_header(&mut self.tabs[i].scene);
-
-                // Fall back to the source version for files with version-locked
-                // data (e.g. AEC/Civil3D objects) so nothing is dropped.
-                let version = self.dwg_save_version(i, ext, version);
 
                 // Native: write to the chosen path. Web: download the bytes
                 // under the chosen name (no filesystem).

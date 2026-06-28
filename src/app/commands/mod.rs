@@ -200,6 +200,21 @@ impl OpenCADStudio {
 // excluded.
 inventory::submit!(crate::command::CommandRegistration {
     names: &[
+        // Drafting-aid / display toggles + customization entry points wired in the
+        // dispatch families (no interactive command module of their own).
+        "ALIASEDIT", "CLEANSCREEN", "CUI", "DSETTINGS", "GRID", "OSNAP", "POLAR",
+        "QUICKPROPERTIES", "SNAP",
+        // Viewport-arrangement shortcuts (delegate to VPORTS configurations).
+        "CASCADE", "HORIZONTAL", "VERTICAL", "VPJOIN",
+        // Standard aliases for existing commands.
+        "BMAKE", "EXPORTPDF", "DDIM",
+        // Inquiry: list the whole drawing database.
+        "DBLIST",
+        // Reset selected entities' overrides to follow their layer.
+        "SETBYLAYER",
+        // Remove duplicate objects; set drawing base point; audit integrity;
+        // read/write system variables.
+        "OVERKILL", "BASE", "AUDIT", "SETVAR", "SCRIPT", "SCR", "FINDNONPURGEABLE",
         "3DORBIT", "3O", "ABOUT", "ATTDISP", "ATTEXT", "BACKGROUND", "CDIMSTY", "CELTSCALE",
         "CHANGELOG", "CHPROP", "CLAYER", "CLEAR", "CLR", "COLORSCHEME", "COUNT", "DATAEXTRACTION",
         "DE", "DESELALL", "DESELECT", "DIMSTYLE", "DONATE", "DRAWORDER", "DWGPROP", "DWGPROPS",

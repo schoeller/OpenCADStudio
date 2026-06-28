@@ -28,8 +28,46 @@ impl OpenCADStudio {
                                 .push_output(&format!("Linetypes: {}", ltypes.join(", ")));
                         }
                     }
+                    // Set the current linetype applied to newly drawn entities.
+                    "SET" | "CURRENT" | "S" => {
+                        let name = parts.get(1).copied().unwrap_or("");
+                        if name.is_empty() {
+                            self.command_line
+                                .push_info("Usage: LINETYPE SET <name | ByLayer | ByBlock>");
+                        } else {
+                            let canon = if name.eq_ignore_ascii_case("BYLAYER") {
+                                Some(("ByLayer".to_string(), acadrust::types::Handle::NULL))
+                            } else if name.eq_ignore_ascii_case("BYBLOCK") {
+                                Some(("ByBlock".to_string(), acadrust::types::Handle::NULL))
+                            } else {
+                                self.tabs[i]
+                                    .scene
+                                    .document
+                                    .line_types
+                                    .iter()
+                                    .find(|lt| lt.name.eq_ignore_ascii_case(name))
+                                    .map(|lt| (lt.name.clone(), lt.handle))
+                            };
+                            match canon {
+                                Some((nm, handle)) => {
+                                    let h = &mut self.tabs[i].scene.document.header;
+                                    h.current_linetype_name = nm.clone();
+                                    h.current_linetype_handle = handle;
+                                    self.tabs[i].dirty = true;
+                                    self.command_line
+                                        .push_output(&format!("Current linetype set to {nm}."));
+                                }
+                                None => {
+                                    self.command_line.push_error(&format!(
+                                        "LINETYPE: \"{name}\" is not loaded. Use LINETYPE LIST to see available linetypes."
+                                    ));
+                                }
+                            }
+                        }
+                    }
                     _ => {
-                        self.command_line.push_info("Usage: LINETYPE LIST");
+                        self.command_line
+                            .push_info("Usage: LINETYPE LIST | SET <name>");
                     }
                 }
             }
@@ -249,6 +287,274 @@ impl OpenCADStudio {
                             }
                         }
                     }
+                }
+            }
+
+            // ── SETBYLAYER — clear color/linetype/lineweight overrides ────
+            // Resets the selected entities' direct property overrides back to
+            // ByLayer so they follow their layer again.
+            "SETBYLAYER" => {
+                let handles: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
+                if handles.is_empty() {
+                    self.command_line
+                        .push_error("SETBYLAYER: select entities first.");
+                } else {
+                    self.push_undo_snapshot(i, "SETBYLAYER");
+                    let mut changed = 0usize;
+                    for handle in &handles {
+                        if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(*handle) {
+                            let common = entity.common_mut();
+                            common.color = acadrust::types::Color::ByLayer;
+                            common.linetype = "ByLayer".to_string();
+                            common.line_weight = acadrust::types::LineWeight::ByLayer;
+                            changed += 1;
+                        }
+                    }
+                    self.tabs[i].dirty = true;
+                    self.tabs[i].scene.bump_geometry();
+                    self.command_line.push_output(&format!(
+                        "SETBYLAYER: reset {changed} entity/entities to ByLayer."
+                    ));
+                }
+            }
+
+            // ── OVERKILL — delete duplicate (identical) objects ──────────
+            // Removes objects that are identical in geometry AND properties to
+            // another object (compared with the handle ignored). Operates on
+            // the current selection, or the whole drawing when nothing is
+            // selected. Conservative: only exact duplicates are removed.
+            "OVERKILL" => {
+                use acadrust::Handle;
+                let selected: std::collections::HashSet<u64> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h.value())
+                    .collect();
+                // Capture (handle, type-name, handle-normalized clone) for each
+                // candidate while the document is borrowed immutably.
+                let candidates: Vec<(Handle, String, acadrust::EntityType)> = self.tabs[i]
+                    .scene
+                    .document
+                    .entities()
+                    .filter(|e| selected.is_empty() || selected.contains(&e.common().handle.value()))
+                    .map(|e| {
+                        let key = crate::entities::names::dxf_name(e).to_string();
+                        let mut norm = e.clone();
+                        norm.common_mut().handle = Handle::NULL;
+                        (e.common().handle, key, norm)
+                    })
+                    .collect();
+                // Bucket by (type, layer) so only like objects are compared.
+                let mut kept: Vec<(String, acadrust::EntityType)> = Vec::new();
+                let mut dups: Vec<Handle> = Vec::new();
+                for (h, key, norm) in &candidates {
+                    let bucket = format!("{key}\u{0}{}", norm.common().layer);
+                    if kept.iter().any(|(b, e)| b == &bucket && e == norm) {
+                        dups.push(*h);
+                    } else {
+                        kept.push((bucket, norm.clone()));
+                    }
+                }
+                if dups.is_empty() {
+                    self.command_line
+                        .push_output("OVERKILL: no duplicate objects found.");
+                } else {
+                    let n = dups.len();
+                    self.push_undo_snapshot(i, "OVERKILL");
+                    self.tabs[i].scene.erase_entities(&dups);
+                    self.tabs[i].dirty = true;
+                    self.refresh_properties();
+                    self.command_line
+                        .push_output(&format!("OVERKILL: deleted {n} duplicate object(s)."));
+                }
+            }
+
+            // ── SETVAR — read / write system variables ───────────────────
+            // SETVAR <name>          → report the value
+            // SETVAR <name> <value>  → set it
+            // SETVAR ?               → list supported variables
+            // Numeric / boolean variables are settable; current-layer/linetype/
+            // style names are read-only here (use their own commands to change
+            // them, which validate the name).
+            cmd if cmd == "SETVAR" || cmd.starts_with("SETVAR ") => {
+                let rest = cmd.strip_prefix("SETVAR").unwrap_or("").trim();
+                let mut it = rest.splitn(2, char::is_whitespace);
+                let name = it.next().unwrap_or("").to_uppercase();
+                let value = it.next().map(|s| s.trim().to_string());
+                if name.is_empty() || name == "?" {
+                    self.command_line.push_info(
+                        "SETVAR: LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE | CLAYER CELTYPE TEXTSTYLE (read-only)",
+                    );
+                } else {
+                    // Parse a boolean given as 0/1 or ON/OFF.
+                    let parse_bool = |s: &str| match s.to_uppercase().as_str() {
+                        "1" | "ON" | "TRUE" => Some(true),
+                        "0" | "OFF" | "FALSE" => Some(false),
+                        _ => None,
+                    };
+                    let outcome: Result<(String, bool), String> = {
+                        let h = &mut self.tabs[i].scene.document.header;
+                        match name.as_str() {
+                            "LTSCALE" => match &value {
+                                Some(v) => v.parse::<f64>().map(|x| { h.linetype_scale = x; (format!("LTSCALE = {x}"), true) }).map_err(|_| "SETVAR: numeric value required.".into()),
+                                None => Ok((format!("LTSCALE = {}", h.linetype_scale), false)),
+                            },
+                            "CELTSCALE" => match &value {
+                                Some(v) => v.parse::<f64>().map(|x| { h.current_entity_linetype_scale = x; (format!("CELTSCALE = {x}"), true) }).map_err(|_| "SETVAR: numeric value required.".into()),
+                                None => Ok((format!("CELTSCALE = {}", h.current_entity_linetype_scale), false)),
+                            },
+                            "PDSIZE" => match &value {
+                                Some(v) => v.parse::<f64>().map(|x| { h.point_display_size = x; (format!("PDSIZE = {x}"), true) }).map_err(|_| "SETVAR: numeric value required.".into()),
+                                None => Ok((format!("PDSIZE = {}", h.point_display_size), false)),
+                            },
+                            "TEXTSIZE" => match &value {
+                                Some(v) => v.parse::<f64>().map(|x| { h.text_height = x; (format!("TEXTSIZE = {x}"), true) }).map_err(|_| "SETVAR: numeric value required.".into()),
+                                None => Ok((format!("TEXTSIZE = {}", h.text_height), false)),
+                            },
+                            "PDMODE" => match &value {
+                                Some(v) => v.parse::<i16>().map(|x| { h.point_display_mode = x; (format!("PDMODE = {x}"), true) }).map_err(|_| "SETVAR: integer value required.".into()),
+                                None => Ok((format!("PDMODE = {}", h.point_display_mode), false)),
+                            },
+                            "ORTHOMODE" => match &value {
+                                Some(v) => parse_bool(v).map(|b| { h.ortho_mode = b; (format!("ORTHOMODE = {}", b as i32), true) }).ok_or_else(|| "SETVAR: 0 or 1 required.".into()),
+                                None => Ok((format!("ORTHOMODE = {}", h.ortho_mode as i32), false)),
+                            },
+                            "FILLMODE" => match &value {
+                                Some(v) => parse_bool(v).map(|b| { h.fill_mode = b; (format!("FILLMODE = {}", b as i32), true) }).ok_or_else(|| "SETVAR: 0 or 1 required.".into()),
+                                None => Ok((format!("FILLMODE = {}", h.fill_mode as i32), false)),
+                            },
+                            "CLAYER" => match &value {
+                                Some(_) => Err("SETVAR: CLAYER is read-only here — use the CLAYER command.".into()),
+                                None => Ok((format!("CLAYER = {}", h.current_layer_name), false)),
+                            },
+                            "CELTYPE" => match &value {
+                                Some(_) => Err("SETVAR: CELTYPE is read-only here — use LINETYPE SET.".into()),
+                                None => Ok((format!("CELTYPE = {}", h.current_linetype_name), false)),
+                            },
+                            "TEXTSTYLE" => match &value {
+                                Some(_) => Err("SETVAR: TEXTSTYLE is read-only here — use the STYLE command.".into()),
+                                None => Ok((format!("TEXTSTYLE = {}", h.current_text_style_name), false)),
+                            },
+                            _ => Err(format!("SETVAR: unknown variable \"{name}\".")),
+                        }
+                    };
+                    match outcome {
+                        Ok((msg, changed)) => {
+                            if changed {
+                                self.tabs[i].dirty = true;
+                            }
+                            self.command_line.push_output(&msg);
+                        }
+                        Err(e) => self.command_line.push_error(&e),
+                    }
+                }
+            }
+
+            // ── FINDNONPURGEABLE — list named objects still in use ───────
+            // Reports the layers, linetypes, text styles and blocks that are
+            // referenced by objects, and therefore cannot be purged — so it is
+            // clear why PURGE leaves them behind. Read-only.
+            "FINDNONPURGEABLE" => {
+                use rustc_hash::FxHashSet;
+                let mut layers: FxHashSet<String> = FxHashSet::default();
+                let mut linetypes: FxHashSet<String> = FxHashSet::default();
+                let mut styles: FxHashSet<String> = FxHashSet::default();
+                let mut blocks: FxHashSet<String> = FxHashSet::default();
+                {
+                    let doc = &self.tabs[i].scene.document;
+                    for e in doc.entities() {
+                        let l = &e.common().layer;
+                        if !l.is_empty() {
+                            layers.insert(l.clone());
+                        }
+                        let lt = &e.common().linetype;
+                        if !lt.is_empty() && lt != "ByLayer" && lt != "ByBlock" {
+                            linetypes.insert(lt.clone());
+                        }
+                        match e {
+                            acadrust::EntityType::Text(t) if !t.style.is_empty() => {
+                                styles.insert(t.style.clone());
+                            }
+                            acadrust::EntityType::MText(t) if !t.style.is_empty() => {
+                                styles.insert(t.style.clone());
+                            }
+                            acadrust::EntityType::Insert(ins) => {
+                                blocks.insert(ins.block_name.clone());
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                let fmt = |set: FxHashSet<String>| -> String {
+                    if set.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        let mut v: Vec<_> = set.into_iter().collect();
+                        v.sort();
+                        v.join(", ")
+                    }
+                };
+                self.command_line
+                    .push_output("FINDNONPURGEABLE: named objects in use (not purgeable):");
+                self.command_line
+                    .push_output(&format!("  Layers: {}", fmt(layers)));
+                self.command_line
+                    .push_output(&format!("  Linetypes: {}", fmt(linetypes)));
+                self.command_line
+                    .push_output(&format!("  Text styles: {}", fmt(styles)));
+                self.command_line
+                    .push_output(&format!("  Blocks: {}", fmt(blocks)));
+            }
+
+            // ── AUDIT — report drawing-database integrity issues ─────────
+            // Read-only scan: flags entities on undefined layers and block
+            // references to undefined block definitions. Reports only; it does
+            // not auto-repair (so it can never make the drawing worse).
+            "AUDIT" => {
+                use std::collections::BTreeSet;
+                let mut undefined_layers: BTreeSet<String> = BTreeSet::new();
+                let mut undefined_blocks: BTreeSet<String> = BTreeSet::new();
+                let mut total = 0usize;
+                {
+                    let doc = &self.tabs[i].scene.document;
+                    for e in doc.entities() {
+                        total += 1;
+                        let layer = &e.common().layer;
+                        if !layer.is_empty() && doc.layers.get(layer).is_none() {
+                            undefined_layers.insert(layer.clone());
+                        }
+                        if let acadrust::EntityType::Insert(ins) = e {
+                            if doc.block_records.get(&ins.block_name).is_none() {
+                                undefined_blocks.insert(ins.block_name.clone());
+                            }
+                        }
+                    }
+                }
+                self.command_line
+                    .push_output(&format!("AUDIT: scanned {total} object(s)."));
+                if undefined_layers.is_empty() && undefined_blocks.is_empty() {
+                    self.command_line.push_output("AUDIT: no issues found.");
+                } else {
+                    if !undefined_layers.is_empty() {
+                        self.command_line.push_error(&format!(
+                            "AUDIT: reference(s) to undefined layer(s): {}",
+                            undefined_layers.into_iter().collect::<Vec<_>>().join(", ")
+                        ));
+                    }
+                    if !undefined_blocks.is_empty() {
+                        self.command_line.push_error(&format!(
+                            "AUDIT: reference(s) to undefined block(s): {}",
+                            undefined_blocks.into_iter().collect::<Vec<_>>().join(", ")
+                        ));
+                    }
+                    self.command_line
+                        .push_info("AUDIT: report only — no automatic repair performed.");
                 }
             }
 

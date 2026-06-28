@@ -23,10 +23,9 @@ use iced::{mouse, Point, Task};
 
 impl OpenCADStudio {
     pub(in crate::app) fn open_save_dialog_window(&mut self, tab_idx: usize) -> Task<Message> {
-        // Default the format dropdown to the loaded file's version so a
-        // round-trip preserves it (e.g. an R2004 drawing offers "DWG 2004",
-        // not "DWG 2018"). The save still falls back to the source version if
-        // the user picks an incompatible one (dwg_save_version).
+        // Default the format dropdown to the latest version (DWG/DXF 2018),
+        // regardless of the loaded file's version. The user can pick any older
+        // version explicitly; the selected version is written as-is.
         let is_dxf = self.tabs[tab_idx]
             .current_path
             .as_ref()
@@ -34,8 +33,8 @@ impl OpenCADStudio {
             .and_then(|e| e.to_str())
             .map(|e| e.eq_ignore_ascii_case("dxf"))
             .unwrap_or(false);
-        let doc_version = self.tabs[tab_idx].scene.document.version;
-        self.save_dialog_format = crate::io::format_for_version(doc_version, is_dxf);
+        self.save_dialog_format =
+            crate::io::format_for_version(acadrust::DxfVersion::AC1032, is_dxf);
 
         // Pre-fill filename and folder from current path or defaults.
         if let Some(p) = &self.tabs[tab_idx].current_path.clone() {
@@ -258,11 +257,9 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
     }
 
     pub(super) fn on_unsaved_picked_save_path_some(&mut self, path: std::path::PathBuf) -> Task<Message> {
-                let (ext, version) = crate::io::parse_save_format(&self.save_dialog_format);
+                let (_ext, version) = crate::io::parse_save_format(&self.save_dialog_format);
                 match self.pending_close.take() {
                     Some(crate::app::PendingClose::Tab(idx)) => {
-                        // Fall back to source version for version-locked data.
-                        let version = self.dwg_save_version(idx, ext, version);
                         match crate::io::save_as_version(
                             &self.tabs[idx].scene.document,
                             &path,
@@ -284,8 +281,6 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                     }
                     Some(crate::app::PendingClose::Quit) => {
                         let i = self.active_tab;
-                        // Fall back to source version for version-locked data.
-                        let version = self.dwg_save_version(i, ext, version);
                         match crate::io::save_as_version(
                             &self.tabs[i].scene.document,
                             &path,

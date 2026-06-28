@@ -146,6 +146,34 @@ impl OpenCADStudio {
                 return Some(Task::done(Message::ToggleLayoutTabs));
             }
 
+            // ── Drafting aids — same toggles the status-bar pills drive, also
+            //    reachable by name from the command line. ─────────────────────────
+            // GRID — show / hide the reference grid.
+            "GRID" => {
+                return Some(Task::done(Message::ToggleGrid));
+            }
+            // SNAP — toggle cursor snapping to the grid.
+            "SNAP" => {
+                return Some(Task::done(Message::ToggleGridSnap));
+            }
+            // POLAR — toggle polar tracking.
+            "POLAR" => {
+                return Some(Task::done(Message::TogglePolar));
+            }
+            // DSETTINGS / OSNAP — open the drafting-settings (object snap) popup.
+            "DSETTINGS" | "OSNAP" => {
+                return Some(Task::done(Message::ToggleSnapPopup));
+            }
+
+            // ── CLEANSCREEN — collapse the surrounding panels for a full canvas ──
+            "CLEANSCREEN" => {
+                return Some(Task::done(Message::ToggleCleanScreen));
+            }
+            // ── QUICKPROPERTIES — toggle the floating quick-properties readout ───
+            "QUICKPROPERTIES" => {
+                return Some(Task::done(Message::ToggleQuickProperties));
+            }
+
             // ── TOOLPALETTES — not yet implemented ───────────────────────────────
             "TOOLPALETTES" | "TP" => {
                 self.command_line
@@ -328,7 +356,7 @@ impl OpenCADStudio {
             }
 
             // ── Plot / Page Setup ──────────────────────────────────────────
-            "PLOT" | "EXPORT" => {
+            "PLOT" | "EXPORT" | "EXPORTPDF" => {
                 return Some(Task::done(Message::PlotExport));
             }
             // PRINT — send current layout to the system default printer.
@@ -487,6 +515,22 @@ impl OpenCADStudio {
                     return Some(Task::done(Message::PageSetupOpen));
                 }
             }
+
+            // ── Recognized commands whose full implementation is pending ─────────
+            // These verbs are surfaced by the ribbon / menus but their feature is
+            // still being built. Acknowledge them with an honest status so the
+            // button responds instead of reporting an unknown command; each is
+            // replaced by its real handler as the feature lands.
+            "ADCENTER" | "CONTENTBROWSER" | "BLOCKPALETTE" | "DATALINK"
+            | "LANDXMLIMPORT" | "POINTCLOUDATTACH" | "RECAP" | "SYNCPVIEWPORTS"
+            | "UNDERLAYLAYERS" | "ADJUST" | "ANNOSCALE" | "OBJECTSCALE"
+            | "SCALELISTEDIT" | "UOSNAP" | "ATTSYNC"
+            | "ATTMAN" | "HIDDENLINE" | "XRAY" | "OPTIONS"
+            | "COLOR" | "BYLAYER" | "CUILOAD" | "CUIIMPORT" | "CUIEXPORT" => {
+                self.command_line
+                    .push_info(&format!("{cmd}: not yet implemented."));
+            }
+
             _ => return None,
         }
         Some(self.finish_dispatch(cmd))

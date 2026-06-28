@@ -237,6 +237,13 @@ impl OpenCADStudio {
                 self.command_line.push_info("Opening release notes...");
             }
 
+            // ── CUI / ALIASEDIT — customization entry points ───────────────
+            // Command-alias and key-binding editing lives in the keyboard
+            // shortcuts panel, so route the customization verbs there.
+            "CUI" | "ALIASEDIT" => {
+                return Some(Task::done(Message::ShortcutsPanelOpen));
+            }
+
             // ── Keyboard Shortcuts panel ──────────────────────────────────
             cmd if cmd == "SHORTCUTS" || cmd.starts_with("SHORTCUTS ") => {
                 let raw_rest = cmd.trim_start_matches("SHORTCUTS").trim();
@@ -356,6 +363,15 @@ impl OpenCADStudio {
             "PSPACE" => {
                 return Some(Task::done(Message::PspaceCommand));
             }
+
+            // ── Viewport arrangement shortcuts ────────────────────────────
+            // Tile the model viewports into preset splits. Each delegates to the
+            // matching VPORTS configuration so the Model/paper handling stays in
+            // one place.
+            "HORIZONTAL" => return self.dispatch_view("VPORTS 2H", i),
+            "VERTICAL" => return self.dispatch_view("VPORTS 2V", i),
+            "VPJOIN" => return self.dispatch_view("VPORTS SINGLE", i),
+            "CASCADE" => return self.dispatch_view("VPORTS 4", i),
 
             // ── VPORTS — list or create preset viewport configurations ────
             cmd if cmd == "VPORTS" || cmd.starts_with("VPORTS ") => {
