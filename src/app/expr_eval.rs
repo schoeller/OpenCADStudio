@@ -90,6 +90,10 @@ struct Parser {
     pos: usize,
 }
 
+/// Maximum recursion depth for the recursive-descent parser. Deeply nested
+/// expressions (e.g. thousands of parentheses) otherwise overflow the stack.
+const MAX_RECURSION: usize = 256;
+
 impl Parser {
     fn new(tokens: Vec<Token>) -> Self {
         Self { tokens, pos: 0 }
@@ -120,13 +124,19 @@ impl Parser {
     }
 
     // expr → sum
-    fn parse_expr(&mut self) -> Result<f64, ()> {
-        self.parse_sum()
+    fn parse_expr(&mut self, depth: usize) -> Result<f64, ()> {
+        if depth > MAX_RECURSION {
+            return Err(());
+        }
+        self.parse_sum(depth + 1)
     }
 
     // sum → product (('+' | '-') product)*
-    fn parse_sum(&mut self) -> Result<f64, ()> {
-        let mut left = self.parse_product()?;
+    fn parse_sum(&mut self, depth: usize) -> Result<f64, ()> {
+        if depth > MAX_RECURSION {
+            return Err(());
+        }
+        let mut left = self.parse_product(depth + 1)?;
         loop {
             let op = match self.peek().cloned() {
                 Some(Token::Plus) => Some("+"),
@@ -136,12 +146,12 @@ impl Parser {
             match op {
                 Some("+") => {
                     self.advance();
-                    let right = self.parse_product()?;
+                    let right = self.parse_product(depth + 1)?;
                     left = left + right;
                 }
                 Some("-") => {
                     self.advance();
-                    let right = self.parse_product()?;
+                    let right = self.parse_product(depth + 1)?;
                     left = left - right;
                 }
                 _ => break,
@@ -151,8 +161,11 @@ impl Parser {
     }
 
     // product → power (('*' | '/' | '%') power)*
-    fn parse_product(&mut self) -> Result<f64, ()> {
-        let mut left = self.parse_power()?;
+    fn parse_product(&mut self, depth: usize) -> Result<f64, ()> {
+        if depth > MAX_RECURSION {
+            return Err(());
+        }
+        let mut left = self.parse_power(depth + 1)?;
         loop {
             let op = match self.peek().cloned() {
                 Some(Token::Star) => Some("*"),
@@ -163,12 +176,12 @@ impl Parser {
             match op {
                 Some("*") => {
                     self.advance();
-                    let right = self.parse_power()?;
+                    let right = self.parse_power(depth + 1)?;
                     left = left * right;
                 }
                 Some("/") => {
                     self.advance();
-                    let right = self.parse_power()?;
+                    let right = self.parse_power(depth + 1)?;
                     if right == 0.0 {
                         return Ok(if left > 0.0 { f64::INFINITY } else if left < 0.0 { f64::NEG_INFINITY } else { f64::NAN });
                     }
@@ -176,7 +189,7 @@ impl Parser {
                 }
                 Some("%") => {
                     self.advance();
-                    let right = self.parse_power()?;
+                    let right = self.parse_power(depth + 1)?;
                     left = left % right;
                 }
                 _ => break,
@@ -186,31 +199,40 @@ impl Parser {
     }
 
     // power → unary ('^' unary)?
-    fn parse_power(&mut self) -> Result<f64, ()> {
-        let base = self.parse_unary()?;
+    fn parse_power(&mut self, depth: usize) -> Result<f64, ()> {
+        if depth > MAX_RECURSION {
+            return Err(());
+        }
+        let base = self.parse_unary(depth + 1)?;
         if let Some(Token::Caret) = self.peek() {
             self.advance();
-            let exp = self.parse_unary()?;
+            let exp = self.parse_unary(depth + 1)?;
             return Ok(base.powf(exp));
         }
         Ok(base)
     }
 
     // unary → ('-' | '+') unary | atom
-    fn parse_unary(&mut self) -> Result<f64, ()> {
+    fn parse_unary(&mut self, depth: usize) -> Result<f64, ()> {
+        if depth > MAX_RECURSION {
+            return Err(());
+        }
         if let Some(Token::Minus) = self.peek() {
             self.advance();
-            return Ok(-self.parse_unary()?);
+            return Ok(-self.parse_unary(depth + 1)?);
         }
         if let Some(Token::Plus) = self.peek() {
             self.advance();
-            return Ok(self.parse_unary()?);
+            return Ok(self.parse_unary(depth + 1)?);
         }
-        self.parse_atom()
+        self.parse_atom(depth + 1)
     }
 
     // atom → NUMBER | NAME | NAME '(' args ')' | 'pi'
-    fn parse_atom(&mut self) -> Result<f64, ()> {
+    fn parse_atom(&mut self, depth: usize) -> Result<f64, ()> {
+        if depth > MAX_RECURSION {
+            return Err(());
+        }
         let next = match self.peek() {
             Some(t) => t.clone(),
             None => return Err(()),
@@ -218,7 +240,7 @@ impl Parser {
         match next {
             Token::LParen => {
                 self.advance();
-                let result = self.parse_expr()?;
+                let result = self.parse_expr(depth + 1)?;
                 self.expect_rparen()?;
                 Ok(result)
             }
@@ -231,7 +253,7 @@ impl Parser {
                 // Check for function call
                 if let Some(Token::LParen) = self.peek() {
                     self.expect_paren()?;
-                    let args = self.parse_args()?;
+                    let args = self.parse_args(depth + 1)?;
                     self.expect_rparen()?;
                     return Self::call_function(&name, &args);
                 }
@@ -246,19 +268,22 @@ impl Parser {
         }
     }
 
-    fn parse_args(&mut self) -> Result<Vec<f64>, ()> {
+    fn parse_args(&mut self, depth: usize) -> Result<Vec<f64>, ()> {
+        if depth > MAX_RECURSION {
+            return Err(());
+        }
         let mut args = Vec::new();
         if matches!(self.peek(), Some(Token::RParen)) {
             return Ok(args);
         }
-        args.push(self.parse_expr()?);
+        args.push(self.parse_expr(depth + 1)?);
         loop {
             if matches!(self.peek(), Some(Token::RParen)) {
                 break;
             }
             if let Some(Token::Comma) = self.peek() {
                 self.advance();
-                args.push(self.parse_expr()?);
+                args.push(self.parse_expr(depth + 1)?);
             } else {
                 break;
             }
@@ -343,7 +368,7 @@ impl Parser {
 pub fn eval_number(input: &str) -> Option<f64> {
     let tokens = tokenize(input.trim()).ok()?;
     let mut parser = Parser::new(tokens);
-    let result = parser.parse_expr().ok()?;
+    let result = parser.parse_expr(0).ok()?;
     if parser.pos != parser.tokens.len() {
         return None;
     }
@@ -594,5 +619,17 @@ mod tests {
         assert_eq!(eval_to_string("a10+5b,3*2,3@10-5@"), "a15b,6,3@5@");
         assert_eq!(eval_to_string("#10+10,#5+5"), "#20,#10");
         assert_eq!(eval_to_string("sqrt(9)+1,cos(0)+1"), "4,2");
+    }
+
+    #[test]
+    fn deeply_nested_parens_returns_none() {
+        let expr = "(".repeat(1000) + "1" + &")".repeat(1000);
+        assert_eq!(eval_number(&expr), None, "deeply nested expression should be rejected");
+    }
+
+    #[test]
+    fn moderately_nested_parens_still_evaluate() {
+        let expr = "(".repeat(30) + "1" + &")".repeat(30);
+        assert_eq!(eval_number(&expr), Some(1.0), "moderately nested expression should evaluate");
     }
 }
