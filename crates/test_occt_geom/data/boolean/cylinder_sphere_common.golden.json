@@ -1,0 +1,17 @@
+{
+  "name": "boolean/cylinder_sphere_common",
+  "recipe_cadrum_rust": "let r = { let p0 = Solid::cylinder(2.000000, DVec3::Z * 6.000000).translate(DVec3::new(0.000000, 0.000000, 0.000000)); let p1 = Solid::sphere(5.000000).translate(DVec3::new(0.000000, 0.000000, 0.000000)); (&p0 * &p1).build()? };",
+  "expected": {
+    "volume": null,
+    "surface_area": null,
+    "centroid": null,
+    "bbox_min": null,
+    "bbox_max": null,
+    "triangle_count": null
+  },
+  "tolerances": {
+    "abs": 0.001,
+    "rel": 0.01
+  },
+  "note": "OCS/truck-shapeops returned no solid for this sphere-cylinder intersection."
+}

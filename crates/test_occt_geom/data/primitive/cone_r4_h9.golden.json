@@ -1,0 +1,29 @@
+{
+  "name": "primitive/cone_r4_h9",
+  "recipe_cadrum_rust": "let r = Solid::cone(4.000000, 0.0, DVec3::Z * 9.000000).translate(DVec3::new(0.000000, 0.000000, 0.000000));",
+  "expected": {
+    "volume": 150.79644737231007,
+    "surface_area": 174.02987972292934,
+    "centroid": [
+      0.0,
+      0.0,
+      2.25
+    ],
+    "bbox_min": [
+      -4.0,
+      -4.0,
+      0.0
+    ],
+    "bbox_max": [
+      4.0,
+      4.0,
+      9.0
+    ],
+    "triangle_count": null
+  },
+  "tolerances": {
+    "abs": 0.001,
+    "rel": 0.01
+  },
+  "note": "Analytic cone metrics."
+}

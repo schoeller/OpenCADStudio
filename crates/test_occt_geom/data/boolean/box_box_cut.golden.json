@@ -1,0 +1,29 @@
+{
+  "name": "boolean/box_box_cut",
+  "recipe_cadrum_rust": "let r = { let p0 = Solid::cube(DVec3::new(-5.000000, -5.000000, -5.000000), DVec3::new(5.000000, 5.000000, 5.000000)); let p1 = Solid::cube(DVec3::new(0.000000, 0.000000, 0.000000), DVec3::new(10.000000, 10.000000, 10.000000)); (&p0 - &p1).build()? };",
+  "expected": {
+    "volume": 874.9999999999999,
+    "surface_area": null,
+    "centroid": [
+      -0.35714285714285704,
+      -0.35714285714285715,
+      -0.357142857142857
+    ],
+    "bbox_min": [
+      -5.00000015,
+      -5.00000015,
+      -5.00000015
+    ],
+    "bbox_max": [
+      5.00000015,
+      5.00000015,
+      5.00000015
+    ],
+    "triangle_count": null
+  },
+  "tolerances": {
+    "abs": 0.001,
+    "rel": 0.01
+  },
+  "note": "Two overlapping boxes; reference values stored in golden file."
+}

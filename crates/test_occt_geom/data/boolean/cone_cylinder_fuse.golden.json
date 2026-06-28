@@ -1,0 +1,29 @@
+{
+  "name": "boolean/cone_cylinder_fuse",
+  "recipe_cadrum_rust": "let r = { let p0 = Solid::cone(4.000000, 0.0, DVec3::Z * 9.000000).translate(DVec3::new(0.000000, 0.000000, 0.000000)); let p1 = Solid::cylinder(2.000000, DVec3::Z * 3.000000).translate(DVec3::new(0.000000, 0.000000, 1.000000)); (&p0 + &p1).build()? };",
+  "expected": {
+    "volume": 150.79644737231007,
+    "surface_area": null,
+    "centroid": [
+      -8.010285864426635e-16,
+      -7.981342693875381e-17,
+      2.25
+    ],
+    "bbox_min": [
+      -4.0000001,
+      -4.0000001,
+      -1e-7
+    ],
+    "bbox_max": [
+      4.0000001,
+      4.0000001,
+      9.0000001
+    ],
+    "triangle_count": null
+  },
+  "tolerances": {
+    "abs": 0.001,
+    "rel": 0.01
+  },
+  "note": "Cylinder fully inside cone; union equals cone; values seeded from OCS."
+}

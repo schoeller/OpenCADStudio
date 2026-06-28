@@ -1,0 +1,29 @@
+{
+  "name": "primitive/torus_r8_r2",
+  "recipe_cadrum_rust": "let r = Solid::torus(8.000000, 2.000000, DVec3::Z).translate(DVec3::new(0.000000, 0.000000, 0.000000));",
+  "expected": {
+    "volume": 631.6546816697189,
+    "surface_area": 631.6546816697189,
+    "centroid": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "bbox_min": [
+      -10.0,
+      -10.0,
+      -2.0
+    ],
+    "bbox_max": [
+      10.0,
+      10.0,
+      2.0
+    ],
+    "triangle_count": null
+  },
+  "tolerances": {
+    "abs": 0.001,
+    "rel": 0.01
+  },
+  "note": "Analytic torus metrics."
+}

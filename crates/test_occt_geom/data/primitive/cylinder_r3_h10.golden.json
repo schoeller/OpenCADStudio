@@ -1,0 +1,29 @@
+{
+  "name": "primitive/cylinder_r3_h10",
+  "recipe_cadrum_rust": "let r = Solid::cylinder(3.000000, DVec3::Z * 10.000000).translate(DVec3::new(0.000000, 0.000000, 0.000000));",
+  "expected": {
+    "volume": 282.7433388230814,
+    "surface_area": 245.04422698000386,
+    "centroid": [
+      0.0,
+      0.0,
+      5.0
+    ],
+    "bbox_min": [
+      -3.0,
+      -3.0,
+      0.0
+    ],
+    "bbox_max": [
+      3.0,
+      3.0,
+      10.0
+    ],
+    "triangle_count": null
+  },
+  "tolerances": {
+    "abs": 0.001,
+    "rel": 0.01
+  },
+  "note": "Analytic cylinder metrics."
+}

@@ -1,0 +1,29 @@
+{
+  "name": "primitive/wedge_4x5x6_at_minus1_minus2_minus3",
+  "recipe_cadrum_rust": "let r = Solid::extrude(&Edge::polygon(&[DVec3::new(0,0,0), DVec3::new(4.000000,0,0), DVec3::new(0,0,6.000000)])?, DVec3::Y * 5.000000)?.translate(DVec3::new(-1.000000, -2.000000, -3.000000));",
+  "expected": {
+    "volume": 60.0,
+    "surface_area": 110.05551275463989,
+    "centroid": [
+      0.33333333333333326,
+      0.5,
+      -1.0
+    ],
+    "bbox_min": [
+      -1.0,
+      -2.0,
+      -3.0
+    ],
+    "bbox_max": [
+      3.0,
+      3.0,
+      3.0
+    ],
+    "triangle_count": null
+  },
+  "tolerances": {
+    "abs": 0.001,
+    "rel": 0.01
+  },
+  "note": "Analytic wedge metrics; cadrum builds it from a triangular profile."
+}

@@ -1,0 +1,29 @@
+{
+  "name": "edge/cylinder_cylinder_tangent",
+  "recipe_cadrum_rust": "let r = { let p0 = Solid::cylinder(3.000000, DVec3::Z * 10.000000).translate(DVec3::new(0.000000, 0.000000, 0.000000)); let p1 = Solid::cylinder(3.000000, DVec3::Z * 10.000000).translate(DVec3::new(6.000000, 0.000000, 0.000000)); (&p0 + &p1).build()? };",
+  "expected": {
+    "volume": 563.839007182193,
+    "surface_area": 489.4841232764904,
+    "centroid": [
+      3.000000000000447,
+      3.91728718733184e-16,
+      4.999999999998294
+    ],
+    "bbox_min": [
+      -3.0,
+      -2.997780243869258,
+      0.0
+    ],
+    "bbox_max": [
+      9.0,
+      2.997780243869258,
+      10.000000000000004
+    ],
+    "triangle_count": 3076
+  },
+  "tolerances": {
+    "abs": 0.001,
+    "rel": 0.01
+  },
+  "note": "Two cylinders tangent along a shared generator; values seeded from OCS."
+}

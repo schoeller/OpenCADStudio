@@ -1,0 +1,17 @@
+{
+  "name": "edge/box_box_coincident_face",
+  "recipe_cadrum_rust": "let r = { let p0 = Solid::cube(DVec3::new(-5.000000, -5.000000, -5.000000), DVec3::new(5.000000, 5.000000, 5.000000)); let p1 = Solid::cube(DVec3::new(-1.000000, -5.000000, -5.000000), DVec3::new(10.000000, 5.000000, 5.000000)); (&p0 + &p1).build()? };",
+  "expected": {
+    "volume": null,
+    "surface_area": null,
+    "centroid": null,
+    "bbox_min": null,
+    "bbox_max": null,
+    "triangle_count": null
+  },
+  "tolerances": {
+    "abs": 0.001,
+    "rel": 0.01
+  },
+  "note": "OCS/truck-shapeops returned no solid for this overlapping-box union."
+}

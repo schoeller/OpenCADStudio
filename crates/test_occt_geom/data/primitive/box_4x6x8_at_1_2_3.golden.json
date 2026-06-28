@@ -1,0 +1,29 @@
+{
+  "name": "primitive/box_4x6x8_at_1_2_3",
+  "recipe_cadrum_rust": "let r = Solid::cube(DVec3::new(-1.000000, -1.000000, -1.000000), DVec3::new(3.000000, 5.000000, 7.000000));",
+  "expected": {
+    "volume": 192.0,
+    "surface_area": 208.0,
+    "centroid": [
+      1.0,
+      2.0,
+      3.0
+    ],
+    "bbox_min": [
+      -1.0,
+      -1.0,
+      -1.0
+    ],
+    "bbox_max": [
+      3.0,
+      5.0,
+      7.0
+    ],
+    "triangle_count": null
+  },
+  "tolerances": {
+    "abs": 0.001,
+    "rel": 0.01
+  },
+  "note": "Analytic box metrics."
+}

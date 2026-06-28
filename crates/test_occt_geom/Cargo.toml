@@ -1,0 +1,33 @@
+[package]
+name = "test_occt_geom"
+version = "0.1.0"
+edition = "2021"
+description = "Regression / correctness test harness for the OCS geometric kernel, using the optional cadrum reference kernel for golden regeneration."
+
+[dependencies]
+# The kernel under test is the OCS app's geometry layer (truck-based B-rep
+# builders, tessellation and booleans).  Depend on the workspace root as a
+# library so the tests exercise the exact code used by the application.
+OpenCADStudio = { path = "../.." }
+
+# Direct truck dependencies are kept in sync with the root crate so the test
+# harness can build solids and compute reference metrics independently.
+truck-modeling = "0.6"
+truck-meshalgo = { version = "0.4", default-features = false, features = ["tessellation"] }
+truck-shapeops = "0.4"
+
+# Optional in-process OpenCASCADE reference kernel (statically linked OCCT 8.0).
+# Enable with the `cadrum-reference` feature; default tests use committed goldens.
+cadrum = { version = "0.8", optional = true }
+
+# Golden file I/O and error handling.
+anyhow = "1"
+
+# Golden file serialization.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+cadrum-reference = ["dep:cadrum"]
+
+[dev-dependencies]

@@ -1,0 +1,29 @@
+{
+  "name": "primitive/sphere_r5",
+  "recipe_cadrum_rust": "let r = Solid::sphere(5.000000).translate(DVec3::new(0.000000, 0.000000, 0.000000));",
+  "expected": {
+    "volume": 523.5987755982989,
+    "surface_area": 314.1592653589793,
+    "centroid": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "bbox_min": [
+      -5.0,
+      -5.0,
+      -5.0
+    ],
+    "bbox_max": [
+      5.0,
+      5.0,
+      5.0
+    ],
+    "triangle_count": null
+  },
+  "tolerances": {
+    "abs": 0.001,
+    "rel": 0.01
+  },
+  "note": "Analytic sphere metrics."
+}
