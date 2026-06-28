@@ -2113,6 +2113,7 @@ impl Scene {
             }
         }
         use acadrust::objects::ObjectType;
+        let start = std::time::Instant::now();
         // Per-block SortEntitiesTable overrides: block -> (entity_val -> sort_val).
         let mut overrides: HashMap<Handle, HashMap<u64, u64>> = HashMap::default();
         for obj in self.document.objects.values() {
@@ -2153,20 +2154,33 @@ impl Scene {
                 .unwrap_or(hv);
             by_block.entry(block).or_default().push((hv, eff));
         }
+        use crate::par::prelude::*;
+        let block_count = by_block.len();
+        let depth_pairs: Vec<(u64, f32)> = by_block
+            .into_par_iter()
+            .flat_map(|(_, mut v)| {
+                v.sort_by_key(|(_, eff)| *eff);
+                let denom = (v.len() as f32) + 1.0;
+                v.into_iter()
+                    .enumerate()
+                    .map(|(rank, (hv, _))| {
+                        let norm = (rank as f32 + 1.0) / denom; // (0,1)
+                        (hv, (norm - 0.5) * 2.0)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
         let mut depth_map: HashMap<u64, f32> = HashMap::default();
-        for (_block, mut v) in by_block {
-            v.sort_by_key(|(_, eff)| *eff);
-            let denom = (v.len() as f32) + 1.0;
-            for (rank, (hv, _)) in v.into_iter().enumerate() {
-                // Signed (-1,1): back ranks → negative, front → positive,
-                // mid → ~0. The shader applies `z -= draw_depth * BIAS`, so a
-                // default/unranked 0.0 means "no bias" (neutral) — which keeps
-                // 3D mesh faces and transient wires at their real depth.
-                let norm = (rank as f32 + 1.0) / denom; // (0,1)
-                depth_map.insert(hv, (norm - 0.5) * 2.0);
-            }
+        for (hv, depth) in depth_pairs {
+            depth_map.insert(hv, depth);
         }
         let arc = Arc::new(depth_map);
+        eprintln!(
+            "draw_depth_map: {} block(s), {} entries in {:.2}ms",
+            block_count,
+            arc.len(),
+            start.elapsed().as_secs_f64() * 1000.0
+        );
         *self.draw_depth_cache.borrow_mut() = Some((self.geometry_epoch, Arc::clone(&arc)));
         arc
     }
@@ -3084,29 +3098,36 @@ impl Scene {
             }
         }
 
-        let mut items: Vec<(Handle, [f64; 4])> = Vec::new();
-        let mut unbounded: Vec<Handle> = Vec::new();
-        let mut union: Option<[f64; 4]> = None;
-        for e in self.document.entities() {
-            if is_unindexable_entity(e) {
-                continue;
-            }
-            match entity_world_aabb_f64(e) {
-                Some(ab) => {
-                    union = Some(match union {
-                        None => ab,
-                        Some(u) => [
-                            u[0].min(ab[0]),
-                            u[1].min(ab[1]),
-                            u[2].max(ab[2]),
-                            u[3].max(ab[3]),
-                        ],
-                    });
-                    items.push((e.common().handle, ab));
-                }
-                None => unbounded.push(e.common().handle),
-            }
-        }
+        let entities: Vec<&EntityType> = self.document.entities().collect();
+        let start = std::time::Instant::now();
+
+        use crate::par::prelude::*;
+        let (items, unbounded, union) = entities
+            .into_par_iter()
+            .filter(|e| !is_unindexable_entity(e))
+            .map(|e| match entity_world_aabb_f64(e) {
+                Some(ab) => (vec![(e.common().handle, ab)], vec![], Some(ab)),
+                None => (vec![], vec![e.common().handle], None),
+            })
+            .reduce(
+                || (Vec::new(), Vec::new(), None),
+                |(mut items1, mut unbounded1, union1), (items2, unbounded2, union2)| {
+                    items1.extend(items2);
+                    unbounded1.extend(unbounded2);
+                    let merged = match (union1, union2) {
+                        (Some(u1), Some(u2)) => Some([
+                            u1[0].min(u2[0]),
+                            u1[1].min(u2[1]),
+                            u1[2].max(u2[2]),
+                            u1[3].max(u2[3]),
+                        ]),
+                        (Some(u), None) | (None, Some(u)) => Some(u),
+                        (None, None) => None,
+                    };
+                    (items1, unbounded1, merged)
+                },
+            );
+
         let root = match union {
             Some(u) => {
                 let w = (u[2] - u[0]).max(1.0);
@@ -3117,6 +3138,7 @@ impl Scene {
             }
             None => [-1.0, -1.0, 1.0, 1.0],
         };
+        let item_count = items.len();
         let mut tree = pick::quadtree::QuadTree::new(root);
         for (h, ab) in items {
             tree.insert(h, ab);
@@ -3129,6 +3151,11 @@ impl Scene {
                 unbounded_handles: unbounded,
             },
         ));
+        eprintln!(
+            "entity_index: {} item(s) in {:.2}ms",
+            item_count,
+            start.elapsed().as_secs_f64() * 1000.0
+        );
         std::cell::Ref::map(self.entity_index_cache.borrow(), |c| {
             &c.as_ref().unwrap().1
         })

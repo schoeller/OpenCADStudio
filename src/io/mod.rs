@@ -1030,3 +1030,87 @@ mod corrupt_guard_tests {
         assert!(!is_entity_corrupt(&EntityType::Spline(s)));
     }
 }
+
+#[cfg(test)]
+mod xref_cache_tests {
+    use super::*;
+    use acadrust::entities::Line;
+    use acadrust::tables::block_record::{BlockFlags, BlockRecord};
+    use acadrust::types::{Handle, Vector3};
+    use acadrust::EntityType;
+
+    /// Build a minimal document with a single model-space line and save it.
+    fn make_xref_file(name: &str) -> PathBuf {
+        let mut doc = CadDocument::new();
+        crate::io::linetypes::populate_document(&mut doc);
+        let ms_handle = doc
+            .block_records
+            .get("*Model_Space")
+            .map(|br| br.handle)
+            .unwrap_or(Handle::NULL);
+        doc.header.model_space_block_handle = ms_handle;
+
+        let mut line = Line::from_points(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(10.0, 0.0, 0.0),
+        );
+        line.common.handle = doc.allocate_handle();
+        line.common.owner_handle = ms_handle;
+        let _ = doc.add_entity(EntityType::Line(line));
+
+        let path = std::env::temp_dir().join(format!("ocs_xref_cache_{}.dxf", name));
+        save_as_version(&doc, &path, acadrust::DxfVersion::AC1032).expect("save xref");
+        path
+    }
+
+    fn make_host_with_xref(path: &str, block_name: &str) -> CadDocument {
+        let mut host = CadDocument::new();
+        crate::io::linetypes::populate_document(&mut host);
+        let mut br = BlockRecord::new(block_name);
+        br.handle = host.allocate_handle();
+        br.flags = BlockFlags {
+            is_xref: true,
+            is_xref_overlay: false,
+            anonymous: false,
+            has_attributes: false,
+            is_external: false,
+        };
+        br.xref_path = path.to_string();
+        let _ = host.block_records.add(br);
+        host
+    }
+
+    #[test]
+    fn parsed_xref_cache_speeds_second_resolve() {
+        // The cache is global, so we use a unique filename to avoid collisions.
+        let path = make_xref_file("cache_speed");
+        let base_dir = path.parent().unwrap().to_path_buf();
+        let block_name =
+            crate::modules::insert::xattach::path_to_block_name(&path.to_string_lossy());
+        let mut host = make_host_with_xref(path.to_str().unwrap(), &block_name);
+
+        let count_before = crate::io::xref::parsed_xref_cache_entry_count();
+
+        let (infos1, dropped1) = crate::io::xref::resolve_xrefs(&mut host, &base_dir, false);
+        assert_eq!(infos1.len(), 1, "one xref resolved");
+        assert_eq!(infos1[0].status, crate::io::xref::XrefStatus::Loaded);
+        assert_eq!(dropped1, 0, "no corrupt entities");
+        let br = host.block_records.get(&block_name).expect("block record");
+        assert!(!br.entity_handles.is_empty(), "xref geometry merged into host");
+
+        let count_after_first = crate::io::xref::parsed_xref_cache_entry_count();
+        assert!(
+            count_after_first > count_before,
+            "parsed xref document was cached"
+        );
+
+        let (infos2, dropped2) = crate::io::xref::resolve_xrefs(&mut host, &base_dir, false);
+        assert_eq!(infos2[0].status, crate::io::xref::XrefStatus::Loaded);
+        assert_eq!(dropped2, 0);
+        let count_after_second = crate::io::xref::parsed_xref_cache_entry_count();
+        assert_eq!(
+            count_after_second, count_after_first,
+            "cache was reused; no extra file was parsed"
+        );
+    }
+}

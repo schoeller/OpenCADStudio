@@ -400,7 +400,7 @@ pub(crate) fn tessellate_entity(
                 .get(&ins.block_name)
                 .map(|br| br.flags.is_xref || br.flags.is_xref_overlay)
                 .unwrap_or(false);
-            if let Some(mut wires) = cache::block_cache::expand_insert(
+            if let Some(arc) = cache::block_cache::expand_insert(
                 cache,
                 ins,
                 h,
@@ -415,7 +415,7 @@ pub(crate) fn tessellate_entity(
                 is_xref,
                 bg_color,
             ) {
-                // XCLIP: if this INSERT carries an enabled spatial filter,
+                let mut wires: Vec<WireModel> = arc.iter().cloned().collect();                // XCLIP: if this INSERT carries an enabled spatial filter,
                 // clip the expanded block geometry to the boundary polygon so
                 // only the portion inside the clip is drawn.
                 if let Some(sf) = pick::xclip::insert_spatial_filter(document, ins) {

@@ -8,7 +8,7 @@ use acadrust::{CadDocument, EntityType};
 use rustc_hash::FxHashMap as HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::time::SystemTime;
+use std::time::{Instant, SystemTime};
 
 /// Status of an external reference block.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,6 +96,15 @@ impl ParsedXrefCache {
 
 static PARSED_XREF_CACHE: OnceLock<std::sync::Mutex<ParsedXrefCache>> = OnceLock::new();
 
+#[cfg(test)]
+pub fn parsed_xref_cache_entry_count() -> usize {
+    parsed_xref_cache()
+        .lock()
+        .unwrap()
+        .entries
+        .len()
+}
+
 fn parsed_xref_cache() -> &'static std::sync::Mutex<ParsedXrefCache> {
     PARSED_XREF_CACHE.get_or_init(|| {
         std::sync::Mutex::new(ParsedXrefCache::with_capacity(PARSED_XREF_CACHE_CAP))
@@ -134,6 +143,7 @@ pub fn resolve_xrefs(
     let mut dropped = 0usize;
 
     for (block_name, raw_path, br_handle) in xref_entries {
+        let start = Instant::now();
         let resolved = resolve_path(&raw_path, base_dir);
 
         let status = match &resolved {
@@ -182,6 +192,13 @@ pub fn resolve_xrefs(
                 .unwrap_or(raw_path),
             status,
         });
+        let info = result.last().unwrap();
+        eprintln!(
+            "xref resolve: {} -> status={:?} elapsed={:.2}ms",
+            info.path,
+            info.status,
+            start.elapsed().as_secs_f64() * 1000.0
+        );
     }
 
     (result, dropped)

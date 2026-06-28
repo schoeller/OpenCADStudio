@@ -16,7 +16,7 @@
 // recursing forever.
 
 use rustc_hash::FxHashMap as HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use acadrust::types::{Color as AcadColor, LineWeight, Transform, Vector3};
 use acadrust::{CadDocument, EntityType, Handle};
@@ -109,6 +109,99 @@ pub struct BlockDefn {
 #[derive(Default, Debug)]
 pub struct BlockCache {
     defns: HashMap<String, Arc<BlockDefn>>,
+    /// Memoized per-instance INSERT expansions. Keyed by every input that
+    /// affects `expand_insert` output (transform, style, cull parameters,
+    /// background). XREFs and repeated MINSERT instances can contain thousands
+    /// of nested INSERTs; this memo avoids re-expanding them on every pan/zoom
+    /// while the camera parameters are stable. The cache is dropped when the
+    /// `BlockCache` is rebuilt (block definition or geometry change), so it never
+    /// references stale defns.
+    expand_memo: Mutex<HashMap<ExpandInsertKey, Arc<Vec<WireModel>>>>,
+}
+
+/// Key for the per-instance INSERT expansion memo. Floats are stored as raw
+/// bits so the struct derives `Hash`/`Eq` without float NaN issues.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+struct ExpandInsertKey {
+    block_name_upper: String,
+    insert_point: [u64; 3],
+    scale: [u64; 3],
+    rotation: u64,
+    normal: [u64; 3],
+    column_count: u16,
+    row_count: u16,
+    column_spacing: u64,
+    row_spacing: u64,
+    ins_color: [u32; 4],
+    ins_pat_len: u32,
+    ins_pat: [u32; 8],
+    ins_lw_px: u32,
+    selected: bool,
+    pslt_factor: u32,
+    view_aabb: Option<[u32; 4]>,
+    world_per_pixel: Option<u32>,
+    is_xref: bool,
+    bg_color: [u32; 4],
+}
+
+impl ExpandInsertKey {
+    fn new(
+        ins: &acadrust::entities::Insert,
+        ins_resolved_color: [f32; 4],
+        ins_pat_len: f32,
+        ins_pat: [f32; 8],
+        ins_lw_px: f32,
+        selected: bool,
+        pslt_factor: f32,
+        view_aabb: Option<[f32; 4]>,
+        world_per_pixel: Option<f32>,
+        is_xref: bool,
+        bg_color: [f32; 4],
+    ) -> Self {
+        Self {
+            block_name_upper: ins.block_name.to_uppercase(),
+            insert_point: [
+                ins.insert_point.x.to_bits(),
+                ins.insert_point.y.to_bits(),
+                ins.insert_point.z.to_bits(),
+            ],
+            scale: [
+                ins.x_scale().to_bits(),
+                ins.y_scale().to_bits(),
+                ins.z_scale().to_bits(),
+            ],
+            rotation: ins.rotation.to_bits(),
+            normal: [
+                ins.normal.x.to_bits(),
+                ins.normal.y.to_bits(),
+                ins.normal.z.to_bits(),
+            ],
+            column_count: ins.column_count,
+            row_count: ins.row_count,
+            column_spacing: ins.column_spacing.to_bits(),
+            row_spacing: ins.row_spacing.to_bits(),
+            ins_color: [
+                ins_resolved_color[0].to_bits(),
+                ins_resolved_color[1].to_bits(),
+                ins_resolved_color[2].to_bits(),
+                ins_resolved_color[3].to_bits(),
+            ],
+            ins_pat_len: ins_pat_len.to_bits(),
+            ins_pat: ins_pat.map(|v| v.to_bits()),
+            ins_lw_px: ins_lw_px.to_bits(),
+            selected,
+            pslt_factor: pslt_factor.to_bits(),
+            view_aabb: view_aabb.map(|v| v.map(|c| c.to_bits())),
+            world_per_pixel: world_per_pixel.map(|v| v.to_bits()),
+            is_xref,
+            bg_color: [
+                bg_color[0].to_bits(),
+                bg_color[1].to_bits(),
+                bg_color[2].to_bits(),
+                bg_color[3].to_bits(),
+            ],
+        }
+    }
 }
 
 impl BlockCache {
@@ -127,6 +220,7 @@ impl BlockCache {
     /// cache.
     pub fn build(doc: &CadDocument, anno_scale: f32, bg_color: [f32; 4]) -> Self {
         use crate::par::prelude::*;
+        let start = std::time::Instant::now();
         let mut cache = Self::new();
         let referenced = collect_referenced_blocks(doc);
         // Each defn is built independently: nested INSERTs are stored as
@@ -140,6 +234,11 @@ impl BlockCache {
             .map(|name| (name.clone(), Arc::new(build_defn(doc, name, anno_scale, bg_color))))
             .collect();
         cache.compute_block_aabbs(&referenced);
+        eprintln!(
+            "block_cache build: {} block(s) in {:.2}ms",
+            referenced.len(),
+            start.elapsed().as_secs_f64() * 1000.0
+        );
         cache
     }
 
@@ -534,6 +633,60 @@ pub fn aabb_disjoint_xy(a: [f32; 4], b: [f32; 4]) -> bool {
 /// Returns `None` if no defn is cached for `ins.block_name`. Returns
 /// `Some(empty)` if the defn exists but is empty.
 pub fn expand_insert(
+    cache: &BlockCache,
+    ins: &acadrust::entities::Insert,
+    ins_handle: Handle,
+    ins_resolved_color: [f32; 4],
+    ins_pat_len: f32,
+    ins_pat: [f32; 8],
+    ins_lw_px: f32,
+    selected: bool,
+    pslt_factor: f32,
+    view_aabb: Option<[f32; 4]>,
+    world_per_pixel: Option<f32>,
+    is_xref: bool,
+    bg_color: [f32; 4],
+) -> Option<Arc<Vec<WireModel>>> {
+    let key = ExpandInsertKey::new(
+        ins,
+        ins_resolved_color,
+        ins_pat_len,
+        ins_pat,
+        ins_lw_px,
+        selected,
+        pslt_factor,
+        view_aabb,
+        world_per_pixel,
+        is_xref,
+        bg_color,
+    );
+    {
+        let memo = cache.expand_memo.lock().unwrap();
+        if let Some(arc) = memo.get(&key) {
+            return Some(Arc::clone(arc));
+        }
+    }
+    let wires = expand_insert_impl(
+        cache,
+        ins,
+        ins_handle,
+        ins_resolved_color,
+        ins_pat_len,
+        ins_pat,
+        ins_lw_px,
+        selected,
+        pslt_factor,
+        view_aabb,
+        world_per_pixel,
+        is_xref,
+        bg_color,
+    )?;
+    let arc = Arc::new(wires);
+    cache.expand_memo.lock().unwrap().insert(key, Arc::clone(&arc));
+    Some(arc)
+}
+
+fn expand_insert_impl(
     cache: &BlockCache,
     ins: &acadrust::entities::Insert,
     ins_handle: Handle,
