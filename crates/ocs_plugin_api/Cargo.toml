@@ -26,3 +26,7 @@ getrandom = { version = "0.2", optional = true }
 # plugin runtime. The OpenCADStudio binary turns this on; pure-data consumers
 # leave it off.
 host = ["dep:acadrust", "dep:interprocess", "dep:serde", "dep:bincode", "dep:thiserror", "dep:libloading", "dep:memmap2", "dep:rkyv", "dep:getrandom"]
+
+[dev-dependencies]
+bincode = "1"
+

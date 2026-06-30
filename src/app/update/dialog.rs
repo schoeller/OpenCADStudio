@@ -96,10 +96,23 @@ impl OpenCADStudio {
 
 
 pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEvent) -> Task<Message> {
-                self.ribbon.activate_tool(&tool_id);
+                // Ribbon tools should not activate while a modal dialog has the
+                // focus. The modal's own dispatch path will close itself first.
+                if self.active_modal.is_some() {
+                    return Task::none();
+                }
                 match event {
-                    ModuleEvent::Command(cmd) => return self.dispatch_command(&cmd),
-                    ModuleEvent::OpenFileDialog => {
+                    ModuleEvent::Command(cmd) => {
+                        let task = self.dispatch_command(&cmd);
+                        // Only highlight the tool when the command was actually
+                        // accepted and installed as the active command.
+                        if self.tabs[self.active_tab].active_cmd.is_some() {
+                            self.ribbon.activate_tool(&tool_id);
+                        } else {
+                            self.ribbon.deactivate_tool_if(&tool_id);
+                        }
+                        return task;
+                    }                    ModuleEvent::OpenFileDialog => {
                         self.command_line
                             .push_info("Open DWG/DXF: not yet implemented.");
                     }

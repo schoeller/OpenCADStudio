@@ -1,0 +1,13 @@
+[plugin]
+id = "opencad.plugin_template_api2"
+name = "Plugin Template API V2"
+version = "0.1.0"
+description = "V2 plugin used in lifecycle tests"
+author = "OpenCADStudio"
+license = "GPL-3.0-only"
+
+[opencad]
+api_version = 2
+ribbon_order = 90
+command_prefixes = ["PT2_"]
+xdata_apps = ["PT2_RECORD"]

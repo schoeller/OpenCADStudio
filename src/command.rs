@@ -525,6 +525,15 @@ pub trait CadCommand: Send {
         CmdResult::Cancel
     }
 
+    /// Called once per frame while the command is active. Default does nothing.
+    fn update(&mut self, _app: &mut crate::app::OpenCADStudio) {}
+
+    /// Return `false` when `update()` has finished the command and the host
+    /// should *not* restore the command after the per-frame call.
+    fn keep_after_update(&self) -> bool {
+        true
+    }
+
     /// Returns `true` when the command needs entity picking (hit-test) instead of point picking.
     fn needs_entity_pick(&self) -> bool {
         false

@@ -31,6 +31,8 @@ pub struct DispatchResult {
     pub handled: bool,
     /// An interactive command was started by a plugin.
     pub started: Option<(Arc<PluginProcess>, u64)>,
+    /// An async session was started by a V3 plugin.
+    pub async_session: Option<(Arc<PluginProcess>, String)>,
     /// Plugins whose process died before or during dispatch.
     pub dead_plugins: Vec<String>,
     /// Plugins that returned an error while trying to handle the command.
@@ -102,7 +104,20 @@ impl PluginManager {
             let mut on_start = |command_id: u64| {
                 result.started = Some((Arc::clone(&process), command_id));
             };
-            match p.process.dispatch(host, cmd, &mut on_start) {
+            let dispatch_result: Result<bool, PluginError> = if p.process.manifest().api_version() >= (crate::manifest::ApiVersion { major: 3 }) {
+                match p.process.dispatch_v3(host, cmd) {
+                    Ok((handled, session_id)) => {
+                        if let Some(session_id) = session_id {
+                            result.async_session = Some((Arc::clone(&process), session_id));
+                        }
+                        Ok(handled)
+                    }
+                    Err(e) => Err(e),
+                }
+            } else {
+                p.process.dispatch(host, cmd, &mut on_start)
+            };
+            match dispatch_result {
                 Ok(true) => {
                     result.handled = true;
                     return result;
@@ -120,6 +135,31 @@ impl PluginManager {
             .iter()
             .map(|p| p.process.id().to_string())
             .collect()
+    }
+
+    /// Return the OS process id for the plugin with `id`, if loaded and alive.
+    pub fn process_id(&self, id: &str) -> Option<u32> {
+        self.plugins
+            .iter()
+            .find(|p| p.process.id() == id)
+            .and_then(|p| p.process.process_id())
+    }
+
+    /// Return whether the plugin with `id` is loaded and its process is alive.
+    pub fn is_alive(&self, id: &str) -> bool {
+        self.plugins
+            .iter()
+            .find(|p| p.process.id() == id)
+            .map(|p| p.process.is_alive())
+            .unwrap_or(false)
+    }
+
+    #[cfg(test)]
+    pub fn process(&self, id: &str) -> Option<Arc<PluginProcess>> {
+        self.plugins
+            .iter()
+            .find(|p| p.process.id() == id)
+            .map(|p| Arc::clone(&p.process))
     }
 
     /// Begin asynchronous shutdown of every plugin process.

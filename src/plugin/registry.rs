@@ -60,6 +60,16 @@ pub(crate) fn try_dispatch(app: &mut OpenCADStudio, tab: usize, cmd: &str) -> bo
                 )),
             );
         }
+        if let Some((process, session_id)) = result.async_session {
+            app.set_active_command(
+                tab,
+                Box::new(crate::app::plugin_host::PluginAsyncSessionAdapter::new(
+                    process,
+                    tab,
+                    session_id,
+                )),
+            );
+        }
         return result.handled;
     }
     #[cfg(target_arch = "wasm32")]

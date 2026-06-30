@@ -59,5 +59,15 @@ pub fn handle_plugin_request(
             },
             None => PluginResponse::Error("shared document view unavailable".to_string()),
         },
+        StartAsyncSession { session_id } => match host.start_async_session(&session_id) {
+            Some(_) => PluginResponse::Ok,
+            None => PluginResponse::Error(format!(
+                "host rejected async session {session_id}"
+            )),
+        },
+        EndAsyncSession { .. } => {
+            // The host-side adapter reacts to this via its own teardown path.
+            PluginResponse::Ok
+        }
     }
 }

@@ -1,23 +1,25 @@
 //! Process management for out-of-process plugins.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use interprocess::local_socket::traits::Listener;
 use interprocess::local_socket::{GenericNamespaced, ListenerOptions, Stream, ToNsName};
 
-use crate::host::{CommandStep, HostApi};
+use crate::host::{AsyncSessionError, AsyncSessionHandle, CommandStep, DocumentReader, HostApi};
 use crate::ipc::protocol::{
-    HostRequest, HostResponse, HostToPlugin, InteractiveEvent, PluginToHost, RunnerHandshake,
-    PLUGIN_TOKEN_ENV,
+    Handle, HostRequest, HostResponse, HostToPlugin, InteractiveEvent, PluginRequest, PluginResponse,
+    PluginToHost, RunnerHandshake, PLUGIN_TOKEN_ENV,
 };
 use crate::ipc::server::handle_plugin_request;
 use crate::ipc::transport::{recv, send};
 use crate::ribbon::owned::{OwnedPluginManifest, OwnedRibbonGroup as OwnedRibbonGroupAlias};
+use crate::shm::{DocumentViewInfo, SharedDocumentReader};
 
 use serde::de::DeserializeOwned;
 
@@ -83,6 +85,8 @@ fn request_kind(req: &HostRequest) -> &'static str {
         HostRequest::InteractiveEvent { .. } => "InteractiveEvent",
         HostRequest::GetPrompt { .. } => "GetPrompt",
         HostRequest::NeedsEntityPick { .. } => "NeedsEntityPick",
+        HostRequest::EndAsyncSession { .. } => "EndAsyncSession",
+        HostRequest::AsyncSessionRequest { .. } => "AsyncSessionRequest",
         HostRequest::Shutdown => "Shutdown",
     }
 }
@@ -108,13 +112,25 @@ pub enum PluginError {
     UnexpectedResponse(HostResponse),
 }
 
+/// Host-side state for API V3 async sessions.
+struct V3State {
+    /// Per-session queues of plugin requests waiting for the host adapter.
+    /// Each entry carries the V3 `request_id` the adapter must use when sending
+    /// the response.
+    queues: Arc<Mutex<HashMap<String, Vec<(u64, crate::ipc::protocol::PluginRequest)>>>>,
+    /// Pending response channels for host-initiated V3 requests.
+    pending: Arc<Mutex<HashMap<u64, mpsc::Sender<crate::ipc::protocol::HostResponse>>>>,
+}
+
 /// One spawned plugin process.
 pub struct PluginProcess {
-    stream: Mutex<Option<Stream>>,
-    child: Mutex<Option<Child>>,
+    stream: Arc<Mutex<Option<Stream>>>,
+    child: Arc<Mutex<Option<Child>>>,
     id: String,
     manifest: OwnedPluginManifest,
     ribbon: Vec<OwnedRibbonGroupAlias>,
+    next_request_id: AtomicU64,
+    v3_state: Mutex<Option<V3State>>,
 }
 
 impl PluginProcess {
@@ -146,7 +162,7 @@ impl PluginProcess {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()?;
-        let child = Mutex::new(Some(child));
+        let child = Arc::new(Mutex::new(Some(child)));
 
         // Accept the runner connection with a timeout so a hung/crashed runner
         // does not block the host indefinitely.
@@ -157,7 +173,7 @@ impl PluginProcess {
         let stream = match rx.recv_timeout(spawn_timeout()) {
             Ok(Ok(stream)) => {
                 eprintln!("[plugin] runner connected");
-                Mutex::new(Some(stream))
+                Arc::new(Mutex::new(Some(stream)))
             }
             Ok(Err(e)) => return Err(e.into()),
             Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -212,6 +228,8 @@ impl PluginProcess {
             id,
             manifest,
             ribbon,
+            next_request_id: AtomicU64::new(1),
+            v3_state: Mutex::new(None),
         })
     }
 
@@ -250,6 +268,239 @@ impl PluginProcess {
         result
     }
 
+    /// Dispatch a command to an API V3 plugin. Returns whether the command was
+    /// handled and, if the plugin started an async session, the session ID.
+    pub fn dispatch_v3(
+        &self,
+        host: &mut dyn HostApi,
+        cmd: &str,
+    ) -> Result<(bool, Option<String>), PluginError> {
+        eprintln!("[plugin v3] dispatching {cmd}");
+        let request_id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
+        {
+            let mut guard = self.stream.lock().unwrap_or_else(|e| e.into_inner());
+            let stream = guard.as_mut().ok_or_else(shutdown_error)?;
+            send(
+                stream,
+                &HostToPlugin::RequestV3 {
+                    request_id,
+                    session_id: String::new(),
+                    request: HostRequest::Dispatch {
+                        cmd: cmd.to_string(),
+                    },
+                },
+            )?;
+        }
+
+        let mut started_session: Option<String> = None;
+        let kind = "Dispatch";
+        let timeout = request_timeout(kind);
+        let deadline = Instant::now() + timeout;
+        let result = loop {
+            let msg = recv_with_deadline::<PluginToHost>(
+                &self.stream,
+                &self.child,
+                deadline,
+                timeout,
+                kind,
+            )?;
+            match msg {
+                PluginToHost::ResponseV3 {
+                    request_id: rid,
+                    response,
+                } if rid == request_id => match response {
+                    HostResponse::Bool(b) => {
+                        eprintln!("[plugin v3] dispatch {cmd} result: {b} async={started_session:?}");
+                        break Ok((b, started_session.clone()));
+                    }
+                    other => break Err(PluginError::UnexpectedResponse(other)),
+                },
+                PluginToHost::ResponseV3 { .. } => continue,
+                PluginToHost::RequestV3 {
+                    request_id: rid,
+                    session_id: _,
+                    request: PluginRequest::StartAsyncSession { session_id },
+                } => {
+                    let resp = match host.start_async_session(&session_id) {
+                        Some(_) => {
+                            started_session = Some(session_id);
+                            PluginResponse::Ok
+                        }
+                        None => PluginResponse::Error(
+                            "host rejected async session".to_string(),
+                        ),
+                    };
+                    self.send_async_response_v3(rid, resp)?;
+                }
+                PluginToHost::RequestV3 {
+                    request_id: rid,
+                    session_id: _,
+                    request,
+                } => {
+                    let mut noop = |_id: u64| {};
+                    let resp = handle_plugin_request(host, request, &mut noop);
+                    self.send_async_response_v3(rid, resp)?;
+                }
+                _ => {}
+            }
+        };
+
+        // Start the long-lived host-side reader only after the synchronous
+        // dispatch exchange has finished, to avoid races over the stream.
+        if started_session.is_some() {
+            self.ensure_v3_reader();
+        }
+        result
+    }
+
+    fn ensure_v3_reader(&self) {
+        let mut state_guard = self.v3_state.lock().unwrap_or_else(|e| e.into_inner());
+        if state_guard.is_some() {
+            return;
+        }
+        let queues: Arc<Mutex<HashMap<String, Vec<(u64, PluginRequest)>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let pending: Arc<Mutex<HashMap<u64, mpsc::Sender<HostResponse>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let state = V3State {
+            queues: Arc::clone(&queues),
+            pending: Arc::clone(&pending),
+        };
+        let stream = Arc::clone(&self.stream);
+        let child = Arc::clone(&self.child);
+        std::thread::spawn(move || {
+            loop {
+                let msg = match recv_one::<PluginToHost>(&stream) {
+                    Ok(m) => m,
+                    Err(_) => break,
+                };
+                match msg {
+                    PluginToHost::RequestV3 {
+                        request_id: rid,
+                        session_id,
+                        request,
+                    } => {
+                        let mut q = queues.lock().unwrap();
+                        q.entry(session_id).or_default().push((rid, request));
+                    }
+                    PluginToHost::ResponseV3 {
+                        request_id: rid,
+                        response,
+                    } => {
+                        let tx = pending.lock().unwrap().remove(&rid);
+                        if let Some(tx) = tx {
+                            let _ = tx.send(response);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            // Process died or stream closed; clear pending so waiters wake.
+            let _ = child.lock().unwrap_or_else(|e| e.into_inner()).take();
+            let txs = std::mem::take(&mut *pending.lock().unwrap());
+            for (_, tx) in txs {
+                let _ = tx.send(HostResponse::Error("session closed".to_string()));
+            }
+        });
+        *state_guard = Some(state);
+    }
+
+    pub fn send_async_response_v3(
+        &self,
+        request_id: u64,
+        response: PluginResponse,
+    ) -> Result<(), PluginError> {
+        let mut guard = self.stream.lock().unwrap_or_else(|e| e.into_inner());
+        let stream = guard.as_mut().ok_or_else(shutdown_error)?;
+        send(
+            stream,
+            &HostToPlugin::ResponseV3 {
+                request_id,
+                response,
+            },
+        )
+        .map_err(Into::into)
+    }
+
+    /// Send a host request within an async session and wait for the response.
+    pub fn request_v3(
+        &self,
+        session_id: &str,
+        req: HostRequest,
+    ) -> Result<HostResponse, PluginError> {
+        // Make sure the host-side V3 reader thread is running so responses can
+        // be routed back to this call.
+        self.ensure_v3_reader();
+
+        let request_id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
+        let (tx, rx) = mpsc::channel();
+        {
+            let mut guard = self.v3_state.lock().unwrap_or_else(|e| e.into_inner());
+            let state = guard.as_mut().expect("ensure_v3_reader initialized state");
+            state.pending.lock().unwrap().insert(request_id, tx);
+        }
+        {
+            let mut guard = self.stream.lock().unwrap_or_else(|e| e.into_inner());
+            let stream = guard.as_mut().ok_or_else(shutdown_error)?;
+            send(
+                stream,
+                &HostToPlugin::RequestV3 {
+                    request_id,
+                    session_id: session_id.to_string(),
+                    request: req,
+                },
+            )?;
+        }
+        match rx.recv_timeout(request_timeout("AsyncRequest")) {
+            Ok(resp) => Ok(resp),
+            Err(_) => Err(PluginError::CallTimeout {
+                request: "AsyncRequest",
+                duration: request_timeout("AsyncRequest"),
+            }),
+        }
+    }
+
+    /// Drain pending plugin requests for `session_id`.
+    pub fn drain_async_requests(&self, session_id: &str) -> Vec<(u64, PluginRequest)> {
+        let guard = self.v3_state.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(state) = guard.as_ref() else {
+            return Vec::new();
+        };
+        let mut q = state.queues.lock().unwrap();
+        q.remove(session_id).unwrap_or_default()
+    }
+
+    /// Create a host-side async session handle for `session_id`.
+    pub fn async_session_handle(
+        self: &Arc<Self>,
+        tab: usize,
+        session_id: String,
+    ) -> Box<dyn AsyncSessionHandle> {
+        Box::new(PluginAsyncSessionHandle {
+            process: Arc::clone(self),
+            tab,
+            session_id,
+        })
+    }
+
+    /// Send an async session-end notification to the plugin runner.
+    pub fn send_end_session(&self, session_id: &str) -> Result<(), PluginError> {
+        let request_id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard = self.stream.lock().unwrap_or_else(|e| e.into_inner());
+        let stream = guard.as_mut().ok_or_else(shutdown_error)?;
+        send(
+            stream,
+            &HostToPlugin::RequestV3 {
+                request_id,
+                session_id: session_id.to_string(),
+                request: HostRequest::EndAsyncSession {
+                    session_id: session_id.to_string(),
+                },
+            },
+        )
+        .map_err(Into::into)
+    }
+
     /// Send an interactive event for `command_id` and return the step the
     /// plugin command produces. Interactive events are not expected to trigger
     /// nested host API calls, so this path does not supply a `HostApi`.
@@ -280,6 +531,12 @@ impl PluginProcess {
                     ));
                     self.send_response(resp)?;
                 }
+                PluginToHost::RequestV3 { .. } | PluginToHost::ResponseV3 { .. } => {
+                    let resp = crate::ipc::protocol::PluginResponse::Error(
+                        "unexpected API v3 message during interactive event".to_string(),
+                    );
+                    self.send_response(resp)?;
+                }
             }
         }
     }
@@ -306,6 +563,12 @@ impl PluginProcess {
                     let resp = crate::ipc::protocol::PluginResponse::Error(format!(
                         "unexpected nested request during get_prompt: {req:?}"
                     ));
+                    self.send_response(resp)?;
+                }
+                PluginToHost::RequestV3 { .. } | PluginToHost::ResponseV3 { .. } => {
+                    let resp = crate::ipc::protocol::PluginResponse::Error(
+                        "unexpected API v3 message during get_prompt".to_string(),
+                    );
                     self.send_response(resp)?;
                 }
             }
@@ -336,7 +599,31 @@ impl PluginProcess {
                     ));
                     self.send_response(resp)?;
                 }
+                PluginToHost::RequestV3 { .. } | PluginToHost::ResponseV3 { .. } => {
+                    let resp = crate::ipc::protocol::PluginResponse::Error(
+                        "unexpected API v3 message during needs_entity_pick".to_string(),
+                    );
+                    self.send_response(resp)?;
+                }
             }
+        }
+    }
+
+    /// Return the OS process id for the plugin child process, if still held.
+    pub fn process_id(&self) -> Option<u32> {
+        let guard = self.child.lock().unwrap_or_else(|e| e.into_inner());
+        guard.as_ref().map(|child| child.id())
+    }
+
+    /// Kill the plugin child process and take its resources.
+    pub fn shutdown_all(&self) {
+        let (stream, mut child) = self.take_resources();
+        drop(stream);
+        if let Some(mut child) = child.take() {
+            let _ = child.kill();
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
         }
     }
 
@@ -368,6 +655,78 @@ impl PluginProcess {
         let stream = self.stream.lock().unwrap_or_else(|e| e.into_inner()).take();
         let child = self.child.lock().unwrap_or_else(|e| e.into_inner()).take();
         (stream, child)
+    }
+}
+
+/// Host-side handle for a V3 async session.
+struct PluginAsyncSessionHandle {
+    process: Arc<PluginProcess>,
+    tab: usize,
+    session_id: String,
+}
+
+impl AsyncSessionHandle for PluginAsyncSessionHandle {
+    fn tab_index(&self) -> usize {
+        self.tab
+    }
+
+    fn request(&self, req: PluginRequest) -> Result<PluginResponse, AsyncSessionError> {
+        match self
+            .process
+            .request_v3(&self.session_id, HostRequest::AsyncSessionRequest { request: req })
+        {
+            Ok(HostResponse::AsyncSessionResponse(resp)) => Ok(resp),
+            Ok(other) => Err(AsyncSessionError::Transport(format!(
+                "unexpected async session response: {other:?}"
+            ))),
+            Err(e) => Err(AsyncSessionError::Transport(e.to_string())),
+        }
+    }
+
+    fn document_reader(&self) -> Box<dyn DocumentReader + 'static> {
+        match self.request(PluginRequest::OpenDocumentView) {
+            Ok(PluginResponse::DocumentView { path, version: _ }) => {
+                if path.is_empty() {
+                    return Box::new(EmptyDocumentReader);
+                }
+                match SharedDocumentReader::open(Path::new(&path)) {
+                    Ok(reader) => Box::new(reader),
+                    Err(e) => {
+                        eprintln!("[plugin] shared reader open failed: {e}");
+                        Box::new(EmptyDocumentReader)
+                    }
+                }
+            }
+            other => {
+                eprintln!("[plugin] document_reader failed: {other:?}");
+                Box::new(EmptyDocumentReader)
+            }
+        }
+    }
+
+    fn document_view(&self) -> Option<DocumentViewInfo> {
+        match self.request(PluginRequest::OpenDocumentView) {
+            Ok(PluginResponse::DocumentView { path, version }) => {
+                Some(DocumentViewInfo { path, version })
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Sentinel reader used when the shared-memory view could not be initialized.
+struct EmptyDocumentReader;
+
+impl DocumentReader for EmptyDocumentReader {
+    fn entity_count(&self) -> usize {
+        0
+    }
+    fn for_each_entity(&self, _f: &mut dyn FnMut(crate::host::ReaderEntity<'_>)) {}
+    fn layer_name(&self, _handle: Handle) -> Option<&str> {
+        None
+    }
+    fn app_id_name(&self, _handle: Handle) -> Option<&str> {
+        None
     }
 }
 
@@ -430,6 +789,36 @@ fn mark_dead(stream: &Mutex<Option<Stream>>, child: &Mutex<Option<Child>>) {
 /// thread can time it out. If the deadline passes, the process is marked dead
 /// (stream closed, child killed) so that subsequent dispatch attempts are
 /// skipped.
+/// Receive one message from `stream` without holding the mutex while blocking.
+/// The stream is taken out, read on a helper thread, and then restored.
+fn recv_one<T: DeserializeOwned + Send + 'static>(
+    stream: &Arc<Mutex<Option<Stream>>>,
+) -> Result<T, PluginError> {
+    let (tx, rx) = mpsc::channel();
+    let stream_to_thread = stream.lock().unwrap_or_else(|e| e.into_inner()).take();
+    std::thread::spawn(move || {
+        let result = match stream_to_thread {
+            Some(mut s) => match recv::<T>(&mut s) {
+                Ok(m) => (Ok(m), Some(s)),
+                Err(e) => (Err(PluginError::from(e)), Some(s)),
+            },
+            None => (Err(shutdown_error()), None),
+        };
+        let _ = tx.send(result);
+    });
+    match rx.recv() {
+        Ok((Ok(msg), stream_opt)) => {
+            *stream.lock().unwrap_or_else(|e| e.into_inner()) = stream_opt;
+            Ok(msg)
+        }
+        Ok((Err(e), stream_opt)) => {
+            *stream.lock().unwrap_or_else(|e| e.into_inner()) = stream_opt;
+            Err(e)
+        }
+        Err(_) => Err(shutdown_error()),
+    }
+}
+
 fn recv_with_deadline<T: DeserializeOwned + Send + 'static>(
     stream: &Mutex<Option<Stream>>,
     child: &Mutex<Option<Child>>,
@@ -509,6 +898,11 @@ fn call(
                 let mut guard = stream.lock().unwrap_or_else(|e| e.into_inner());
                 let stream = guard.as_mut().ok_or_else(shutdown_error)?;
                 send(stream, &HostToPlugin::Response(resp))?;
+            }
+            PluginToHost::RequestV3 { .. } | PluginToHost::ResponseV3 { .. } => {
+                return Err(PluginError::Runner(
+                    "unexpected API v3 message on v2 call path".to_string(),
+                ));
             }
         }
     }
@@ -795,11 +1189,13 @@ mod timeout_tests {
     fn fake_process() -> (PluginProcess, Stream) {
         let (host_stream, runner_stream) = connected_pair();
         let process = PluginProcess {
-            stream: Mutex::new(Some(host_stream)),
-            child: Mutex::new(Some(sleepy_child())),
+            stream: Arc::new(Mutex::new(Some(host_stream))),
+            child: Arc::new(Mutex::new(Some(sleepy_child()))),
             id: "test.plugin".to_string(),
             manifest: fake_manifest(),
             ribbon: vec![],
+            next_request_id: AtomicU64::new(1),
+            v3_state: Mutex::new(None),
         };
         (process, runner_stream)
     }

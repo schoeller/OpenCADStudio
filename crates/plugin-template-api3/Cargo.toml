@@ -1,8 +1,8 @@
 [package]
-name = "plugin-template-api2"
+name = "plugin-template-api3"
 version = "0.1.0"
 edition = "2021"
-description = "V2 test plugin for OpenCADStudio plugin lifecycle tests."
+description = "V3 test plugin for OpenCADStudio plugin lifecycle tests."
 license = "GPL-3.0-only"
 
 [lib]

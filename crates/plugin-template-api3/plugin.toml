@@ -1,0 +1,13 @@
+[plugin]
+id = "opencad.plugin_template_api3"
+name = "Plugin Template API V3"
+version = "0.1.0"
+description = "V3 plugin used in lifecycle tests"
+author = "OpenCADStudio"
+license = "GPL-3.0-only"
+
+[opencad]
+api_version = 3
+ribbon_order = 91
+command_prefixes = ["PT3_"]
+xdata_apps = ["PT3_RECORD"]

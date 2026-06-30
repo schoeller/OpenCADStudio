@@ -54,6 +54,16 @@ pub enum HostRequest {
     NeedsEntityPick {
         command_id: u64,
     },
+    /// Ask the plugin runner to close/end an async session. Sent by the host
+    /// when the host-side async adapter is dropped or the pinned tab is closed.
+    EndAsyncSession {
+        session_id: String,
+    },
+    /// Forward a plugin request from the host-side async session handle to the
+    /// plugin runner. This is an implementation detail of V3 async sessions.
+    AsyncSessionRequest {
+        request: PluginRequest,
+    },
     Shutdown,
 }
 
@@ -66,6 +76,8 @@ pub enum HostResponse {
     Ribbon(Vec<OwnedRibbonGroup>),
     Manifest(OwnedPluginManifest),
     Error(String),
+    /// Response to a forwarded async-session plugin request.
+    AsyncSessionResponse(PluginResponse),
 }
 
 /// Requests the plugin runner sends to the host.
@@ -99,6 +111,15 @@ pub enum PluginRequest {
     /// Ask the host to create/refresh a shared-memory document view and return
     /// the file path + current version.
     OpenDocumentView,
+    /// Ask the host to create an async session for out-of-process plugins that
+    /// need to keep talking to the host after `dispatch` returns.
+    StartAsyncSession {
+        session_id: String,
+    },
+    /// Tell the host an async session is ending (e.g. the plugin window closed).
+    EndAsyncSession {
+        session_id: String,
+    },
 }
 
 /// Responses the host sends back for `PluginRequest`.
@@ -122,6 +143,18 @@ pub enum PluginResponse {
 pub enum HostToPlugin {
     Request(HostRequest),
     Response(PluginResponse),
+    /// V3 request/response pair. The `request_id` lets multiple in-flight
+    /// requests share the same bidirectional socket. `session_id` routes the
+    /// request to the correct async session on the plugin side.
+    RequestV3 {
+        request_id: u64,
+        session_id: String,
+        request: HostRequest,
+    },
+    ResponseV3 {
+        request_id: u64,
+        response: PluginResponse,
+    },
 }
 
 /// Messages sent from the plugin runner to the host.
@@ -129,6 +162,18 @@ pub enum HostToPlugin {
 pub enum PluginToHost {
     Request(PluginRequest),
     Response(HostResponse),
+    /// V3 request/response pair. The `request_id` lets multiple in-flight
+    /// requests share the same bidirectional socket. `session_id` routes the
+    /// request to the correct async session on the host side.
+    RequestV3 {
+        request_id: u64,
+        session_id: String,
+        request: PluginRequest,
+    },
+    ResponseV3 {
+        request_id: u64,
+        response: HostResponse,
+    },
 }
 
 /// Convenience helper for manifest serialization.
@@ -152,5 +197,50 @@ impl OwnedPluginManifest {
         ApiVersion {
             major: self.api_version,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn api_version_orders_by_major() {
+        assert!(ApiVersion { major: 3 } >= ApiVersion { major: 2 });
+        assert!(ApiVersion { major: 3 } >= ApiVersion { major: 3 });
+        assert!(ApiVersion { major: 2 } < ApiVersion { major: 3 });
+    }
+
+    #[test]
+    fn v3_envelopes_round_trip_through_bincode() {
+        let host_to_plugin = HostToPlugin::RequestV3 {
+            request_id: 7,
+            session_id: "session-42".to_string(),
+            request: HostRequest::EndAsyncSession {
+                session_id: "session-42".to_string(),
+            },
+        };
+        let encoded = bincode::serialize(&host_to_plugin).expect("serialize HostToPlugin");
+        let decoded: HostToPlugin =
+            bincode::deserialize(&encoded).expect("deserialize HostToPlugin");
+        assert!(
+            std::mem::discriminant(&decoded) == std::mem::discriminant(&host_to_plugin),
+            "HostToPlugin V3 variant round-tripped"
+        );
+
+        let plugin_to_host = PluginToHost::RequestV3 {
+            request_id: 9,
+            session_id: "session-42".to_string(),
+            request: PluginRequest::StartAsyncSession {
+                session_id: "session-42".to_string(),
+            },
+        };
+        let encoded = bincode::serialize(&plugin_to_host).expect("serialize PluginToHost");
+        let decoded: PluginToHost =
+            bincode::deserialize(&encoded).expect("deserialize PluginToHost");
+        assert!(
+            std::mem::discriminant(&decoded) == std::mem::discriminant(&plugin_to_host),
+            "PluginToHost V3 variant round-tripped"
+        );
     }
 }

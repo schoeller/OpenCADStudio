@@ -1,11 +1,14 @@
 // HostSession — plugin-facing API implemented inside `app` (private field access).
 
 use std::any::Any;
+use std::sync::Arc;
 
 use acadrust::tables::AppId;
 use acadrust::xdata::ExtendedDataRecord;
 use acadrust::{CadDocument, EntityType, Handle};
 use ocs_plugin_api::host::HostApi;
+use ocs_plugin_api::ipc::protocol::{PluginRequest, PluginResponse};
+use ocs_plugin_api::process::PluginProcess;
 
 use super::OpenCADStudio;
 
@@ -385,6 +388,86 @@ fn plugin_step_to_result(step: ocs_plugin_api::host::CommandStep) -> crate::comm
         CommandStep::Commit(e) => CmdResult::CommitEntity(e),
         CommandStep::CommitAndEnd(e) => CmdResult::CommitAndExit(e),
         CommandStep::Done | CommandStep::Cancel => CmdResult::Cancel,
+    }
+}
+
+/// Adapter that keeps a V3 async session alive as the active `CadCommand`.
+/// Each frame it drains the plugin's per-session request queue, applies them
+/// via a fresh `HostSession`, and sends responses back to the runner.
+pub struct PluginAsyncSessionAdapter {
+    process: Arc<PluginProcess>,
+    tab: usize,
+    session_id: String,
+    ended: bool,
+}
+
+impl PluginAsyncSessionAdapter {
+    pub fn new(process: Arc<PluginProcess>, tab: usize, session_id: String) -> Self {
+        Self {
+            process,
+            tab,
+            session_id,
+            ended: false,
+        }
+    }
+}
+
+impl crate::command::CadCommand for PluginAsyncSessionAdapter {
+    fn name(&self) -> &'static str {
+        "PLUGIN"
+    }
+
+    fn prompt(&self) -> String {
+        String::new()
+    }
+
+    fn on_point(&mut self, _pt: glam::DVec3) -> crate::command::CmdResult {
+        crate::command::CmdResult::Cancel
+    }
+
+    fn on_enter(&mut self) -> crate::command::CmdResult {
+        crate::command::CmdResult::Cancel
+    }
+
+    fn update(&mut self, app: &mut OpenCADStudio) {
+        if !self.process.is_alive() {
+            self.ended = true;
+            return;
+        }
+
+        let requests = self.process.drain_async_requests(&self.session_id);
+        for (request_id, request) in requests {
+            let mut host = HostSession::new(app, self.tab);
+            let mut on_start_interactive = |_id: u64| {};
+            let response = match request {
+                PluginRequest::EndAsyncSession { .. } => {
+                    self.ended = true;
+                    PluginResponse::Ok
+                }
+                other => {
+                    ocs_plugin_api::ipc::server::handle_plugin_request(
+                        &mut host,
+                        other,
+                        &mut on_start_interactive,
+                    )
+                }
+            };
+            let _ = self.process.send_async_response_v3(request_id, response);
+        }
+    }
+
+    fn keep_after_update(&self) -> bool {
+        !self.ended
+    }
+}
+
+impl Drop for PluginAsyncSessionAdapter {
+    fn drop(&mut self) {
+        // Notify the plugin runner that the host-side async session is ending,
+        // unless the plugin already initiated the end itself.
+        if !self.ended {
+            let _ = self.process.send_end_session(&self.session_id);
+        }
     }
 }
 

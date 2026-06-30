@@ -12,7 +12,7 @@ pub const API_VERSION: u32 = 3;
 /// current `HostApi` trait.
 pub const API_VERSION_MIN_SUPPORTED: u32 = 2;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ApiVersion {
     pub major: u32,
 }

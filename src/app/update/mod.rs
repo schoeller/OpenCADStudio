@@ -130,6 +130,20 @@ impl OpenCADStudio {
             }
         }
         let task = self.update_inner(msg);
+
+        // Let the active command run per-frame work (e.g. drain async plugin
+        // requests). The command may cancel itself by clearing active_cmd; in
+        // that case we only restore it if it asks to keep running.
+        {
+            let i = self.active_tab;
+            if let Some(mut cmd) = self.tabs[i].active_cmd.take() {
+                cmd.update(self);
+                if self.tabs[i].active_cmd.is_none() && cmd.keep_after_update() {
+                    self.tabs[i].active_cmd = Some(cmd);
+                }
+            }
+        }
+
         // After every message, mirror the active command step's prompt so
         // its history line stays pinned (non-fading) until the step changes.
         let prompt = self.tabs[self.active_tab]

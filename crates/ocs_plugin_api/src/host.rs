@@ -15,7 +15,9 @@ use std::any::Any;
 
 use acadrust::xdata::ExtendedDataRecord;
 use acadrust::{CadDocument, EntityType, Handle};
+use thiserror::Error;
 
+use crate::ipc::protocol::{HostRequest, HostResponse, PluginRequest, PluginResponse};
 use crate::manifest::PluginManifest;
 use crate::ribbon::CadModule;
 
@@ -27,6 +29,21 @@ pub trait BuiltinPlugin: Send + Sync {
     fn manifest(&self) -> &'static PluginManifest;
     fn ribbon(&self) -> Box<dyn CadModule>;
     fn dispatch(&self, host: &mut dyn HostApi, cmd: &str) -> bool;
+
+    /// Run the plugin's own main thread after the V3 IPC reader is started.
+    /// V2 plugins can ignore this.
+    fn run_on_main_thread(&self) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
+
+    /// Called when the host is shutting down the plugin process.
+    fn shutdown(&self) {}
+
+    /// Handle a host request that arrives on the V3 async-session path. Return
+    /// `None` to let the runner use its default response.
+    fn on_host_request(&self, _req: &HostRequest) -> Option<HostResponse> {
+        None
+    }
 }
 
 /// A point-driven interactive command a plugin starts via
@@ -175,6 +192,39 @@ pub trait HostApi {
     fn document_view(&mut self) -> Option<crate::shm::DocumentViewInfo> {
         None
     }
+
+    /// Start an async session that lets the plugin keep sending requests after
+    /// `dispatch` returns. Added in API v3; default returns `None` so in-process
+    /// hosts and V2 hosts are unaffected.
+    fn start_async_session(&mut self, _session_id: &str) -> Option<Box<dyn AsyncSessionHandle>> {
+        None
+    }
+}
+
+/// Error type for async-session RPC failures.
+#[derive(Debug, Error)]
+pub enum AsyncSessionError {
+    #[error("transport error: {0}")]
+    Transport(String),
+    #[error("session closed")]
+    Closed,
+}
+
+/// Handle returned by [`HostApi::start_async_session`]. The plugin keeps a
+/// cloneable reference to this handle and uses it to send requests to the host
+/// for the lifetime of the async session.
+pub trait AsyncSessionHandle: Send + Sync {
+    /// Index of the tab this session targets.
+    fn tab_index(&self) -> usize;
+
+    /// Send a request to the host and wait for the matching response.
+    fn request(&self, req: PluginRequest) -> Result<PluginResponse, AsyncSessionError>;
+
+    /// Read-only, zero-copy view of the active document.
+    fn document_reader(&self) -> Box<dyn DocumentReader + 'static>;
+
+    /// Open (or refresh) the host-side shared document view.
+    fn document_view(&self) -> Option<crate::shm::DocumentViewInfo>;
 }
 
 /// Simplified, read-only entity kind exposed by [`DocumentReader`].
