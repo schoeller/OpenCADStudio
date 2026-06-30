@@ -116,6 +116,26 @@ impl HostProxy {
             ))),
         }
     }
+
+    /// Helper: write an informational message to the host command line.
+    pub fn push_info(&self, msg: &str) -> Result<(), AsyncSessionError> {
+        match self.request(PluginRequest::PushInfo(msg.to_string()))? {
+            PluginResponse::Ok => Ok(()),
+            other => Err(AsyncSessionError::Transport(format!(
+                "unexpected PushInfo response: {other:?}"
+            ))),
+        }
+    }
+
+    /// Tell the host that this async session is ending.
+    pub fn end_session(&self) -> Result<(), AsyncSessionError> {
+        match self.request(PluginRequest::EndAsyncSession { session_id: String::new() })? {
+            PluginResponse::Ok => Ok(()),
+            other => Err(AsyncSessionError::Transport(format!(
+                "unexpected EndAsyncSession response: {other:?}"
+            ))),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -148,7 +168,10 @@ mod tests {
             match req {
                 PluginRequest::AddEntity(_) => Ok(PluginResponse::Handle(Handle::new(42))),
                 PluginRequest::WriteRecord { .. } => Ok(PluginResponse::Bool(true)),
-                PluginRequest::PushUndo { .. } | PluginRequest::PushOutput { .. } => Ok(PluginResponse::Ok),
+                PluginRequest::PushUndo { .. }
+                | PluginRequest::PushOutput { .. }
+                | PluginRequest::PushInfo { .. }
+                | PluginRequest::EndAsyncSession { .. } => Ok(PluginResponse::Ok),
                 _ => Ok(PluginResponse::Error(format!("unmocked: {req:?}"))),
             }
         }
@@ -223,6 +246,18 @@ mod tests {
     fn proxy_push_output_succeeds() {
         let proxy = HostProxy::new(Box::new(mock()));
         proxy.push_output("hello").unwrap();
+    }
+
+    #[test]
+    fn proxy_push_info_succeeds() {
+        let proxy = HostProxy::new(Box::new(mock()));
+        proxy.push_info("hello info").unwrap();
+    }
+
+    #[test]
+    fn proxy_end_session_succeeds() {
+        let proxy = HostProxy::new(Box::new(mock()));
+        proxy.end_session().unwrap();
     }
 
     #[test]

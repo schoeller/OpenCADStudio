@@ -55,11 +55,22 @@ impl AsyncSessionHandle for DummyAsyncHandle {
 struct DummyHost {
     document: CadDocument,
     accepted_session: Option<String>,
+    tab: usize,
+}
+
+impl DummyHost {
+    fn new(tab: usize) -> Self {
+        Self {
+            document: CadDocument::new(),
+            accepted_session: None,
+            tab,
+        }
+    }
 }
 
 impl HostApi for DummyHost {
     fn tab_index(&self) -> usize {
-        0
+        self.tab
     }
     fn document(&self) -> &CadDocument {
         &self.document
@@ -190,10 +201,7 @@ fn pyshell_dispatch_starts_async_session() {
     };
 
     let mut manager = PluginManager::new();
-    let mut host = DummyHost {
-        document: CadDocument::new(),
-        accepted_session: None,
-    };
+    let mut host = DummyHost::new(0);
 
     let id = manager.load(&path, &mut host).expect("load pythonshell plugin");
     assert_eq!(id, "opencad.pythonshell");
@@ -232,10 +240,7 @@ fn pyshell_unknown_command_not_handled() {
     };
 
     let mut manager = PluginManager::new();
-    let mut host = DummyHost {
-        document: CadDocument::new(),
-        accepted_session: None,
-    };
+    let mut host = DummyHost::new(0);
 
     let id = manager.load(&path, &mut host).expect("load pythonshell plugin");
     let result = manager.dispatch(&mut host, "UNKNOWN", |_| false);
@@ -258,10 +263,7 @@ fn pyshell_request_fails_after_kill() {
         }
     };
 
-    let mut host = DummyHost {
-        document: CadDocument::new(),
-        accepted_session: None,
-    };
+    let mut host = DummyHost::new(0);
 
     let process = PluginProcess::spawn(&path, &mut host).expect("spawn pythonshell plugin");
     assert_eq!(process.id(), "opencad.pythonshell");
@@ -282,4 +284,55 @@ fn pyshell_request_fails_after_kill() {
             || msg.contains("shut down"),
         "unexpected error from dead process: {err:?}"
     );
+}
+
+#[test]
+fn pyshell_dispatch_after_one_session_still_alive() {
+    setup_runner();
+    let path = match cdylib_path("opencad-pythonshell") {
+        Some(p) => p,
+        None => {
+            eprintln!("opencad-pythonshell cdylib not built; skipping");
+            return;
+        }
+    };
+
+    let mut manager = PluginManager::new();
+    let mut host = DummyHost::new(0);
+
+    let id = manager.load(&path, &mut host).expect("load pythonshell plugin");
+    assert_eq!(id, "opencad.pythonshell");
+
+    let result = manager.dispatch(&mut host, "PYSHELL", |_| false);
+    assert!(result.handled, "PYSHELL should be handled");
+    let first_session = result
+        .async_session
+        .expect("PYSHELL should start an async session")
+        .1;
+
+    wait_for(|| manager.is_alive(&id), Duration::from_secs(5));
+    assert!(manager.is_alive(&id), "pythonshell process should be alive");
+
+    // Dispatching a second time on the same tab should raise the existing
+    // session rather than spawn a second process.
+    let result = manager.dispatch(&mut host, "PYSHELL", |_| false);
+    assert!(result.handled, "second PYSHELL should be handled");
+    let second_session = result
+        .async_session
+        .expect("second PYSHELL should return existing async session")
+        .1;
+    assert_eq!(
+        first_session, second_session,
+        "second dispatch should reuse the same session"
+    );
+
+    wait_for(|| manager.is_alive(&id), Duration::from_secs(5));
+    assert!(
+        manager.is_alive(&id),
+        "pythonshell process should still be alive after second dispatch"
+    );
+
+    manager.shutdown_all();
+    wait_for(|| !manager.is_alive(&id), Duration::from_secs(5));
+    assert!(!manager.is_alive(&id), "pythonshell process should be dead after shutdown");
 }

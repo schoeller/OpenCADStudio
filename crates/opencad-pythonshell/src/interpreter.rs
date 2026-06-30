@@ -7,6 +7,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -21,6 +22,11 @@ pub trait Interpreter: Send + Sync {
 
     /// Drain pending output lines produced by the interpreter.
     fn drain_output(&self) -> Vec<String>;
+
+    /// Returns true while the interpreter backend is still alive.
+    fn is_alive(&self) -> bool {
+        true
+    }
 }
 
 /// Error returned when a real Python interpreter cannot be located or started.
@@ -43,18 +49,59 @@ pub struct PythonInterpreter {
     output_rx: Mutex<Receiver<String>>,
     output_tx: Sender<String>,
     python_path: PathBuf,
+    alive: Arc<AtomicBool>,
+}
+
+/// Build the Python wrapper script around `code.InteractiveInterpreter`.
+fn wrapper_script(module_code: &str) -> String {
+    let module_code_json = serde_json::to_string(module_code).unwrap();
+    format!(
+        r#"import sys, code
+{MODULE_CODE} = {module_code_json}
+exec({MODULE_CODE})
+__name__ = '__interactive__'
+
+class _InteractiveInterpreter(code.InteractiveInterpreter):
+    def write(self, data):
+        sys.stderr.write(data)
+
+_interpreter = _InteractiveInterpreter()
+_buffer = []
+while True:
+    try:
+        _line = input()
+    except EOFError:
+        break
+    _buffer.append(_line)
+    _source = "\n".join(_buffer)
+    try:
+        _more = _interpreter.runsource(_source, "<input>", "single")
+    except SystemExit:
+        print("<<<PYSHELL_EXIT>>>", flush=True)
+        sys.exit(0)
+    except KeyboardInterrupt:
+        _buffer.clear()
+        print("^C", file=sys.stderr, flush=True)
+        continue
+    if not _more:
+        _buffer.clear()
+"#,
+        MODULE_CODE = "_OCS_MODULE_CODE"
+    )
 }
 
 impl PythonInterpreter {
     /// Try to locate a Python executable.
     pub fn find_python() -> Option<PathBuf> {
-        for name in ["python3", "python"] {
+        // On Windows the "python3" name is often a Store app execution alias
+        // that fails when spawned as a non-interactive child. Prefer "python".
+        let names: &[&str] = if cfg!(target_os = "windows") {
+            &["python", "python3", "py"]
+        } else {
+            &["python3", "python", "py"]
+        };
+        for name in names {
             if let Ok(path) = which::which(name) {
-                return Some(path);
-            }
-        }
-        if cfg!(target_os = "windows") {
-            if let Ok(path) = which::which("py") {
                 return Some(path);
             }
         }
@@ -72,15 +119,11 @@ impl PythonInterpreter {
     /// Spawn a Python subprocess using the given executable.
     pub fn with_python(python_path: &Path) -> Result<(Self, Receiver<String>), InterpreterError> {
         let module_code = ocs_module_source();
-        let startup = format!(
-            "exec({}); __name__ = '__interactive__'",
-            serde_json::to_string(&module_code)
-                .map_err(|e| InterpreterError { message: e.to_string() })?
-        );
+        let startup = wrapper_script(&module_code);
 
+        eprintln!("[pyshell] spawning Python interpreter at {}", python_path.display());
         let mut child = Command::new(python_path)
             .arg("-u")
-            .arg("-i")
             .arg("-c")
             .arg(&startup)
             .stdin(Stdio::piped())
@@ -109,9 +152,13 @@ impl PythonInterpreter {
             spawn_reader(stderr, stderr_tx);
         }
 
-        // Detach a waiter so the child is reaped when it exits.
+        let alive = Arc::new(AtomicBool::new(true));
+        let alive_waiter = Arc::clone(&alive);
+        // Detach a waiter so the child is reaped and liveness flag is cleared on exit.
         std::thread::spawn(move || {
-            let _ = child.wait();
+            let status = child.wait();
+            eprintln!("[pyshell] Python interpreter exited: {status:?}");
+            alive_waiter.store(false, Ordering::SeqCst);
         });
 
         let interpreter = Self {
@@ -119,6 +166,7 @@ impl PythonInterpreter {
             output_rx: Mutex::new(output_rx.clone()),
             output_tx,
             python_path: python_path.to_path_buf(),
+            alive,
         };
         Ok((interpreter, output_rx))
     }
@@ -165,6 +213,11 @@ impl Interpreter for PythonInterpreter {
             return;
         }
 
+        if !self.is_alive() {
+            let _ = self.output_tx.send("[pyshell] interpreter process has exited".to_string());
+            return;
+        }
+
         if let Ok(mut stdin) = self.stdin.lock() {
             let _ = writeln!(stdin, "{}", line);
         } else {
@@ -180,6 +233,10 @@ impl Interpreter for PythonInterpreter {
             }
         }
         out
+    }
+
+    fn is_alive(&self) -> bool {
+        self.alive.load(Ordering::SeqCst)
     }
 }
 
@@ -277,5 +334,22 @@ mod tests {
         let out = stub.drain_output();
         assert_eq!(out.len(), 2);
         assert!(out.iter().all(|s| s == "Python not found; running in stub mode."));
+    }
+
+    #[test]
+    fn wrapper_script_contains_interactive_interpreter() {
+        let script = wrapper_script("pass");
+        assert!(script.contains("code.InteractiveInterpreter"));
+        assert!(script.contains("<<<PYSHELL_EXIT>>>"));
+        assert!(script.contains("runsource"));
+    }
+
+    #[test]
+    fn wrapper_script_contains_ocs_module() {
+        let module = ocs_module_source();
+        let script = wrapper_script(&module);
+        let module_json = serde_json::to_string(&module).unwrap();
+        assert!(script.contains(&module_json));
+        assert!(script.contains("_OCS_MODULE_CODE"));
     }
 }

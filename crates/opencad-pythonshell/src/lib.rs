@@ -158,6 +158,20 @@ fn set_controller_tx(tx: Sender<UiRequest>) {
     *UI_TX.lock().unwrap() = Some(tx);
 }
 
+/// Remove the session entry whose id matches `session_id` from the global session map.
+///
+/// Called by the controller when the plugin itself initiates the close.
+pub(crate) fn remove_session_by_id(session_id: &str) {
+    let mut sessions = SESSIONS.lock().unwrap();
+    sessions.retain(|_, id| id != session_id);
+}
+
+/// Returns true if the global session map contains `tab`.
+#[cfg(test)]
+pub(crate) fn has_session_for_tab(tab: usize) -> bool {
+    SESSIONS.lock().unwrap().contains_key(&tab)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
