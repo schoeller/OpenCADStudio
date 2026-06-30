@@ -205,6 +205,7 @@ pub struct StubInterpreter {
 
 impl StubInterpreter {
     /// Create a stub interpreter. Returns the interpreter and the output receiver.
+    #[cfg(test)]
     pub fn new() -> (Self, Receiver<String>) {
         let (tx, rx) = crossbeam_channel::unbounded();
         (

@@ -186,7 +186,10 @@ pub struct OpenProgress {
 
 // ── Application state ──────────────────────────────────────────────────────
 
-pub(super) struct OpenCADStudio {
+/// The main application state. Intentionally `pub` so that public traits such as
+/// [`crate::command::CadCommand`] can use it in their method signatures without
+/// triggering `private_interfaces` warnings.
+pub struct OpenCADStudio {
     start: Instant,
     tabs: Vec<DocumentTab>,
     active_tab: usize,

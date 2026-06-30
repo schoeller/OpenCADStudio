@@ -223,6 +223,79 @@ fn v2_plugin_lifecycle() {
 }
 
 #[test]
+fn v2_plugin_shutdown_leaves_no_temp_artifacts() {
+    setup_runner();
+    let path = match cdylib_path("plugin-template-api2") {
+        Some(p) => p,
+        None => {
+            eprintln!("plugin-template-api2 cdylib not built; skipping");
+            return;
+        }
+    };
+
+    let host_pid = std::process::id();
+    let before = temp_artifacts(host_pid);
+
+    let mut manager = PluginManager::new();
+    let mut host = DummyHost {
+        document: CadDocument::new(),
+        accepted_session: None,
+    };
+
+    let id = manager.load(&path, &mut host).expect("load V2 plugin");
+    let result = manager.dispatch(&mut host, "PT2_HELLO", |_| false);
+    assert!(result.handled);
+
+    manager.shutdown_all();
+    wait_for(|| !manager.is_alive(&id), Duration::from_secs(5));
+    assert!(!manager.is_alive(&id), "plugin process should be dead after shutdown");
+
+    let after = temp_artifacts(host_pid);
+    let leaked: Vec<_> = after
+        .into_iter()
+        .filter(|a| !before.contains(a))
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "V2 plugin shutdown leaked temp artifacts: {leaked:?}"
+    );
+}
+
+/// Collect names of temp artifacts owned by this host process.
+fn temp_artifacts(host_pid: u32) -> Vec<String> {
+    let mut out = Vec::new();
+    let temp = std::env::temp_dir();
+    if let Ok(entries) = std::fs::read_dir(&temp) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("ocs_plugin_doc_") && name.contains(&format!("_{host_pid}_")) {
+                out.push(name);
+            }
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(output) = std::process::Command::new("powershell")
+            .arg("-NoProfile")
+            .arg("-Command")
+            .arg(format!(
+                "Get-ChildItem \"\\\\.\\pipe\\ocs_plugin_{host_pid}_*\" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name"
+            ))
+            .output()
+        {
+            let text = String::from_utf8_lossy(&output.stdout);
+            for line in text.lines() {
+                let line = line.trim();
+                if !line.is_empty() {
+                    out.push(line.to_string());
+                }
+            }
+        }
+    }
+    out
+}
+
+#[test]
 fn v3_plugin_lifecycle() {
     setup_runner();
     let path = match cdylib_path("plugin-template-api3") {

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use acadrust::tables::AppId;
 use acadrust::xdata::ExtendedDataRecord;
 use acadrust::{CadDocument, EntityType, Handle};
-use ocs_plugin_api::host::HostApi;
+use ocs_plugin_api::host::{AsyncSessionError, AsyncSessionHandle, DocumentReader, HostApi, ReaderEntity};
 use ocs_plugin_api::ipc::protocol::{PluginRequest, PluginResponse};
 use ocs_plugin_api::process::PluginProcess;
 
@@ -171,6 +171,60 @@ impl<'a> HostSession<'a> {
     }
 }
 
+/// Empty document reader returned when the async-session store could not be
+/// initialized for the current tab.
+struct EmptyReader;
+
+impl DocumentReader for EmptyReader {
+    fn entity_count(&self) -> usize {
+        0
+    }
+    fn for_each_entity(&self, _f: &mut dyn FnMut(ReaderEntity<'_>)) {}
+    fn layer_name(&self, _handle: Handle) -> Option<&str> {
+        None
+    }
+    fn app_id_name(&self, _handle: Handle) -> Option<&str> {
+        None
+    }
+}
+
+/// Host-side async session handle that applies requests to the tab it was
+/// created for. Returned by [`HostSession::start_async_session`].
+pub(crate) struct AcceptedAsyncSessionHandle {
+    tab: usize,
+    store: Option<ocs_plugin_api::shm::DocumentSnapshotStore>,
+}
+
+impl AsyncSessionHandle for AcceptedAsyncSessionHandle {
+    fn tab_index(&self) -> usize {
+        self.tab
+    }
+
+    fn request(&self, req: PluginRequest) -> Result<PluginResponse, AsyncSessionError> {
+        let _ = req;
+        Err(AsyncSessionError::Transport(
+            "in-process async session request not routed".to_string(),
+        ))
+    }
+
+    fn document_reader(&self) -> Box<dyn DocumentReader + 'static> {
+        match self.store.as_ref() {
+            Some(store) => match ocs_plugin_api::shm::SharedDocumentReader::open(store.path()) {
+                Ok(reader) => Box::new(reader),
+                Err(_) => Box::new(EmptyReader),
+            },
+            None => Box::new(EmptyReader),
+        }
+    }
+
+    fn document_view(&self) -> Option<ocs_plugin_api::shm::DocumentViewInfo> {
+        self.store.as_ref().map(|store| ocs_plugin_api::shm::DocumentViewInfo {
+            path: store.path().to_string_lossy().to_string(),
+            version: store.version(),
+        })
+    }
+}
+
 /// The stable contract a plugin's `dispatch` sees. Each method forwards to the
 /// inherent `HostSession` method of the same name (inherent methods take
 /// resolution priority, so this is plain delegation, not recursion). The
@@ -248,6 +302,16 @@ impl HostApi for HostSession<'_> {
     }
     fn document_view(&mut self) -> Option<ocs_plugin_api::shm::DocumentViewInfo> {
         self.document_view()
+    }
+    fn start_async_session(&mut self, session_id: &str) -> Option<Box<dyn AsyncSessionHandle>> {
+        let mut store = ocs_plugin_api::shm::DocumentSnapshotStore::new(self.tab, 8 * 1024 * 1024).ok()?;
+        store.publish(self.document()).ok()?;
+        let handle = AcceptedAsyncSessionHandle {
+            tab: self.tab,
+            store: Some(store),
+        };
+        self.push_info(&format!("Async session {session_id} started"));
+        Some(Box::new(handle))
     }
 }
 

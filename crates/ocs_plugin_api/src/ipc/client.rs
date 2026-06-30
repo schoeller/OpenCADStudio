@@ -575,6 +575,7 @@ pub struct PluginHostApiV3 {
     next_command_id: Cell<u64>,
     record_cache: RefCell<HashMap<(Handle, String), &'static ExtendedDataRecord>>,
     doc_view: RefCell<Option<DocumentViewInfo>>,
+    async_session_id: RefCell<Option<String>>,
 }
 
 impl PluginHostApiV3 {
@@ -587,6 +588,7 @@ impl PluginHostApiV3 {
             next_command_id: Cell::new(1),
             record_cache: RefCell::new(HashMap::new()),
             doc_view: RefCell::new(None),
+            async_session_id: RefCell::new(None),
         }
     }
 
@@ -761,6 +763,14 @@ impl HostApi for PluginHostApiV3 {
     }
 
     fn document_reader(&self) -> Box<dyn DocumentReader + '_> {
+        if let Some(session_id) = self.async_session_id.borrow().as_ref() {
+            let handle = AsyncSessionHandleV3 {
+                client: self.client.clone(),
+                tab_index: self.tab_index,
+                session_id: session_id.clone(),
+            };
+            return handle.document_reader();
+        }
         let info = self
             .doc_view
             .borrow_mut()
@@ -792,12 +802,12 @@ impl HostApi for PluginHostApiV3 {
             session_id: session_id.to_string(),
         }) {
             PluginResponse::Ok => {
-                let handle = AsyncSessionHandleV3 {
+                *self.async_session_id.borrow_mut() = Some(session_id.to_string());
+                Some(Box::new(AsyncSessionHandleV3 {
                     client: self.client.clone(),
                     tab_index: self.tab_index,
                     session_id: session_id.to_string(),
-                };
-                Some(Box::new(handle))
+                }))
             }
             other => {
                 eprintln!("[plugin v3] start_async_session failed: {other:?}");
