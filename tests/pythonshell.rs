@@ -10,7 +10,8 @@ use ocs_plugin_api::host::{
     AsyncSessionError, AsyncSessionHandle, DocumentReader, HostApi, InteractiveCommand,
     ReaderEntity,
 };
-use ocs_plugin_api::process::PluginManager;
+use ocs_plugin_api::ipc::protocol::HostRequest;
+use ocs_plugin_api::process::{PluginManager, PluginProcess};
 use ocs_plugin_api::CadModule;
 
 struct EmptyReader;
@@ -244,4 +245,41 @@ fn pyshell_unknown_command_not_handled() {
     manager.shutdown_all();
     wait_for(|| !manager.is_alive(&id), Duration::from_secs(5));
     assert!(!manager.is_alive(&id));
+}
+
+#[test]
+fn pyshell_request_fails_after_kill() {
+    setup_runner();
+    let path = match cdylib_path("opencad-pythonshell") {
+        Some(p) => p,
+        None => {
+            eprintln!("opencad-pythonshell cdylib not built; skipping");
+            return;
+        }
+    };
+
+    let mut host = DummyHost {
+        document: CadDocument::new(),
+        accepted_session: None,
+    };
+
+    let process = PluginProcess::spawn(&path, &mut host).expect("spawn pythonshell plugin");
+    assert_eq!(process.id(), "opencad.pythonshell");
+    assert!(process.is_alive(), "pythonshell process should be alive");
+
+    process.shutdown_all();
+    wait_for(|| !process.is_alive(), Duration::from_secs(5));
+    assert!(!process.is_alive(), "pythonshell process should be dead after kill");
+
+    let err = process
+        .request_v3("", HostRequest::GetManifest)
+        .expect_err("request to dead process should fail");
+    let msg = format!("{err:?}").to_lowercase();
+    assert!(
+        msg.contains("session closed")
+            || msg.contains("calltimeout")
+            || msg.contains("timed out")
+            || msg.contains("shut down"),
+        "unexpected error from dead process: {err:?}"
+    );
 }

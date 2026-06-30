@@ -1,6 +1,7 @@
 //! Proxy around a V3 async session handle for host-side CAD operations.
 
 use acadrust::entities::{Line, Point};
+use acadrust::xdata::ExtendedDataRecord;
 use acadrust::{EntityType, Handle};
 use ocs_plugin_api::host::{AsyncSessionError, AsyncSessionHandle, DocumentReader};
 use ocs_plugin_api::ipc::protocol::{PluginRequest, PluginResponse};
@@ -82,6 +83,20 @@ impl HostProxy {
         }
     }
 
+    /// Write an extended-data record onto the entity with `handle`.
+    pub fn write_record(
+        &self,
+        handle: Handle,
+        record: ExtendedDataRecord,
+    ) -> Result<bool, AsyncSessionError> {
+        match self.request(PluginRequest::WriteRecord { handle, record })? {
+            PluginResponse::Bool(b) => Ok(b),
+            other => Err(AsyncSessionError::Transport(format!(
+                "unexpected WriteRecord response: {other:?}"
+            ))),
+        }
+    }
+
     /// Ask the host to open/refresh a shared-memory document view.
     pub fn open_document_view(&self) -> Option<DocumentViewInfo> {
         self.handle.document_view()
@@ -107,7 +122,12 @@ impl HostProxy {
 mod tests {
     use super::*;
     use acadrust::Handle;
-    use ocs_plugin_api::host::{AsyncSessionError, AsyncSessionHandle, DocumentReader, ReaderEntity};
+    use ocs_plugin_api::host::{
+        AsyncSessionError, AsyncSessionHandle, DocumentReader, ReaderEntity, ReaderEntityKind,
+        ReaderPoint,
+    };
+    use ocs_plugin_api::shm::{DocumentSnapshotStore, DocumentViewInfo, SharedDocumentReader};
+    use std::path::Path;
 
     struct MockHandle {
         fail_next: std::sync::Mutex<bool>,
@@ -127,6 +147,7 @@ mod tests {
             }
             match req {
                 PluginRequest::AddEntity(_) => Ok(PluginResponse::Handle(Handle::new(42))),
+                PluginRequest::WriteRecord { .. } => Ok(PluginResponse::Bool(true)),
                 PluginRequest::PushUndo { .. } | PluginRequest::PushOutput { .. } => Ok(PluginResponse::Ok),
                 _ => Ok(PluginResponse::Error(format!("unmocked: {req:?}"))),
             }
@@ -189,5 +210,81 @@ mod tests {
         let proxy = HostProxy::new(Box::new(handle));
         let err = proxy.push_undo("fail").unwrap_err();
         assert!(matches!(err, AsyncSessionError::Closed));
+    }
+
+    #[test]
+    fn proxy_write_record_returns_bool() {
+        let proxy = HostProxy::new(Box::new(mock()));
+        let result = proxy.write_record(Handle::new(1), ExtendedDataRecord::new("TEST"));
+        assert_eq!(result.unwrap(), true);
+    }
+
+    #[test]
+    fn proxy_push_output_succeeds() {
+        let proxy = HostProxy::new(Box::new(mock()));
+        proxy.push_output("hello").unwrap();
+    }
+
+    #[test]
+    fn proxy_document_reader_sees_published_entities() {
+        let mut doc = acadrust::CadDocument::new();
+        let mut point = Point::from_coords(3.0, 4.0, 5.0);
+        point.common.handle = Handle::new(7);
+        doc.add_entity(EntityType::Point(point)).unwrap();
+
+        let mut store = DocumentSnapshotStore::new(0, 8 * 1024 * 1024).unwrap();
+        store.publish(&doc).unwrap();
+
+        let view = DocumentViewInfo {
+            path: store.path().to_string_lossy().to_string(),
+            version: store.version(),
+        };
+
+        struct StoreHandle {
+            _store: DocumentSnapshotStore,
+            view: DocumentViewInfo,
+        }
+
+        impl AsyncSessionHandle for StoreHandle {
+            fn tab_index(&self) -> usize {
+                0
+            }
+            fn request(
+                &self,
+                _req: PluginRequest,
+            ) -> Result<PluginResponse, AsyncSessionError> {
+                Err(AsyncSessionError::Closed)
+            }
+            fn document_reader(&self) -> Box<dyn DocumentReader + 'static> {
+                Box::new(SharedDocumentReader::open(Path::new(&self.view.path)).unwrap())
+            }
+            fn document_view(&self) -> Option<DocumentViewInfo> {
+                Some(self.view.clone())
+            }
+        }
+
+        let handle = StoreHandle {
+            _store: store,
+            view,
+        };
+        let proxy = HostProxy::new(Box::new(handle));
+
+        let reader = proxy.document_reader();
+        assert!(reader.entity_count() >= 1);
+
+        let mut found = None;
+        reader.for_each_entity(&mut |e| {
+            if e.kind == ReaderEntityKind::Point {
+                found = Some(e.point);
+            }
+        });
+        assert_eq!(
+            found,
+            Some(Some(ReaderPoint {
+                x: 3.0,
+                y: 4.0,
+                z: 5.0
+            }))
+        );
     }
 }
