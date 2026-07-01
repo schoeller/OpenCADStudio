@@ -1,0 +1,13 @@
+[plugin]
+id = "ocs.template.api3"
+name = "API v3 Panel Template"
+version = "0.1.0"
+description = "Reference plugin showing API v3 panels and async IPC."
+author = "Open CAD Studio contributors"
+license = "GPL-3.0-only"
+
+[opencad]
+api_version = 3
+ribbon_order = 200
+command_prefixes = ["API3_"]
+xdata_apps = ["API3TMPL"]

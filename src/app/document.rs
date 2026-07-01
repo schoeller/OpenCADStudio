@@ -10,6 +10,7 @@ use crate::ui::{LayerPanel, PropertiesPanel};
 use acadrust::tables::Ucs;
 use acadrust::{CadDocument, EntityType, Handle};
 use iced;
+use ocs_plugin_api::shm::DocumentSnapshotStore;
 use std::any::Any;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -154,6 +155,9 @@ impl DocumentTab {
 
 pub(super) struct DocumentTab {
     pub(super) scene: Scene,
+    /// Shared-memory snapshot store for out-of-process plugins. Kept on the tab
+    /// so the backing file survives individual HostSession instances.
+    pub(super) doc_store: Option<DocumentSnapshotStore>,
     pub(super) current_path: Option<PathBuf>,
     pub(super) dirty: bool,
     pub(super) tab_title: String,
@@ -409,6 +413,7 @@ impl DocumentTab {
         }
         Self {
             scene,
+            doc_store: None,
             current_path: None,
             dirty: false,
             tab_title: format!("Drawing{}", n),

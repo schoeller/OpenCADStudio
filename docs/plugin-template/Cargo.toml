@@ -5,13 +5,18 @@ edition = "2021"
 description = "An Open CAD Studio add-on."
 license = "GPL-3.0-only"
 
+# Keep the template standalone even when it sits inside the host repo.
+[workspace]
+
 # A plugin is a C-ABI dynamic library the host loads at runtime.
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
 # The stable contract, with the runtime `host` surface (HostApi / BuiltinPlugin).
-ocs_plugin_api = { git = "https://github.com/HakanSeven12/OpenCADStudio", features = ["host"] }
+# When you copy this template into its own repository, change this to the git
+# dependency shown in `docs/plugin-architecture.md`.
+ocs_plugin_api = { path = "../../crates/ocs_plugin_api", features = ["host"] }
 
 # Match the host's acadrust so the loaded library is binary-compatible
 # (approach B assumes the same toolchain + dependency versions).

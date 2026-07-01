@@ -1255,6 +1255,14 @@ impl OpenCADStudio {
             Space::new().into()
         };
 
+        // Plugin panels (API v3). Rendered as in-window floating overlays on
+        // top of the main layout; `Space` keeps the layout stable when empty.
+        #[cfg(not(target_arch = "wasm32"))]
+        let plugin_panels_overlay: Element<'_, Message> =
+            crate::plugin::external::with_manager(|mgr| mgr.view());
+        #[cfg(target_arch = "wasm32")]
+        let plugin_panels_overlay: Element<'_, Message> = Space::new().into();
+
         // Command-line sits as a bottom-centre overlay on top of the
         // viewport stack rather than as a separate row in the main
         // column — frees up vertical space when no command is active
@@ -1267,7 +1275,7 @@ impl OpenCADStudio {
         // The MText preview also captures keystrokes (typing edits it), so the
         // command line must likewise release its on_input there.
         let dyn_capturing =
-            (self.dyn_input && tab.active_cmd.is_some() && !tab.dyn_fields.is_empty())
+            (self.dyn_input && tab.active_cmd.is_some() && !self.tabs[i].dyn_fields.is_empty())
                 || self.mtext_editor.as_ref().is_some_and(|e| e.show_preview)
                 || self.text_inline.is_some();
         let command_line_overlay =
@@ -1290,6 +1298,7 @@ impl OpenCADStudio {
         let center_stack = iced::widget::stack![
             row![properties_el, viewport_stack].width(Fill).height(Fill),
             command_line_overlay,
+            plugin_panels_overlay,
         ]
         .width(Fill)
         .height(Fill);
@@ -1676,6 +1685,31 @@ impl OpenCADStudio {
         } else {
             Subscription::none()
         };
+        // While any plugin panel is open, poll async plugin events at ~60 Hz so
+        // push_output / panel updates appear promptly without waiting for the
+        // next user-generated message.
+        let plugin_drain = if crate::plugin::external::with_manager(|mgr| mgr.has_open_panels()) {
+            iced::time::every(std::time::Duration::from_millis(16))
+                .map(|_| Message::PluginDrainTick)
+        } else {
+            Subscription::none()
+        };
+        // While a plugin panel is being dragged or resized, listen to global
+        // pointer move/release events so the operation tracks the cursor even
+        // when it leaves the panel bounds.
+        let panel_pointer = if crate::plugin::external::with_manager(|mgr| mgr.is_dragging_or_resizing()) {
+            event::listen_with(|ev, _status, _win_id| match ev {
+                iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                    Some(Message::PanelPointerMove { point: position })
+                }
+                iced::Event::Mouse(iced::mouse::Event::ButtonReleased(_)) => {
+                    Some(Message::PanelPointerRelease)
+                }
+                _ => None,
+            })
+        } else {
+            Subscription::none()
+        };
         // Web: poll for per-script fonts that a drawing's text needs but hasn't
         // fetched yet. Cheap — `PollWebFonts` is a no-op when nothing is
         // pending. Native has system fonts, so no polling. (#141)
@@ -1708,6 +1742,8 @@ impl OpenCADStudio {
             hover_dwell,
             nav_settle,
             caret_blink,
+            plugin_drain,
+            panel_pointer,
             web_fonts,
             autosave,
             single_instance,

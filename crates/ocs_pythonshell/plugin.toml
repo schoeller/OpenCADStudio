@@ -1,0 +1,13 @@
+[plugin]
+id = "ocs.pythonshell"
+name = "Python Shell"
+version = "0.2.0"
+description = "Interactive Python REPL panel."
+author = "Open CAD Studio contributors"
+license = "GPL-3.0-only"
+
+[opencad]
+api_version = 3
+ribbon_order = 200
+command_prefixes = ["PY_"]
+xdata_apps = ["PY_SHELL"]

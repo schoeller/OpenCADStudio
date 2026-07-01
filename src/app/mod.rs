@@ -1767,6 +1767,25 @@ pub enum Message {
     PluginManagerClose,
     /// Enable (`true`) or disable (`false`) the plugin with this id.
     SetPluginEnabled(String, bool),
+    /// User interaction with a host-rendered plugin panel.
+    PluginPanelEvent {
+        process_id: String,
+        panel_id: String,
+        event: ocs_plugin_api::panel::PanelEvent,
+    },
+    /// Periodic tick that drains plugin async events while panels are open,
+    /// so plugin responses appear without waiting for the next user input.
+    PluginDrainTick,
+    /// Start dragging a floating plugin panel by its header.
+    PanelDragStart(ocs_plugin_api::panel::PanelHandle),
+    /// Start resizing a floating plugin panel from the grip.
+    PanelResizeStart(ocs_plugin_api::panel::PanelHandle),
+    /// Global pointer move while a panel drag or resize is active.
+    PanelPointerMove { point: iced::Point },
+    /// Global pointer release while a panel drag or resize is active.
+    PanelPointerRelease,
+    /// Bring a floating plugin panel to the front.
+    PanelFocus(ocs_plugin_api::panel::PanelHandle),
     // ── Plugin marketplace (install from a linked repo's releases) ─────────
     /// Edit the add-repository text field.
     PluginRepoInput(String),
@@ -2486,6 +2505,17 @@ impl OpenCADStudio {
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub(crate) fn push_plugin_error(&mut self, msg: &str) {
         self.command_line.push_error(msg);
+    }
+
+    /// Geometry epoch for `tab`, used to coalesce document-changed broadcasts
+    /// to plugin panels.
+    pub(crate) fn geometry_epoch(&self, tab: usize) -> u64 {
+        self.tabs.get(tab).map(|t| t.scene.geometry_epoch).unwrap_or(0)
+    }
+
+    /// Index of the currently active document tab.
+    pub(crate) fn active_tab(&self) -> usize {
+        self.active_tab
     }
 
     #[cfg(test)]

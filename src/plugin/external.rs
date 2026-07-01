@@ -223,7 +223,7 @@ fn parse_string_array(s: &str) -> Vec<String> {
 // ── Runtime loading (desktop only) ──────────────────────────────────────────
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) use loader::{shutdown_plugins, with_manager};
+    pub(crate) use loader::{shutdown_plugins, with_manager};
 
 #[cfg(all(not(target_arch = "wasm32"), not(test)))]
 pub(crate) use loader::{load_at_startup, loaded_ids};
@@ -231,15 +231,219 @@ pub(crate) use loader::{load_at_startup, loaded_ids};
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg_attr(test, allow(dead_code))]
 mod loader {
-    use super::lib_extension;
-    use ocs_plugin_api::process::PluginManager;
     use std::cell::RefCell;
     use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+
+    use ocs_plugin_api::ipc::protocol::HostAsync;
+    use ocs_plugin_api::panel::{PanelDef, PanelError, PanelEvent, PanelHandle};
+    use ocs_plugin_api::process::PluginManager;
+
+    fn panel_log(_msg: &str) {
+        // Disabled in release builds to avoid synchronous file I/O on the hot
+        // panel-event path. Re-enable locally when debugging async IPC.
+    }
+
+    use super::lib_extension;
+    use crate::plugin::panels::{DocumentEvent, PanelManager};
+
+    /// Host-side wrapper around the crate-level plugin manager that also owns
+    /// the panel manager for API v3 panels.
+    pub struct HostPluginManager {
+        manager: PluginManager,
+        /// `RefCell` allows `HostApi` callbacks dispatched from inside
+        /// `with_manager` (which holds an immutable borrow of the manager) to
+        /// still mutate the panel state (e.g. `open_panel`).
+        panels: RefCell<PanelManager>,
+    }
+
+    impl HostPluginManager {
+        pub fn new() -> Self {
+            Self {
+                manager: PluginManager::new(),
+                panels: RefCell::new(PanelManager::new()),
+            }
+        }
+
+        /// Returns whether any plugin panel is currently open.
+        pub fn has_open_panels(&self) -> bool {
+            self.panels.borrow().has_panels()
+        }
+
+        /// Open (or refresh) a panel for `def` owned by `process`.
+        pub fn open_panel(
+            &self,
+            process: Arc<ocs_plugin_api::process::PluginProcess>,
+            def: &PanelDef,
+        ) -> Result<PanelHandle, PanelError> {
+            self.panels.borrow_mut().open(process, def)
+        }
+
+        /// Update the logical window size used for clamping and edge snapping.
+        pub fn set_window_size(&self, width: f32, height: f32) {
+            self.panels.borrow_mut().set_window_size(width, height);
+        }
+
+        /// Close an open panel.
+        pub fn close_panel(&self, handle: PanelHandle) -> Result<(), PanelError> {
+            self.panels.borrow_mut().close(handle)
+        }
+
+        /// Move an open panel to logical window coordinates.
+        pub fn move_panel(&self, handle: PanelHandle, x: f32, y: f32) -> Result<(), PanelError> {
+            self.panels.borrow_mut().move_panel(handle, x, y)
+        }
+
+        /// Resize an open panel. Values are clamped to the panel's minimum size.
+        pub fn resize_panel(
+            &self,
+            handle: PanelHandle,
+            width: f32,
+            height: f32,
+        ) -> Result<(), PanelError> {
+            self.panels.borrow_mut().resize_panel(handle, width, height)
+        }
+
+        /// Dock an open panel to `zone`.
+        pub fn dock_panel(
+            &self,
+            handle: PanelHandle,
+            zone: ocs_plugin_api::panel::DockZone,
+        ) -> Result<(), PanelError> {
+            self.panels.borrow_mut().dock_panel(handle, zone)
+        }
+
+        /// Undock an open panel and place it at logical window coordinates.
+        pub fn undock_panel(
+            &self,
+            handle: PanelHandle,
+            x: f32,
+            y: f32,
+        ) -> Result<(), PanelError> {
+            self.panels.borrow_mut().undock_panel(handle, x, y)
+        }
+
+        /// Update the widgets of the panel identified by `panel_id`.
+        #[allow(dead_code)]
+        pub fn update_panel(&self, panel_id: &str, widgets: Vec<ocs_plugin_api::panel::Widget>) {
+            self.panels.borrow_mut().update(panel_id, widgets);
+        }
+
+        /// Send a panel event to the plugin process owning the panel with
+        /// `handle`. Used when the plugin addresses a panel by handle rather
+        /// than by id.
+        pub fn send_panel_event(
+            &self,
+            handle: PanelHandle,
+            event: PanelEvent,
+        ) -> Result<(), PanelError> {
+            // Find the panel by handle so we can route to the right process/id.
+            let panels = self.panels.borrow();
+            let (process_id, panel_id) = panels
+                .panel_by_handle(handle)
+                .map(|(pid, id)| (pid.to_string(), id.to_string()))
+                .ok_or(PanelError::UnknownHandle)?;
+            drop(panels);
+            self.panels
+                .borrow_mut()
+                .send_panel_event_by_ids(&process_id, &panel_id, event);
+            Ok(())
+        }
+
+        /// Handle an asynchronous plugin event from an in-process plugin.
+        pub fn handle_async(&self, event: ocs_plugin_api::ipc::protocol::PluginAsync) {
+            panel_log(&format!("handle_async: {event:?}"));
+            let mut panels = self.panels.borrow_mut();
+            match event {
+                ocs_plugin_api::ipc::protocol::PluginAsync::PanelUpdate { panel_id, widgets } => {
+                    panels.update(&panel_id, widgets);
+                }
+                ocs_plugin_api::ipc::protocol::PluginAsync::PanelClosed { panel_id } => {
+                    if let Some(handle) = panels.handle_by_panel_id(&panel_id) {
+                        let _ = panels.close(handle);
+                    }
+                }
+            }
+            panel_log("handle_async done");
+        }
+
+        /// Drain all queued async events from plugin processes and apply them.
+        pub fn drain_and_handle_async(&self, host: &mut dyn ocs_plugin_api::host::HostApi) {
+            let events = self.manager.drain_async_events(host);
+            panel_log(&format!("drain_and_handle_async: {} events", events.len()));
+            for event in events {
+                self.handle_async(event);
+            }
+        }
+
+        /// Broadcast a document lifecycle event to every panel-owning plugin.
+        pub fn broadcast_document_event(&self, tab: usize, event: DocumentEvent) {
+            panel_log(&format!("broadcast_document_event tab={tab} event={event:?}"));
+            self.panels.borrow().broadcast_document_event(tab, event);
+        }
+
+        /// Handle a host UI message that may target a plugin panel.
+        pub fn handle_message(
+            &self,
+            msg: &crate::app::Message,
+        ) -> Option<iced::Task<crate::app::Message>> {
+            panel_log(&format!("handle_message: {msg:?}"));
+            let result = self.panels.borrow_mut().handle_message(msg);
+            panel_log("handle_message done");
+            result
+        }
+
+        /// Render the open plugin panels as floating overlays.
+        pub fn view(&self) -> iced::Element<'static, crate::app::Message> {
+            panel_log("view start");
+            let result = self.panels.borrow().view();
+            panel_log("view done");
+            result
+        }
+
+        /// Returns whether the user is currently dragging or resizing a panel.
+        pub fn is_dragging_or_resizing(&self) -> bool {
+            self.panels.borrow().is_dragging_or_resizing()
+        }
+
+        /// Ribbon modules for alive, non-disabled plugins.
+        pub fn ribbon_modules<F: Fn(&str) -> bool>(
+            &self,
+            is_disabled: F,
+        ) -> Vec<(i32, ocs_plugin_api::ribbon::owned::SharedCadModule)> {
+            self.manager.ribbon_modules(is_disabled)
+        }
+
+        /// Command names advertised by every alive, non-disabled plugin.
+        pub fn command_names<F: Fn(&str) -> bool>(&self, is_disabled: F) -> Vec<String> {
+            self.manager.command_names(is_disabled)
+        }
+
+        /// Dispatch `cmd` to each plugin until one handles it.
+        pub fn dispatch<F: Fn(&str) -> bool>(
+            &self,
+            host: &mut dyn ocs_plugin_api::host::HostApi,
+            cmd: &str,
+            is_disabled: F,
+        ) -> ocs_plugin_api::process::DispatchResult {
+            self.manager.dispatch(host, cmd, is_disabled)
+        }
+
+        /// Plugin ids currently loaded.
+        pub fn ids(&self) -> Vec<String> {
+            self.manager.ids()
+        }
+
+        /// Eagerly shut down all plugin runner processes.
+        pub fn shutdown_all(&mut self) {
+            self.manager.shutdown_all();
+        }
+    }
 
     // Process-wide plugin manager. Drop kills every runner process asynchronously
     // so host shutdown is never delayed by a plugin.
     thread_local! {
-        static MANAGER: RefCell<Option<PluginManager>> = const { RefCell::new(None) };
+        static MANAGER: RefCell<Option<HostPluginManager>> = const { RefCell::new(None) };
     }
 
     /// Discover packages and spawn every API-compatible one as a separate
@@ -249,7 +453,7 @@ mod loader {
         app: &mut crate::app::OpenCADStudio,
     ) -> Vec<(String, Result<(), String>)> {
         let discovered = super::discover();
-        let mut manager = PluginManager::new();
+        let mut host_manager = HostPluginManager::new();
         let mut out = Vec::new();
         for d in &discovered {
             if !d.api_compatible() || !d.lib_present {
@@ -263,12 +467,23 @@ mod loader {
                 continue;
             };
             let mut host = crate::app::plugin_host::HostSession::new(app, 0);
-            match manager.load(&path, &mut host) {
-                Ok(id) => out.push((id, Ok(()))),
+            match host_manager.manager.load(&path, &mut host) {
+                Ok(id) => {
+                    // Tell the plugin about the initially active tab and
+                    // register any panels it declares.
+                    if let Some(process) = host_manager.manager.process(&id) {
+                        let _ = process.send_async(HostAsync::DocumentActivated { tab: 0 });
+                        let mut panels = host_manager.panels.borrow_mut();
+                        for def in process.panels() {
+                            panels.register_def(def);
+                        }
+                    }
+                    out.push((id, Ok(())));
+                }
                 Err(e) => out.push((d.id.clone(), Err(e.to_string()))),
             }
         }
-        MANAGER.with(|m| *m.borrow_mut() = Some(manager));
+        MANAGER.with(|m| *m.borrow_mut() = Some(host_manager));
         out
     }
 
@@ -277,15 +492,15 @@ mod loader {
         MANAGER.with(|m| m.borrow().as_ref().map(|mgr| mgr.ids()).unwrap_or_default())
     }
 
-    /// Run `f` with a reference to the loaded plugin manager.
-    pub fn with_manager<R>(f: impl FnOnce(&PluginManager) -> R) -> R {
+    /// Run `f` with a reference to the loaded host plugin manager.
+    pub fn with_manager<R>(f: impl FnOnce(&HostPluginManager) -> R) -> R {
         MANAGER.with(|m| {
             let guard = m.borrow();
             if let Some(manager) = guard.as_ref() {
                 return f(manager);
             }
             drop(guard);
-            let empty = PluginManager::new();
+            let empty = HostPluginManager::new();
             f(&empty)
         })
     }

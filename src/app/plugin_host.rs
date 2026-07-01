@@ -13,7 +13,7 @@ use super::OpenCADStudio;
 pub(crate) struct HostSession<'a> {
     app: &'a mut OpenCADStudio,
     tab: usize,
-    doc_store: Option<ocs_plugin_api::shm::DocumentSnapshotStore>,
+    current_process: Option<std::sync::Arc<ocs_plugin_api::process::PluginProcess>>,
 }
 
 impl<'a> HostSession<'a> {
@@ -21,7 +21,7 @@ impl<'a> HostSession<'a> {
         Self {
             app,
             tab,
-            doc_store: None,
+            current_process: None,
         }
     }
 
@@ -39,12 +39,13 @@ impl<'a> HostSession<'a> {
 
     pub fn document_view(&mut self) -> Option<ocs_plugin_api::shm::DocumentViewInfo> {
         use ocs_plugin_api::shm::DocumentSnapshotStore;
-        if self.doc_store.is_none() {
+        let tab = &mut self.app.tabs[self.tab];
+        if tab.doc_store.is_none() {
             let mut store = DocumentSnapshotStore::new(self.tab, 8 * 1024 * 1024).ok()?;
-            store.publish(self.document()).ok()?;
-            self.doc_store = Some(store);
+            store.publish(&tab.scene.document).ok()?;
+            tab.doc_store = Some(store);
         }
-        let store = self.doc_store.as_ref()?;
+        let store = tab.doc_store.as_ref()?;
         Some(ocs_plugin_api::shm::DocumentViewInfo {
             path: store.path().to_string_lossy().to_string(),
             version: store.version(),
@@ -52,8 +53,12 @@ impl<'a> HostSession<'a> {
     }
 
     fn publish_document_view(&mut self) {
-        let doc = &self.app.tabs[self.tab].scene.document;
-        if let Some(store) = self.doc_store.as_mut() {
+        let tab = &mut self.app.tabs[self.tab];
+        // Take the store out so we can borrow the document immutably at the
+        // same time, then put it back after publishing.
+        let mut store_opt = tab.doc_store.take();
+        let doc = &tab.scene.document;
+        if let Some(ref mut store) = store_opt {
             if let Err(e) = store.publish(doc) {
                 eprintln!(
                     "[host] failed to publish document view for tab {}: {e}",
@@ -61,6 +66,7 @@ impl<'a> HostSession<'a> {
                 );
             }
         }
+        tab.doc_store = store_opt;
     }
 
     pub fn add_entity(&mut self, entity: EntityType) -> Handle {
@@ -84,20 +90,19 @@ impl<'a> HostSession<'a> {
     }
 
     /// Delete the entity with `handle`, keeping the scene's render caches in
-    /// sync. Returns `false` when the entity is absent or on a locked layer
-    /// (which `erase_entities` refuses to remove).
-    pub fn remove_entity(&mut self, handle: Handle) -> bool {
+    /// sync. Returns the removed entity when one existed (and was not on a
+    /// locked layer).
+    pub fn remove_entity(&mut self, handle: Handle) -> Option<EntityType> {
         if self.document().get_entity(handle).is_none() {
-            return false;
+            return None;
         }
+        let entity = self.document_mut().remove_entity(handle);
         self.app.tabs[self.tab].scene.erase_entities(&[handle]);
-        let removed = self.document().get_entity(handle).is_none();
-        if removed {
+        if entity.is_some() {
             self.publish_document_view();
         }
-        removed
+        entity
     }
-
     // ── XDATA convenience ──────────────────────────────────────────────────
     // Plugins persist domain data as XDATA on plain entities so it round-trips
     // through DWG/DXF. These wrap the `acadrust::xdata` API keyed by entity
@@ -202,6 +207,17 @@ impl<'a> HostSession<'a> {
         self.app.tabs[self.tab].dirty = true;
     }
 
+    pub fn set_active_tab(&mut self, tab: usize) -> Result<(), String> {
+        if tab >= self.app.tabs.len() {
+            return Err(format!(
+                "tab index {tab} out of range ({} tabs)",
+                self.app.tabs.len()
+            ));
+        }
+        self.tab = tab;
+        Ok(())
+    }
+
     pub fn push_info(&mut self, msg: &str) {
         self.app.command_line.push_info(msg);
     }
@@ -236,7 +252,7 @@ impl HostApi for HostSession<'_> {
     fn update_entity(&mut self, entity: EntityType) -> bool {
         self.update_entity(entity)
     }
-    fn remove_entity(&mut self, handle: Handle) -> bool {
+    fn remove_entity(&mut self, handle: Handle) -> Option<EntityType> {
         self.remove_entity(handle)
     }
     fn bump_geometry(&mut self) {
@@ -298,6 +314,74 @@ impl HostApi for HostSession<'_> {
     }
     fn document_view(&mut self) -> Option<ocs_plugin_api::shm::DocumentViewInfo> {
         self.document_view()
+    }
+    fn set_active_tab(&mut self, tab: usize) -> Result<(), String> {
+        self.set_active_tab(tab)
+    }
+    fn open_panel(
+        &mut self,
+        def: &ocs_plugin_api::panel::PanelDef,
+    ) -> Result<ocs_plugin_api::panel::PanelHandle, ocs_plugin_api::panel::PanelError> {
+        let Some(process) = self.current_process.clone() else {
+            return Err(ocs_plugin_api::panel::PanelError::Unsupported);
+        };
+        crate::plugin::external::with_manager(|mgr| mgr.open_panel(process, def))
+    }
+    fn close_panel(
+        &mut self,
+        handle: ocs_plugin_api::panel::PanelHandle,
+    ) -> Result<(), ocs_plugin_api::panel::PanelError> {
+        crate::plugin::external::with_manager(|mgr| mgr.close_panel(handle))
+    }
+    fn move_panel(
+        &mut self,
+        handle: ocs_plugin_api::panel::PanelHandle,
+        x: f32,
+        y: f32,
+    ) -> Result<(), ocs_plugin_api::panel::PanelError> {
+        crate::plugin::external::with_manager(|mgr| mgr.move_panel(handle, x, y))
+    }
+    fn resize_panel(
+        &mut self,
+        handle: ocs_plugin_api::panel::PanelHandle,
+        width: f32,
+        height: f32,
+    ) -> Result<(), ocs_plugin_api::panel::PanelError> {
+        crate::plugin::external::with_manager(|mgr| mgr.resize_panel(handle, width, height))
+    }
+    fn dock_panel(
+        &mut self,
+        handle: ocs_plugin_api::panel::PanelHandle,
+        zone: ocs_plugin_api::panel::DockZone,
+    ) -> Result<(), ocs_plugin_api::panel::PanelError> {
+        crate::plugin::external::with_manager(|mgr| mgr.dock_panel(handle, zone))
+    }
+    fn undock_panel(
+        &mut self,
+        handle: ocs_plugin_api::panel::PanelHandle,
+        x: f32,
+        y: f32,
+    ) -> Result<(), ocs_plugin_api::panel::PanelError> {
+        crate::plugin::external::with_manager(|mgr| mgr.undock_panel(handle, x, y))
+    }
+    fn post_panel_event(
+        &mut self,
+        handle: ocs_plugin_api::panel::PanelHandle,
+        event: ocs_plugin_api::panel::PanelEvent,
+    ) -> Result<(), ocs_plugin_api::panel::PanelError> {
+        crate::plugin::external::with_manager(|mgr| mgr.send_panel_event(handle, event))
+    }
+    fn send_async(&mut self, event: ocs_plugin_api::ipc::protocol::PluginAsync) {
+        crate::plugin::external::with_manager(|mgr| mgr.handle_async(event));
+    }
+    fn set_current_process(
+        &mut self,
+        process: Option<std::sync::Arc<ocs_plugin_api::process::PluginProcess>>,
+    ) {
+        self.current_process = process;
+    }
+    fn current_process(&self) -> Option<std::sync::Arc<ocs_plugin_api::process::PluginProcess>> {
+        self.current_process.clone()
     }
 }
 

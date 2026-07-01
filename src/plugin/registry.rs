@@ -51,10 +51,16 @@ pub fn plugin_command_names(disabled: &rustc_hash::FxHashSet<String>) -> Vec<Str
 
 /// Dispatch `cmd` to a loaded external plugin (skipping disabled ones).
 /// Returns true if one handled it.
+///
+/// The entire dispatch path runs under a panic guard so a bug in plugin
+/// runtime code (or a plugin that panics through the cdylib boundary) cannot
+/// crash the host UI. If the guard catches a panic, the error is surfaced in
+/// the command line and dispatch reports as unhandled.
 pub(crate) fn try_dispatch(app: &mut OpenCADStudio, tab: usize, cmd: &str) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
         use super::host::HostSession;
+
         let disabled = app.disabled_plugin_ids();
         let result = {
             let mut host = HostSession::new(app, tab);

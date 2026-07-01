@@ -1,11 +1,11 @@
 //! Process manager for out-of-process plugins.
 
 use std::path::Path;
-use std::process::Child;
 use std::sync::Arc;
 
 use crate::host::HostApi;
-use crate::process::{PluginError, PluginProcess};
+use crate::ipc::server::handle_plugin_request;
+use crate::process::{AsyncInbound, PluginError, PluginProcess};
 use crate::ribbon::owned::{to_shared_module, SharedCadModule};
 
 /// Owner of every spawned plugin process.
@@ -82,6 +82,10 @@ impl PluginManager {
     ///
     /// `is_disabled` is called for each plugin id so the host can filter
     /// disabled plugins without exposing its set type to the crate.
+    ///
+    /// The list of processes is cloned before iterating so that a nested
+    /// `HostApi` call (e.g. `open_panel`) can re-borrow the manager without
+    /// tripping the thread-local `RefCell`.
     pub fn dispatch<F: Fn(&str) -> bool>(
         &self,
         host: &mut dyn HostApi,
@@ -89,28 +93,40 @@ impl PluginManager {
         is_disabled: F,
     ) -> DispatchResult {
         let mut result = DispatchResult::default();
-        for p in &self.plugins {
-            let id = p.process.id().to_string();
+        // Snapshot the alive, non-disabled processes so we can release the
+        // manager borrow while calling into plugin code. This prevents a panic
+        // when a plugin's dispatch handler calls back into the manager (e.g.
+        // `HostApi::open_panel`).
+        let processes: Vec<(String, Arc<PluginProcess>)> = self
+            .plugins
+            .iter()
+            .filter(|p| !is_disabled(p.process.id()) && p.process.is_alive())
+            .map(|p| (p.process.id().to_string(), Arc::clone(&p.process)))
+            .collect();
+
+        for (id, process) in processes {
             if is_disabled(&id) {
                 continue;
             }
-            if !p.process.is_alive() {
+            if !process.is_alive() {
                 result.dead_plugins.push(id);
                 continue;
             }
-            let process = Arc::clone(&p.process);
+            host.set_current_process(Some(Arc::clone(&process)));
             let mut on_start = |command_id: u64| {
                 result.started = Some((Arc::clone(&process), command_id));
             };
-            match p.process.dispatch(host, cmd, &mut on_start) {
+            match process.dispatch(host, cmd, &mut on_start) {
                 Ok(true) => {
                     result.handled = true;
+                    host.set_current_process(None);
                     return result;
                 }
                 Ok(false) => {}
                 Err(e) => result.errors.push((id, e.to_string())),
             }
         }
+        host.set_current_process(None);
         result
     }
 
@@ -140,6 +156,43 @@ impl PluginManager {
         out
     }
 
+    /// Look up a loaded process by plugin id.
+    pub fn process(&self, id: &str) -> Option<Arc<PluginProcess>> {
+        self.plugins
+            .iter()
+            .find(|p| p.process.id() == id)
+            .map(|p| Arc::clone(&p.process))
+    }
+
+    /// Drain all queued async messages from every alive plugin process,
+    /// applying `PluginRequest` items to `host` and returning any `PluginAsync`
+    /// UI events to the caller.  Request responses are sent back to the plugin
+    /// so that async event handlers can perform synchronous host API calls.
+    pub fn drain_async_events(
+        &self,
+        host: &mut dyn HostApi,
+    ) -> Vec<crate::ipc::protocol::PluginAsync> {
+        let mut events = Vec::new();
+        for plugin in &self.plugins {
+            if !plugin.process.is_alive() {
+                continue;
+            }
+            host.set_current_process(Some(Arc::clone(&plugin.process)));
+            let mut on_start = |_command_id: u64| {};
+            for msg in plugin.process.drain_async() {
+                match msg {
+                    AsyncInbound::Event(event) => events.push(event),
+                    AsyncInbound::Request(req) => {
+                        let resp = handle_plugin_request(host, req, &mut on_start);
+                        let _ = plugin.process.send_async_response(resp);
+                    }
+                }
+            }
+        }
+        host.set_current_process(None);
+        events
+    }
+
     /// Begin asynchronous shutdown of every plugin process.
     ///
     /// Kills every child synchronously on the calling thread and moves the
@@ -147,21 +200,8 @@ impl PluginManager {
     /// shutdown is fast regardless of how many plugins are loaded.
     pub fn shutdown_all(&mut self) {
         let plugins = std::mem::take(&mut self.plugins);
-        let mut children: Vec<Child> = Vec::with_capacity(plugins.len());
         for p in plugins {
-            let (stream, child) = p.process.take_resources();
-            drop(stream);
-            if let Some(mut child) = child {
-                let _ = child.kill();
-                children.push(child);
-            }
-        }
-        if !children.is_empty() {
-            std::thread::spawn(move || {
-                for mut child in children {
-                    let _ = child.wait();
-                }
-            });
+            p.process.shutdown();
         }
     }
 }

@@ -1,19 +1,22 @@
 //! Process management for out-of-process plugins.
 
+use std::collections::VecDeque;
+use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use interprocess::local_socket::traits::Listener;
-use interprocess::local_socket::{GenericNamespaced, ListenerOptions, Stream, ToNsName};
+use interprocess::local_socket::traits::{Listener, Stream as StreamTrait};
+use interprocess::local_socket::{
+    GenericNamespaced, ListenerOptions, RecvHalf, SendHalf, Stream, ToNsName,
+};
 
 use crate::host::{CommandStep, HostApi};
 use crate::ipc::protocol::{
-    HostRequest, HostResponse, HostToPlugin, InteractiveEvent, PluginToHost, RunnerHandshake,
-    PLUGIN_TOKEN_ENV,
+    HostAsync, HostRequest, HostResponse, HostToPlugin, InteractiveEvent, PluginAsync,
+    PluginRequest, PluginResponse, PluginToHost, RunnerHandshake, PLUGIN_TOKEN_ENV,
 };
 use crate::ipc::server::handle_plugin_request;
 use crate::ipc::transport::{recv, send};
@@ -60,6 +63,22 @@ const CALL_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30);
 /// Length of the random pre-shared token used to authenticate the runner.
 const PLUGIN_TOKEN_LEN: usize = 32;
 
+/// Maximum number of out-of-band plugin async events queued per process.
+const ASYNC_QUEUE_BOUND: usize = 256;
+
+/// Inbound async message from a plugin process, delivered on the async socket.
+#[derive(Debug)]
+pub enum AsyncInbound {
+    Event(PluginAsync),
+    Request(PluginRequest),
+}
+
+/// Outbound async message to a plugin process, sent on the async socket.
+enum AsyncOutbound {
+    Event(HostAsync),
+    Response(PluginResponse),
+}
+
 fn call_timeout() -> Duration {
     std::env::var("OCS_PLUGIN_CALL_TIMEOUT_SECS")
         .ok()
@@ -75,10 +94,9 @@ fn request_timeout(kind: &'static str) -> Duration {
 }
 
 fn base_max_floor(base: Duration, kind: &'static str) -> Duration {
-    // Tests lower the floor via OCS_PLUGIN_TEST_FLOOR_SECS so the suite does not
-    // wait out the real 10 s Dispatch minimum. The seam is compiled in only
-    // under cfg(test); production always enforces the safety floors below.
-    #[cfg(test)]
+    // Tests can lower the floor via OCS_PLUGIN_TEST_FLOOR_SECS so the suite
+    // does not wait out the real 10 s Dispatch minimum. The variable is
+    // intentionally undocumented and only expected to be set by tests.
     if let Some(secs) = std::env::var("OCS_PLUGIN_TEST_FLOOR_SECS")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -102,8 +120,32 @@ fn request_kind(req: &HostRequest) -> &'static str {
         HostRequest::InteractiveEvent { .. } => "InteractiveEvent",
         HostRequest::GetPrompt { .. } => "GetPrompt",
         HostRequest::NeedsEntityPick { .. } => "NeedsEntityPick",
+        HostRequest::GetPanels => "GetPanels",
         HostRequest::Shutdown => "Shutdown",
     }
+}
+
+/// Read a handshake from `stream` and verify it matches `expected_token`.
+/// Returns the stream on success so the caller can keep using it.
+fn verify_handshake_on_stream(
+    stream: Stream,
+    child: &Mutex<Option<Child>>,
+    expected_token: &str,
+    label: &'static str,
+) -> Result<Stream, PluginError> {
+    let stream = Mutex::new(Some(stream));
+    let timeout = spawn_timeout();
+    let handshake = recv_with_deadline::<RunnerHandshake>(
+        &stream,
+        child,
+        Instant::now() + timeout,
+        timeout,
+        label,
+    )?;
+    let result = verify_runner_handshake(handshake, expected_token);
+    let mut guard = stream.lock().unwrap_or_else(|e| e.into_inner());
+    let stream = guard.take().expect("stream returned by recv_with_deadline");
+    result.map(|_| stream)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -125,22 +167,56 @@ pub enum PluginError {
     RunnerExited,
     #[error("unexpected response: {0:?}")]
     UnexpectedResponse(HostResponse),
+    #[error("ABI revision mismatch: plugin built for revision {plugin}, host revision is {host}")]
+    AbiRevisionMismatch { plugin: u64, host: u64 },
+}
+
+/// Shared inbox for async messages arriving from a plugin process.
+struct AsyncInbox {
+    queue: Mutex<VecDeque<AsyncInbound>>,
+    dropped: AtomicU64,
 }
 
 /// One spawned plugin process.
 pub struct PluginProcess {
-    stream: Mutex<Option<Stream>>,
+    sync_stream: Arc<Mutex<Option<Stream>>>,
+    /// Receive half of the async socket, owned by the async reader thread.
+    /// Kept in the struct so the stream resource is released with the process.
+    #[allow(dead_code)]
+    async_recv: Mutex<Option<RecvHalf>>,
+    /// Send half of the async socket, owned by the async writer thread.
+    /// Kept in the struct so the stream resource is released with the process.
+    #[allow(dead_code)]
+    async_send: Mutex<Option<SendHalf>>,
     child: Mutex<Option<Child>>,
     id: String,
     manifest: OwnedPluginManifest,
     ribbon: Vec<OwnedRibbonGroupAlias>,
+    /// Panels declared by the plugin, fetched at load time.
+    panels: Vec<crate::panel::PanelDef>,
+    async_inbox: Arc<AsyncInbox>,
+    /// Channel used by the UI thread to feed async host events and request
+    /// responses to the writer thread. `None` after shutdown.
+    async_writer_tx: Mutex<Option<mpsc::SyncSender<AsyncOutbound>>>,
+    async_writer_alive: Arc<AtomicBool>,
+    async_reader_alive: Arc<AtomicBool>,
+    async_writer_handle: Mutex<Option<std::thread::JoinHandle<()>>>,
+    async_reader_handle: Mutex<Option<std::thread::JoinHandle<()>>>,
+    /// Path to a temp file capturing the runner's stderr, used for crash
+    /// diagnostics when the runner exits unexpectedly.
+    stderr_path: PathBuf,
 }
 
 impl PluginProcess {
     /// Spawn the plugin cdylib in a separate process and connect to it.
     pub fn spawn(cdylib_path: &Path, host: &mut dyn HostApi) -> Result<Self, PluginError> {
-        let socket_name = generate_socket_name();
-        let socket_name_ref: interprocess::local_socket::Name = socket_name
+        let sync_socket_name = generate_socket_name();
+        let async_socket_name = generate_socket_name();
+        let sync_name_ref: interprocess::local_socket::Name = sync_socket_name
+            .clone()
+            .to_ns_name::<GenericNamespaced>()
+            .expect("valid namespaced name");
+        let async_name_ref: interprocess::local_socket::Name = async_socket_name
             .clone()
             .to_ns_name::<GenericNamespaced>()
             .expect("valid namespaced name");
@@ -152,91 +228,188 @@ impl PluginProcess {
         );
 
         let token = generate_token()?;
+        let stderr_path = generate_stderr_path();
+        let stderr_file = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&stderr_path)?;
 
-        // Create the listener before spawning so the runner can connect immediately.
-        let listener = ListenerOptions::new().name(socket_name_ref).create_sync()?;
+        // Create both listeners before spawning so the runner can connect immediately.
+        let sync_listener = ListenerOptions::new().name(sync_name_ref).create_sync()?;
+        let async_listener = ListenerOptions::new().name(async_name_ref).create_sync()?;
 
         let child = Command::new(&runner_path)
-            .arg("--ocs-plugin-runner")
-            .arg(&socket_name)
+            .arg(&sync_socket_name)
+            .arg(&async_socket_name)
             .arg(cdylib_path)
             .env(PLUGIN_TOKEN_ENV, &token)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::from(stderr_file))
             .spawn()?;
         let child = Mutex::new(Some(child));
 
-        // Accept the runner connection with a timeout so a hung/crashed runner
-        // does not block the host indefinitely.
-        let (tx, rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            let _ = tx.send(listener.accept());
-        });
-        let stream = match rx.recv_timeout(spawn_timeout()) {
-            Ok(Ok(stream)) => {
-                vlog!("[plugin] runner connected");
-                Mutex::new(Some(stream))
-            }
-            Ok(Err(e)) => return Err(e.into()),
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                if let Some(child) = child.lock().unwrap_or_else(|e| e.into_inner()).take() {
-                    reap(child);
+        // Accept both connections with a timeout. Each accept runs in its own
+        // thread so a hung/crashed runner cannot block the host indefinitely.
+        let sync_stream = {
+            let (tx, rx) = mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(sync_listener.accept());
+            });
+            match rx.recv_timeout(spawn_timeout()) {
+                Ok(Ok(stream)) => stream,
+                Ok(Err(e)) => return Err(e.into()),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if let Some(child) = child.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                        reap(child);
+                    }
+                    return Err(PluginError::SpawnTimeout(spawn_timeout()));
                 }
-                return Err(PluginError::SpawnTimeout(spawn_timeout()));
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                if let Some(child) = child.lock().unwrap_or_else(|e| e.into_inner()).take() {
-                    reap(child);
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    if let Some(child) = child.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                        reap(child);
+                    }
+                    return Err(PluginError::RunnerExited);
                 }
-                return Err(PluginError::RunnerExited);
             }
         };
+        let async_stream = {
+            let (tx, rx) = mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(async_listener.accept());
+            });
+            match rx.recv_timeout(spawn_timeout()) {
+                Ok(Ok(stream)) => stream,
+                Ok(Err(e)) => return Err(e.into()),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if let Some(child) = child.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                        reap(child);
+                    }
+                    return Err(PluginError::SpawnTimeout(spawn_timeout()));
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    if let Some(child) = child.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                        reap(child);
+                    }
+                    return Err(PluginError::RunnerExited);
+                }
+            }
+        };
+        vlog!("[plugin] runner connected (sync + async)");
 
-        // Verify the runner presented the token it received through the
-        // environment before allowing any host→runner requests. The read is
-        // bounded by a deadline: `accept` above guards the connect, and this
-        // guards the first frame, so a process that connects but never sends —
-        // or a runner that dies mid-handshake — cannot block the host forever.
-        let handshake_timeout = spawn_timeout();
-        let handshake_deadline = Instant::now() + handshake_timeout;
-        let handshake = recv_with_deadline::<RunnerHandshake>(
-            &stream,
-            &child,
-            handshake_deadline,
-            handshake_timeout,
-            "Handshake",
-        )?;
-        if let Err(e) = verify_runner_handshake(handshake, &token) {
-            mark_dead(&stream, &child);
-            return Err(e);
-        }
+        // Verify the runner presented the token on both sockets before wrapping them.
+        let sync_stream =
+            match verify_handshake_on_stream(sync_stream, &child, &token, "SyncHandshake") {
+                Ok(s) => s,
+                Err(e) => {
+                    if let Some(child) = child.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                        reap(child);
+                    }
+                    return Err(e);
+                }
+            };
+        let async_stream =
+            match verify_handshake_on_stream(async_stream, &child, &token, "AsyncHandshake") {
+                Ok(s) => s,
+                Err(e) => {
+                    if let Some(child) = child.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                        reap(child);
+                    }
+                    return Err(e);
+                }
+            };
+
+        let sync_stream = Arc::new(Mutex::new(Some(sync_stream)));
+        let async_stream = Arc::new(Mutex::new(Some(async_stream)));
 
         // The runner first answers GetManifest and GetRibbon so the host can
         // build the UI without keeping the plugin object alive.
         let no_op = &mut |_| {};
-        let manifest = match call(&stream, &child, host, HostRequest::GetManifest, no_op)? {
+        let drop_async = |_event: PluginAsync| {};
+        let manifest = match call(
+            &sync_stream,
+            &child,
+            host,
+            HostRequest::GetManifest,
+            no_op,
+            drop_async,
+        )? {
             HostResponse::Manifest(m) => m,
             other => return Err(PluginError::UnexpectedResponse(other)),
         };
-        // Normal-run notice: just the loaded plugin's name (id + version). The
-        // full IPC trace above/below is gated behind OCS_PLUGIN_VERBOSE.
         eprintln!(
             "Loaded plugin: {} ({} {})",
             manifest.name, manifest.id, manifest.version
         );
-        let ribbon = match call(&stream, &child, host, HostRequest::GetRibbon, no_op)? {
+        let ribbon = match call(
+            &sync_stream,
+            &child,
+            host,
+            HostRequest::GetRibbon,
+            no_op,
+            drop_async,
+        )? {
             HostResponse::Ribbon(r) => r,
+            other => return Err(PluginError::UnexpectedResponse(other)),
+        };
+        let panels = match call(
+            &sync_stream,
+            &child,
+            host,
+            HostRequest::GetPanels,
+            no_op,
+            drop_async,
+        )? {
+            HostResponse::Panels(p) => p,
             other => return Err(PluginError::UnexpectedResponse(other)),
         };
 
         let id = manifest.id.clone();
+        let (async_writer_tx, async_writer_rx) = mpsc::sync_channel::<AsyncOutbound>(ASYNC_QUEUE_BOUND);
+        let async_inbox = Arc::new(AsyncInbox {
+            queue: Mutex::new(VecDeque::new()),
+            dropped: AtomicU64::new(0),
+        });
+        let writer_alive = Arc::new(AtomicBool::new(true));
+        let reader_alive = Arc::new(AtomicBool::new(true));
+
+        // Split the async socket so the reader and writer threads can operate
+        // concurrently without contending for a single stream lock.
+        let async_stream = Arc::try_unwrap(async_stream)
+            .expect("async stream has no other refs")
+            .into_inner()
+            .expect("async stream mutex not poisoned")
+            .expect("async stream present");
+        let (async_recv, async_send) = async_stream.split();
+
+        let writer_alive_for_thread = Arc::clone(&writer_alive);
+        let async_writer_handle = std::thread::spawn(move || {
+            async_writer(async_send, async_writer_rx, writer_alive_for_thread);
+        });
+
+        let reader_alive_for_thread = Arc::clone(&reader_alive);
+        let reader_inbox = Arc::clone(&async_inbox);
+        let async_reader_handle = std::thread::spawn(move || {
+            async_reader(async_recv, reader_inbox, reader_alive_for_thread);
+        });
+
         Ok(Self {
-            stream,
+            sync_stream,
+            async_recv: Mutex::new(None),
+            async_send: Mutex::new(None),
             child,
             id,
             manifest,
             ribbon,
+            panels,
+            async_inbox,
+            async_writer_tx: Mutex::new(Some(async_writer_tx)),
+            async_writer_alive: writer_alive,
+            async_reader_alive: reader_alive,
+            async_writer_handle: Mutex::new(Some(async_writer_handle)),
+            async_reader_handle: Mutex::new(Some(async_reader_handle)),
+            stderr_path,
         })
     }
 
@@ -252,6 +425,10 @@ impl PluginProcess {
         &self.ribbon
     }
 
+    pub fn panels(&self) -> &[crate::panel::PanelDef] {
+        &self.panels
+    }
+
     pub fn dispatch(
         &self,
         host: &mut dyn HostApi,
@@ -260,16 +437,35 @@ impl PluginProcess {
     ) -> Result<bool, PluginError> {
         vlog!("[plugin] dispatching {cmd}");
         let result = match call(
-            &self.stream,
+            &self.sync_stream,
             &self.child,
             host,
             HostRequest::Dispatch {
                 cmd: cmd.to_string(),
             },
             on_start_interactive,
-        )? {
-            HostResponse::Bool(b) => Ok(b),
-            other => Err(PluginError::UnexpectedResponse(other)),
+            |event| self.enqueue_async(event),
+        ) {
+            Ok(HostResponse::Bool(b)) => Ok(b),
+            Ok(other) => Err(PluginError::UnexpectedResponse(other)),
+            Err(e) => {
+                if is_connection_failure(&e) {
+                    let tail = self.stderr_tail(200);
+                    eprintln!(
+                        "[plugin] {} runner died; stderr tail:\n{}\n(full stderr: {})",
+                        self.id,
+                        tail,
+                        self.stderr_path.display()
+                    );
+                    let mut detail = format!("{e}");
+                    if !tail.is_empty() && tail != "(stderr unavailable)" {
+                        detail.push_str(&format!("\nrunner stderr tail:\n{tail}"));
+                    }
+                    Err(PluginError::Runner(detail))
+                } else {
+                    Err(e)
+                }
+            }
         };
         vlog!("[plugin] dispatch {cmd} result: {result:?}");
         result
@@ -289,7 +485,7 @@ impl PluginProcess {
         let deadline = Instant::now() + timeout;
         loop {
             match recv_with_deadline::<PluginToHost>(
-                &self.stream,
+                &self.sync_stream,
                 &self.child,
                 deadline,
                 timeout,
@@ -305,6 +501,7 @@ impl PluginProcess {
                     ));
                     self.send_response(resp)?;
                 }
+                PluginToHost::Async(event) => self.enqueue_async(event),
             }
         }
     }
@@ -317,7 +514,7 @@ impl PluginProcess {
         let deadline = Instant::now() + timeout;
         loop {
             match recv_with_deadline::<PluginToHost>(
-                &self.stream,
+                &self.sync_stream,
                 &self.child,
                 deadline,
                 timeout,
@@ -333,6 +530,7 @@ impl PluginProcess {
                     ));
                     self.send_response(resp)?;
                 }
+                PluginToHost::Async(event) => self.enqueue_async(event),
             }
         }
     }
@@ -345,7 +543,7 @@ impl PluginProcess {
         let deadline = Instant::now() + timeout;
         loop {
             match recv_with_deadline::<PluginToHost>(
-                &self.stream,
+                &self.sync_stream,
                 &self.child,
                 deadline,
                 timeout,
@@ -361,58 +559,208 @@ impl PluginProcess {
                     ));
                     self.send_response(resp)?;
                 }
+                PluginToHost::Async(event) => self.enqueue_async(event),
             }
         }
     }
 
     pub fn is_alive(&self) -> bool {
         let mut guard = self.child.lock().unwrap_or_else(|e| e.into_inner());
-        match guard.as_mut() {
-            Some(child) => match child.try_wait() {
-                Ok(None) => true,
-                Ok(Some(_)) | Err(_) => false,
-            },
+        let child_alive = match guard.as_mut() {
+            Some(child) => matches!(child.try_wait(), Ok(None)),
             None => false,
+        };
+        let writer_alive = self.async_writer_alive.load(Ordering::SeqCst);
+        let reader_alive = self.async_reader_alive.load(Ordering::SeqCst);
+        child_alive && writer_alive && reader_alive
+    }
+
+    /// Read the last `max_lines` lines from the runner's stderr capture file.
+    /// Used for crash diagnostics when a plugin process exits unexpectedly.
+    pub fn stderr_tail(&self, max_lines: usize) -> String {
+        fn tail(path: &Path, max_lines: usize) -> Option<String> {
+            let data = std::fs::read(path).ok()?;
+            let text = String::from_utf8_lossy(&data);
+            let lines: Vec<&str> = text.lines().collect();
+            let start = lines.len().saturating_sub(max_lines);
+            Some(lines[start..].join("\n"))
+        }
+        tail(&self.stderr_path, max_lines).unwrap_or_else(|| "(stderr unavailable)".into())
+    }
+
+    /// Send an asynchronous host event to the plugin process. Never blocks the
+    /// caller. If the writer channel is full, the oldest event is dropped and
+    /// the drop counter is incremented.
+    pub fn send_async(&self, event: HostAsync) -> Result<(), PluginError> {
+        let mut guard = self
+            .async_writer_tx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let sender = guard.as_mut().ok_or_else(shutdown_error)?;
+        match sender.try_send(AsyncOutbound::Event(event)) {
+            Ok(()) => Ok(()),
+            Err(mpsc::TrySendError::Full(_)) => {
+                self.async_inbox.dropped.fetch_add(1, Ordering::Relaxed);
+                Err(PluginError::Runner(
+                    "async writer channel full; event dropped".to_string(),
+                ))
+            }
+            Err(mpsc::TrySendError::Disconnected(_)) => Err(shutdown_error()),
         }
     }
 
-    /// Tear down the plugin process without blocking the caller. The stream is
-    /// closed and the child is killed synchronously; the blocking `wait()` is
-    /// done in a detached background thread so the host never waits on a plugin.
+    /// Send a synchronous response to a plugin request that arrived on the
+    /// async socket. The plugin's async event thread is waiting for this
+    /// response so it can complete a host API call made from `on_async_event`.
+    pub fn send_async_response(&self, resp: PluginResponse) -> Result<(), PluginError> {
+        let mut guard = self
+            .async_writer_tx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let sender = guard.as_mut().ok_or_else(shutdown_error)?;
+        match sender.try_send(AsyncOutbound::Response(resp)) {
+            Ok(()) => Ok(()),
+            Err(mpsc::TrySendError::Full(_)) => {
+                self.async_inbox.dropped.fetch_add(1, Ordering::Relaxed);
+                Err(PluginError::Runner(
+                    "async response channel full; response dropped".to_string(),
+                ))
+            }
+            Err(mpsc::TrySendError::Disconnected(_)) => Err(shutdown_error()),
+        }
+    }
+
+    /// Take all queued async messages from the plugin process.
+    pub fn drain_async(&self) -> Vec<AsyncInbound> {
+        let mut guard = self
+            .async_inbox
+            .queue
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::mem::take(&mut *guard).into_iter().collect()
+    }
+
+    /// Number of async messages dropped because the inbound queue or outbound
+    /// channel was full.
+    pub fn dropped_async_count(&self) -> u64 {
+        self.async_inbox.dropped.load(Ordering::Relaxed)
+    }
+
+    fn enqueue_async(&self, event: PluginAsync) {
+        let mut guard = self
+            .async_inbox
+            .queue
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if guard.len() >= ASYNC_QUEUE_BOUND {
+            drop(guard);
+            self.async_inbox.dropped.fetch_add(1, Ordering::Relaxed);
+            eprintln!("[plugin] async event dropped for {} (queue full)", self.id);
+        } else {
+            guard.push_back(AsyncInbound::Event(event));
+        }
+    }
+
+    /// Tear down the plugin process without blocking the caller. Drops the
+    /// writer channel, kills the child, and joins the async threads with a short
+    /// timeout. The child is killed before taking streams so that any thread
+    /// blocked on the async socket is unblocked first.
     pub fn shutdown(&self) {
-        let (stream, child) = self.take_resources();
-        drop(stream);
-        if let Some(child) = child {
+        // Dropping the sender wakes the writer thread so it can exit cleanly.
+        drop(
+            self.async_writer_tx
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take(),
+        );
+        // Killing the child closes the runner's socket ends, which unblocks any
+        // reader/writer thread currently parked on recv/send.
+        if let Some(child) = self.child.lock().unwrap_or_else(|e| e.into_inner()).take() {
             reap(child);
         }
+        // Now the threads are (or will soon be) unblocked; take the sync stream.
+        let (_sync_stream, _child) = self.take_resources();
+        self.join_async_threads(Duration::from_millis(500));
     }
 
-    /// Take the stream and child handles out of the process. After this the
-    /// process is considered shut down and any further IPC will fail.
+    /// Take the sync stream and child handles out of the process. After this
+    /// the process is considered shut down and any further IPC will fail. The
+    /// async socket halves are owned by the reader/writer threads and are not
+    /// accessible here.
     fn take_resources(&self) -> (Option<Stream>, Option<Child>) {
-        let stream = self.stream.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let sync_stream = self
+            .sync_stream
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
         let child = self.child.lock().unwrap_or_else(|e| e.into_inner()).take();
-        (stream, child)
+        (sync_stream, child)
+    }
+
+    fn join_async_threads(&self, timeout: Duration) {
+        let writer = self
+            .async_writer_handle
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        let reader = self
+            .async_reader_handle
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+
+        fn join_with_timeout<T: 'static>(
+            handle: Option<std::thread::JoinHandle<T>>,
+            timeout: Duration,
+        ) {
+            let Some(handle) = handle else {
+                return;
+            };
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = handle.join();
+                let _ = tx.send(());
+            });
+            let _ = rx.recv_timeout(timeout);
+        }
+
+        join_with_timeout(writer, timeout);
+        join_with_timeout(reader, timeout);
     }
 }
 
 impl Drop for PluginProcess {
     fn drop(&mut self) {
         self.shutdown();
+        let _ = std::fs::remove_file(&self.stderr_path);
     }
 }
 
 impl PluginProcess {
     fn send_request(&self, req: HostRequest) -> Result<(), PluginError> {
-        let mut guard = self.stream.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = self.sync_stream.lock().unwrap_or_else(|e| e.into_inner());
         let stream = guard.as_mut().ok_or_else(shutdown_error)?;
-        send(stream, &HostToPlugin::Request(req)).map_err(Into::into)
+        send(stream, &HostToPlugin::Request(req)).map_err(|e| {
+            drop(guard);
+            let err: PluginError = e.into();
+            if is_connection_failure(&err) {
+                mark_dead(&self.sync_stream, &self.child);
+            }
+            err
+        })
     }
 
     fn send_response(&self, resp: crate::ipc::protocol::PluginResponse) -> Result<(), PluginError> {
-        let mut guard = self.stream.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = self.sync_stream.lock().unwrap_or_else(|e| e.into_inner());
         let stream = guard.as_mut().ok_or_else(shutdown_error)?;
-        send(stream, &HostToPlugin::Response(resp)).map_err(Into::into)
+        send(stream, &HostToPlugin::Response(resp)).map_err(|e| {
+            drop(guard);
+            let err: PluginError = e.into();
+            if is_connection_failure(&err) {
+                mark_dead(&self.sync_stream, &self.child);
+            }
+            err
+        })
     }
 }
 
@@ -454,7 +802,8 @@ fn mark_dead(stream: &Mutex<Option<Stream>>, child: &Mutex<Option<Child>>) {
 /// A short-lived reader thread performs the blocking `recv` so that the main
 /// thread can time it out. If the deadline passes, the process is marked dead
 /// (stream closed, child killed) so that subsequent dispatch attempts are
-/// skipped.
+/// skipped. IO/transport errors also mark the process dead so the host does not
+/// keep trying to talk to a runner whose pipe has closed.
 fn recv_with_deadline<T: DeserializeOwned + Send + 'static>(
     stream: &Mutex<Option<Stream>>,
     child: &Mutex<Option<Child>>,
@@ -476,7 +825,7 @@ fn recv_with_deadline<T: DeserializeOwned + Send + 'static>(
 
     std::thread::spawn(move || {
         let result = match stream_to_thread {
-            Some(mut stream) => match recv::<T>(&mut stream) {
+            Some(mut stream) => match recv(&mut stream) {
                 Ok(msg) => (Ok(msg), Some(stream)),
                 Err(e) => (Err(PluginError::from(e)), Some(stream)),
             },
@@ -492,6 +841,9 @@ fn recv_with_deadline<T: DeserializeOwned + Send + 'static>(
         }
         Ok((Err(e), stream_opt)) => {
             *stream.lock().unwrap_or_else(|e| e.into_inner()) = stream_opt;
+            if is_connection_failure(&e) {
+                mark_dead(stream, child);
+            }
             Err(e)
         }
         Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -501,18 +853,94 @@ fn recv_with_deadline<T: DeserializeOwned + Send + 'static>(
                 duration: timeout,
             })
         }
-        Err(mpsc::RecvTimeoutError::Disconnected) => Err(shutdown_error()),
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            mark_dead(stream, child);
+            Err(shutdown_error())
+        }
     }
 }
 
+/// Dedicated writer thread that sends host async events to the runner on the
+/// async socket send half. Exits when the channel is disconnected or any send
+/// fails.
+fn async_writer(
+    mut send_half: SendHalf,
+    rx: mpsc::Receiver<AsyncOutbound>,
+    alive: Arc<AtomicBool>,
+) {
+    while let Ok(outbound) = rx.recv() {
+        let result = match outbound {
+            AsyncOutbound::Event(event) => send(&mut send_half, &HostToPlugin::Async(event)),
+            AsyncOutbound::Response(resp) => send(&mut send_half, &HostToPlugin::Response(resp)),
+        };
+        if let Err(e) = result {
+            eprintln!("[plugin] async writer send failed: {e}");
+            alive.store(false, Ordering::SeqCst);
+            break;
+        }
+    }
+    vlog!("[plugin] async writer thread exiting");
+}
+
+/// Dedicated reader thread that receives plugin async events and fire-and-forget
+/// requests on the async socket receive half. Enqueues them for the host UI
+/// thread and sets the liveness flag to false on any recv error.
+fn async_reader(mut recv_half: RecvHalf, inbox: Arc<AsyncInbox>, alive: Arc<AtomicBool>) {
+    loop {
+        match recv(&mut recv_half) {
+            Ok(PluginToHost::Async(event)) => {
+                let mut queue = inbox.queue.lock().unwrap_or_else(|e| e.into_inner());
+                if queue.len() >= ASYNC_QUEUE_BOUND {
+                    drop(queue);
+                    inbox.dropped.fetch_add(1, Ordering::Relaxed);
+                    eprintln!("[plugin] async event dropped (queue full)");
+                } else {
+                    queue.push_back(AsyncInbound::Event(event));
+                }
+            }
+            Ok(PluginToHost::Request(req)) => {
+                let mut queue = inbox.queue.lock().unwrap_or_else(|e| e.into_inner());
+                if queue.len() >= ASYNC_QUEUE_BOUND {
+                    drop(queue);
+                    inbox.dropped.fetch_add(1, Ordering::Relaxed);
+                    eprintln!("[plugin] async request dropped (queue full)");
+                } else {
+                    queue.push_back(AsyncInbound::Request(req));
+                }
+            }
+            Ok(PluginToHost::Response(resp)) => {
+                eprintln!("[plugin] unexpected PluginToHost::Response on async socket: {resp:?}");
+            }
+            Err(e) => {
+                eprintln!("[plugin] async reader recv error: {e}");
+                alive.store(false, Ordering::SeqCst);
+                break;
+            }
+        }
+    }
+    vlog!("[plugin] async reader thread exiting");
+}
+
+/// True for errors that mean the runner process has gone away or the IPC
+/// stream is unusable. Used to mark a plugin dead immediately instead of
+/// generating cascading failures on the next dispatch.
+fn is_connection_failure(err: &PluginError) -> bool {
+    matches!(
+        err,
+        PluginError::Io(_) | PluginError::Transport(_) | PluginError::RunnerExited
+    )
+}
+
 /// Send a host request and wait for the response, handling any nested plugin
-/// requests inline using the supplied `HostApi`.
+/// requests inline using the supplied `HostApi`. Out-of-band plugin async events
+/// are enqueued via `on_async` instead of being treated as errors.
 fn call(
     stream: &Mutex<Option<Stream>>,
     child: &Mutex<Option<Child>>,
     host: &mut dyn HostApi,
     req: HostRequest,
     on_start_interactive: &mut dyn FnMut(u64),
+    mut on_async: impl FnMut(PluginAsync),
 ) -> Result<HostResponse, PluginError> {
     let kind = request_kind(&req);
     let timeout = request_timeout(kind);
@@ -520,8 +948,12 @@ fn call(
     vlog!("[plugin] host -> runner: {req:?}");
     {
         let mut guard = stream.lock().unwrap_or_else(|e| e.into_inner());
-        let stream = guard.as_mut().ok_or_else(shutdown_error)?;
-        send(stream, &HostToPlugin::Request(req))?;
+        let stream_ref = guard.as_mut().ok_or_else(shutdown_error)?;
+        if let Err(e) = send(stream_ref, &HostToPlugin::Request(req)) {
+            drop(guard);
+            mark_dead(stream, child);
+            return Err(e.into());
+        }
     }
     loop {
         let msg = recv_with_deadline::<PluginToHost>(stream, child, deadline, timeout, kind)?;
@@ -532,22 +964,24 @@ fn call(
                 let resp = handle_plugin_request(host, plugin_req, on_start_interactive);
                 vlog!("[plugin] host -> runner response: {resp:?}");
                 let mut guard = stream.lock().unwrap_or_else(|e| e.into_inner());
-                let stream = guard.as_mut().ok_or_else(shutdown_error)?;
-                send(stream, &HostToPlugin::Response(resp))?;
+                let stream_ref = guard.as_mut().ok_or_else(shutdown_error)?;
+                if let Err(e) = send(stream_ref, &HostToPlugin::Response(resp)) {
+                    drop(guard);
+                    mark_dead(stream, child);
+                    return Err(e.into());
+                }
             }
+            PluginToHost::Async(event) => on_async(event),
         }
     }
 }
 
 /// Locate the executable to spawn for running a plugin.
 ///
-/// The host spawns *itself* in runner mode (`--ocs-plugin-runner`), so the
-/// runner is always available and stays in sync with the host binary. This
-/// avoids shipping a separate `ocs_plugin_runner` binary and works the same on
-/// Windows, macOS, and Linux.
-///
-/// For testing or unusual deployment layouts, set `OCS_PLUGIN_RUNNER_EXE` to
-/// the host executable path.
+/// The host spawns the separate `ocs_plugin_runner` binary that lives next to
+/// the host executable. This keeps the runner lightweight (no iced/wgpu) while
+/// the host stays unchanged. The `OCS_PLUGIN_RUNNER_EXE` environment variable
+/// overrides the lookup for tests or unusual deployment layouts.
 fn runner_executable() -> Result<PathBuf, PluginError> {
     static RUNNER: Mutex<Option<PathBuf>> = Mutex::new(None);
     let mut cached = RUNNER.lock().unwrap_or_else(|e| e.into_inner());
@@ -574,15 +1008,32 @@ fn runner_executable() -> Result<PathBuf, PluginError> {
             )));
         }
 
-        // Create a hard link with a distinct name next to the host binary. This
-        // makes runner processes visible as separate sub-processes in task
-        // managers / ps, while keeping the runner the exact same binary as the
-        // host so they can never drift out of sync.
-        let runner = distinct_runner_path(&host);
-        let _ = std::fs::remove_file(&runner);
-        match std::fs::hard_link(&host, &runner) {
-            Ok(()) => runner,
-            Err(_) => host,
+        // Look for the separate runner binary next to the host executable.
+        let runner = runner_path_next_to_host(&host);
+        if runner.exists() {
+            runner
+        } else if let Some(alt) = runner_path_in_sibling_profile(&host) {
+            // Development convenience: if the host is in a Cargo target profile
+            // directory (debug/release), try the sibling profile too. This lets a
+            // debug host find a release-built runner (or vice versa) without
+            // requiring OCS_PLUGIN_RUNNER_EXE.
+            alt
+        } else if let Some(alt) = runner_path_in_sibling_target_dir(&host) {
+            // Another development convenience: the host and runner may have been
+            // built in different Cargo target directories (e.g. one clean dir for
+            // tests, another for the host). Search sibling target dirs for the
+            // runner in both debug and release profiles.
+            alt
+        } else {
+            return Err(PluginError::Runner(format!(
+                "cannot find runner executable at {}. Build it with `cargo build -p ocs_plugin_runner{}` (or set OCS_PLUGIN_RUNNER_EXE to override)",
+                runner.display(),
+                if is_target_profile_dir(&runner) {
+                    ""
+                } else {
+                    " --release"
+                }
+            )));
         }
     };
 
@@ -590,24 +1041,81 @@ fn runner_executable() -> Result<PathBuf, PluginError> {
     Ok(path)
 }
 
-/// Build a runner path like `<host>-plugin-runner<ext>` in the same directory.
-/// Using a distinct image name lets task managers show plugin processes as
-/// children/sub-processes of the host instead of collapsing them into one row.
-fn distinct_runner_path(host: &Path) -> PathBuf {
-    let mut runner = host.as_os_str().to_owned();
-    if let Some(ext) = host.extension().and_then(|s| s.to_str()) {
-        let base = host.file_stem().unwrap_or_default();
-        runner =
-            std::ffi::OsString::from(format!("{}-plugin-runner.{}", base.to_string_lossy(), ext));
+/// Build the expected runner path next to the host binary.
+fn runner_path_next_to_host(host: &Path) -> PathBuf {
+    let dir = host.parent().unwrap_or_else(|| Path::new("."));
+    let mut runner = dir.to_path_buf();
+    runner.push(runner_exe_name());
+    runner
+}
+
+/// If the host binary sits inside a Cargo `debug` or `release` folder, also try
+/// the sibling folder. This avoids forcing developers to build the runner in the
+/// same profile as the host.
+fn runner_path_in_sibling_profile(host: &Path) -> Option<PathBuf> {
+    let dir = host.parent()?;
+    let dir_name = dir.file_name()?.to_str()?;
+    let sibling = match dir_name {
+        "debug" => "release",
+        "release" => "debug",
+        _ => return None,
+    };
+    let mut candidate = dir.to_path_buf();
+    candidate.pop();
+    candidate.push(sibling);
+    candidate.push(runner_exe_name());
+    if candidate.exists() {
+        Some(candidate)
     } else {
-        runner.push("-plugin-runner");
+        None
     }
-    let mut path = host
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .to_path_buf();
-    path.push(runner);
-    path
+}
+
+/// If the host binary sits inside `<target_dir>/debug` or `<target_dir>/release`,
+/// also try `<sibling_target_dir>/debug` and `<sibling_target_dir>/release` for
+/// every sibling of `<target_dir>`. This handles the common case where the host
+/// was built in one Cargo target directory (e.g. a clean dir for tests) and the
+/// runner in another.
+fn runner_path_in_sibling_target_dir(host: &Path) -> Option<PathBuf> {
+    let profile_dir = host.parent()?;
+    let profile = profile_dir.file_name()?.to_str()?;
+    if profile != "debug" && profile != "release" {
+        return None;
+    }
+    let target_dir = profile_dir.parent()?;
+    let parent = target_dir.parent()?;
+    let entries = std::fs::read_dir(parent).ok()?;
+    for entry in entries.flatten() {
+        let sibling_target = entry.path();
+        if sibling_target == target_dir || !sibling_target.is_dir() {
+            continue;
+        }
+        for profile in ["debug", "release"] {
+            let candidate = sibling_target.join(profile).join(runner_exe_name());
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+fn runner_exe_name() -> &'static str {
+    if cfg!(windows) {
+        "ocs_plugin_runner.exe"
+    } else {
+        "ocs_plugin_runner"
+    }
+}
+
+/// True when `path` looks like it lives inside a Cargo `debug` or `release`
+/// profile folder (used to tailor the build command in error messages).
+fn is_target_profile_dir(path: &Path) -> bool {
+    path.parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        .map(|n| n == "debug" || n == "release")
+        .unwrap_or(false)
 }
 
 /// Verify that the runner's `handshake` presents `expected_token`.
@@ -631,6 +1139,18 @@ fn generate_socket_name() -> String {
     format!("ocs_plugin_{}_{}", std::process::id(), n)
 }
 
+fn generate_stderr_path() -> PathBuf {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let mut path = std::env::temp_dir();
+    path.push(format!(
+        "ocs_plugin_runner_{}_{}.stderr",
+        std::process::id(),
+        n
+    ));
+    path
+}
+
 /// Generate a 32-byte random token for runner authentication.
 fn generate_token() -> Result<String, PluginError> {
     let mut bytes = [0u8; PLUGIN_TOKEN_LEN];
@@ -650,20 +1170,82 @@ mod tests {
     use super::*;
 
     #[test]
-    fn distinct_runner_path_appends_suffix() {
+    fn runner_path_next_to_host_uses_platform_name() {
         let host = PathBuf::from("/app/OpenCADStudio.exe");
-        let runner = distinct_runner_path(&host);
-        assert_eq!(
-            runner,
-            PathBuf::from("/app/OpenCADStudio-plugin-runner.exe")
-        );
+        let runner = runner_path_next_to_host(&host);
+        let expected = if cfg!(windows) {
+            "/app/ocs_plugin_runner.exe"
+        } else {
+            "/app/ocs_plugin_runner"
+        };
+        assert_eq!(runner, PathBuf::from(expected));
     }
 
     #[test]
-    fn distinct_runner_path_handles_no_extension() {
+    fn runner_path_next_to_host_handles_no_extension() {
         let host = PathBuf::from("/app/OpenCADStudio");
-        let runner = distinct_runner_path(&host);
-        assert_eq!(runner, PathBuf::from("/app/OpenCADStudio-plugin-runner"));
+        let runner = runner_path_next_to_host(&host);
+        let expected = if cfg!(windows) {
+            "/app/ocs_plugin_runner.exe"
+        } else {
+            "/app/ocs_plugin_runner"
+        };
+        assert_eq!(runner, PathBuf::from(expected));
+    }
+
+    #[test]
+    fn runner_path_in_sibling_profile_finds_release_when_host_in_debug() {
+        // The helper only returns a path when the sibling file exists; create a
+        // temporary directory tree to exercise the happy path.
+        let tmp =
+            std::env::temp_dir().join(format!("ocs_runner_sibling_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("debug")).unwrap();
+        std::fs::create_dir_all(tmp.join("release")).unwrap();
+        let runner = tmp.join("release").join(runner_exe_name());
+        std::fs::write(&runner, b"").unwrap();
+
+        let host = tmp.join("debug").join("OpenCADStudio");
+        let found = runner_path_in_sibling_profile(&host);
+        assert_eq!(found, Some(runner));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn is_target_profile_dir_recognizes_cargo_profiles() {
+        assert!(is_target_profile_dir(Path::new(
+            "/target/debug/ocs_plugin_runner"
+        )));
+        assert!(is_target_profile_dir(Path::new(
+            "/target/release/ocs_plugin_runner"
+        )));
+        assert!(!is_target_profile_dir(Path::new("/app/ocs_plugin_runner")));
+    }
+
+    #[test]
+    fn runner_path_in_sibling_target_dir_finds_runner_across_target_dirs() {
+        let tmp = std::env::temp_dir().join(format!(
+            "ocs_runner_target_sibling_test_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        // Host lives in one target directory (debug profile).
+        let host_target = tmp.join("ocs_target_clean");
+        std::fs::create_dir_all(host_target.join("debug")).unwrap();
+        let host = host_target.join("debug").join("OpenCADStudio");
+
+        // Runner lives in a sibling target directory (release profile).
+        let runner_target = tmp.join("ocs_target");
+        let runner = runner_target.join("release").join(runner_exe_name());
+        std::fs::create_dir_all(runner_target.join("release")).unwrap();
+        std::fs::write(&runner, b"").unwrap();
+
+        let found = runner_path_in_sibling_target_dir(&host);
+        assert_eq!(found, Some(runner));
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
 
@@ -820,11 +1402,24 @@ mod timeout_tests {
     fn fake_process() -> (PluginProcess, Stream) {
         let (host_stream, runner_stream) = connected_pair();
         let process = PluginProcess {
-            stream: Mutex::new(Some(host_stream)),
+            sync_stream: Arc::new(Mutex::new(Some(host_stream))),
+            async_recv: Mutex::new(None),
+            async_send: Mutex::new(None),
             child: Mutex::new(Some(sleepy_child())),
             id: "test.plugin".to_string(),
             manifest: fake_manifest(),
             ribbon: vec![],
+            panels: vec![],
+            async_inbox: Arc::new(AsyncInbox {
+                queue: Mutex::new(VecDeque::new()),
+                dropped: AtomicU64::new(0),
+            }),
+            async_writer_tx: Mutex::new(None),
+            async_writer_alive: Arc::new(AtomicBool::new(true)),
+            async_reader_alive: Arc::new(AtomicBool::new(true)),
+            async_writer_handle: Mutex::new(None),
+            async_reader_handle: Mutex::new(None),
+            stderr_path: generate_stderr_path(),
         };
         (process, runner_stream)
     }
@@ -842,12 +1437,12 @@ mod timeout_tests {
 
         let _runner = thread::spawn(move || {
             let mut peer = runner_stream;
-            let req = recv::<HostToPlugin>(&mut peer).expect("read dispatch");
+            let req = recv(&mut peer).expect("read dispatch");
             assert!(
                 matches!(req, HostToPlugin::Request(HostRequest::Dispatch { ref cmd }) if cmd == "HANG")
             );
             // Block until the host closes the connection after the timeout.
-            let _ = recv::<HostToPlugin>(&mut peer);
+            let _: Result<HostToPlugin, _> = recv(&mut peer);
         });
 
         let mut host = DummyHost {
@@ -900,7 +1495,7 @@ mod timeout_tests {
 
         let runner = thread::spawn(move || {
             let mut peer = runner_stream;
-            let req = recv::<HostToPlugin>(&mut peer).expect("read dispatch");
+            let req = recv(&mut peer).expect("read dispatch");
             assert!(
                 matches!(req, HostToPlugin::Request(HostRequest::Dispatch { ref cmd }) if cmd == "NESTED")
             );
@@ -909,7 +1504,7 @@ mod timeout_tests {
                 &PluginToHost::Request(PluginRequest::PushInfo("hello".to_string())),
             )
             .expect("send nested request");
-            let resp = recv::<HostToPlugin>(&mut peer).expect("read nested response");
+            let resp = recv(&mut peer).expect("read nested response");
             assert!(matches!(resp, HostToPlugin::Response(PluginResponse::Ok)));
             send(&mut peer, &PluginToHost::Response(HostResponse::Bool(true)))
                 .expect("send final response");
@@ -957,6 +1552,9 @@ mod timeout_tests {
             RunnerHandshake::Token("correct-token".to_string()),
             "correct-token",
         );
-        assert!(result.is_ok(), "expected authentication success, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "expected authentication success, got {result:?}"
+        );
     }
 }

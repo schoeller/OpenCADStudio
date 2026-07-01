@@ -38,13 +38,14 @@ fn main() -> iced::Result {
         // load a plugin cdylib in an isolated process. Hand off immediately so
         // the child never touches GUI state.
         if let Some(runner_args) = &args.ocs_plugin_runner {
-            if runner_args.len() != 2 {
-                eprintln!("--ocs-plugin-runner expects <socket> <cdylib>");
+            if runner_args.len() != 3 {
+                eprintln!("--ocs-plugin-runner expects <sync> <async> <cdylib>");
                 std::process::exit(1);
             }
             let socket = &runner_args[0];
-            let cdylib = std::path::Path::new(&runner_args[1]);
-            if let Err(e) = ocs_plugin_api::runner::run(socket, cdylib) {
+            let async_socket = &runner_args[1];
+            let cdylib = std::path::Path::new(&runner_args[2]);
+            if let Err(e) = ocs_plugin_api::runner::run(socket, async_socket, cdylib) {
                 eprintln!("[runner] fatal: {e}");
                 std::process::exit(1);
             }

@@ -6,6 +6,7 @@
 
 use ocs_plugin_api::host::{BuiltinPlugin, HostApi};
 use ocs_plugin_api::manifest::{ApiVersion, PluginManifest};
+use ocs_plugin_api::panel::{DockStyle, DockZone, PanelDef, PanelEvent, Widget};
 use ocs_plugin_api::ribbon::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
 
 // Keep these fields in sync with `plugin.toml`.
@@ -46,6 +47,26 @@ impl CadModule for MyModule {
 /// The plugin entry point.
 struct MyPlugin;
 
+fn panel_def() -> PanelDef {
+    PanelDef {
+        id: "my_plugin.panel".to_string(),
+        title: "My Plugin Panel".to_string(),
+        icon: None,
+        dock: DockZone::Floating,
+        initial_x: Some(100.0),
+        initial_y: Some(100.0),
+        initial_width: 260.0,
+        initial_height: 400.0,
+        min_width: 160.0,
+        min_height: 120.0,
+        dockable_zones: vec![DockZone::Floating, DockZone::Left, DockZone::Right],
+        allow_undock: true,
+        resizable: true,
+        draggable: true,
+        dock_style: DockStyle::Tabs,
+    }
+}
+
 impl BuiltinPlugin for MyPlugin {
     fn manifest(&self) -> &'static PluginManifest {
         &MANIFEST
@@ -59,7 +80,40 @@ impl BuiltinPlugin for MyPlugin {
                 host.push_info("Hello from My Plugin");
                 true
             }
+            // Open the optional panel when the ribbon tool is clicked.
+            "MP_OPEN_PANEL" => {
+                let _ = host.open_panel(&panel_def());
+                true
+            }
             _ => false,
+        }
+    }
+
+    /// Optional API v3 panel declaration. Remove if your add-on has no panels.
+    fn panels(&self) -> Vec<PanelDef> {
+        vec![panel_def()]
+    }
+
+    /// Handle host async events (panel interactions, document lifecycle).
+    /// Remove if your add-on has no panels.
+    fn on_async_event(&mut self, host: &mut dyn HostApi, event: ocs_plugin_api::ipc::protocol::HostAsync) {
+        use ocs_plugin_api::ipc::protocol::{HostAsync, PluginAsync};
+        match event {
+            HostAsync::PanelEvent { panel_id, event } => {
+                if panel_id == "my_plugin.panel" {
+                    match event {
+                        PanelEvent::Clicked(id) if id == "run" => {
+                            host.push_info("Run clicked");
+                            let _ = host.send_async(PluginAsync::PanelUpdate {
+                                panel_id: "my_plugin.panel".to_string(),
+                                widgets: vec![Widget::Label("Hello from the panel".to_string())],
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
         }
     }
 }

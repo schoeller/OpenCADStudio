@@ -16,7 +16,9 @@ use std::any::Any;
 use acadrust::xdata::ExtendedDataRecord;
 use acadrust::{CadDocument, EntityType, Handle};
 
+use crate::ipc::protocol::PluginAsync;
 use crate::manifest::PluginManifest;
+use crate::panel::{DockZone, PanelDef, PanelError, PanelEvent, PanelHandle};
 use crate::ribbon::CadModule;
 
 /// An add-on package's entry point: its manifest, optional ribbon tab, and
@@ -27,6 +29,40 @@ pub trait BuiltinPlugin: Send + Sync {
     fn manifest(&self) -> &'static PluginManifest;
     fn ribbon(&self) -> Box<dyn CadModule>;
     fn dispatch(&self, host: &mut dyn HostApi, cmd: &str) -> bool;
+
+    /// Panels declared by this plugin (API v3). Default: none.
+    fn panels(&self) -> Vec<PanelDef> {
+        Vec::new()
+    }
+    /// Asynchronous host event delivered to the plugin (API v3). Default: no-op.
+    fn on_async_event(&mut self, _host: &mut dyn HostApi, _event: crate::ipc::protocol::HostAsync) {
+    }
+}
+
+/// API v2 plugin entry point. Kept as a separate trait so v2 cdylibs can be
+/// loaded and adapted to the API v3 `BuiltinPlugin` trait without recompiling.
+/// The v2 surface has no panels, async events, document reader, or interactive
+/// object pick.
+pub trait BuiltinPluginV2: Send + Sync {
+    fn manifest(&self) -> &'static PluginManifest;
+    fn ribbon(&self) -> Box<dyn CadModule>;
+    fn dispatch(&self, host: &mut dyn HostApi, cmd: &str) -> bool;
+}
+
+/// Adapter that wraps an API v2 plugin so it satisfies the API v3
+/// `BuiltinPlugin` trait. New v3 methods (`panels`, `on_async_event`) are no-ops.
+pub struct V2ToV3Adapter(pub Box<dyn BuiltinPluginV2>);
+
+impl BuiltinPlugin for V2ToV3Adapter {
+    fn manifest(&self) -> &'static PluginManifest {
+        self.0.manifest()
+    }
+    fn ribbon(&self) -> Box<dyn CadModule> {
+        self.0.ribbon()
+    }
+    fn dispatch(&self, host: &mut dyn HostApi, cmd: &str) -> bool {
+        self.0.dispatch(host, cmd)
+    }
 }
 
 /// A point-driven interactive command a plugin starts via
@@ -78,10 +114,13 @@ pub enum CommandStep {
 
 /// Export a `BuiltinPlugin` from a `cdylib` so the host can load it at runtime.
 ///
-/// Emits the two C symbols the loader looks for: `ocs_plugin_api_version`
-/// (checked before anything else, so an ABI-incompatible build is rejected
-/// without running its code) and `ocs_plugin_register` (constructs the plugin
-/// and hands ownership to the host as a boxed trait object).
+/// Emits the C symbols the loader looks for:
+/// - `ocs_plugin_api_version` (checked before anything else, so an ABI-incompatible
+///   build is rejected without running its code),
+/// - `ocs_plugin_abi_revision` (for API v3, checked after the major version so
+///   old v3 cdylibs with a stale trait layout are rejected),
+/// - `ocs_plugin_register` (constructs the plugin and hands ownership to the host
+///   as a boxed trait object).
 ///
 /// ```ignore
 /// ocs_plugin_api::export_plugin!(MyPlugin::new());
@@ -92,6 +131,11 @@ macro_rules! export_plugin {
         #[no_mangle]
         pub extern "C" fn ocs_plugin_api_version() -> u32 {
             $crate::API_VERSION
+        }
+
+        #[no_mangle]
+        pub extern "C" fn ocs_plugin_abi_revision() -> u64 {
+            $crate::ABI_REVISION
         }
 
         #[no_mangle]
@@ -132,6 +176,17 @@ pub trait HostApi {
 
     /// Add an entity to the active document, returning its handle.
     fn add_entity(&mut self, entity: EntityType) -> Handle;
+    /// Mark the scene geometry dirty so it is re-tessellated next frame.
+    fn bump_geometry(&mut self);
+    /// Read the XDATA record for `app_name` on entity `handle`, if any.
+    fn read_record(&self, handle: Handle, app_name: &str) -> Option<&ExtendedDataRecord>;
+    /// Attach `record` to entity `handle`, replacing any existing record for the
+    /// same application and registering the APPID. Returns `false` if the entity
+    /// does not exist.
+    fn write_record(&mut self, handle: Handle, record: ExtendedDataRecord) -> bool;
+    /// Remove the XDATA record for `app_name` from entity `handle`. Returns
+    /// `true` if a record was removed.
+    fn remove_record(&mut self, handle: Handle, app_name: &str) -> bool;
     /// Replace the existing entity that carries `entity`'s handle, preserving
     /// its identity (handle and owning block). Returns `false` when no entity
     /// has that handle. This is the sanctioned way to commit in-place edits
@@ -148,23 +203,10 @@ pub trait HostApi {
         }
     }
     /// Delete the entity with `handle` (and any derived render caches). Returns
-    /// `true` when an entity was removed.
-    fn remove_entity(&mut self, handle: Handle) -> bool {
-        self.document_mut().remove_entity(handle).is_some()
+    /// the removed entity, if any.
+    fn remove_entity(&mut self, handle: Handle) -> Option<EntityType> {
+        self.document_mut().remove_entity(handle)
     }
-    /// Mark the scene geometry dirty so it is re-tessellated next frame.
-    fn bump_geometry(&mut self);
-
-    // ── XDATA ───────────────────────────────────────────────────────────────
-    /// Read the XDATA record for `app_name` on entity `handle`, if any.
-    fn read_record(&self, handle: Handle, app_name: &str) -> Option<&ExtendedDataRecord>;
-    /// Attach `record` to entity `handle`, replacing any existing record for the
-    /// same application and registering the APPID. Returns `false` if the entity
-    /// does not exist.
-    fn write_record(&mut self, handle: Handle, record: ExtendedDataRecord) -> bool;
-    /// Remove the XDATA record for `app_name` from entity `handle`. Returns
-    /// `true` if a record was removed.
-    fn remove_record(&mut self, handle: Handle, app_name: &str) -> bool;
 
     // ── Undo / dirty ────────────────────────────────────────────────────────
     fn push_undo(&mut self, label: &str);
@@ -178,6 +220,72 @@ pub trait HostApi {
     /// Start a plugin-defined interactive (click-to-place) command on the active
     /// tab. The host drives it through its normal point-collection flow.
     fn start_interactive(&mut self, command: Box<dyn InteractiveCommand>);
+
+    // ── Panels (API v3; default implementations return Unsupported for v2 hosts) ─
+    /// Open (or refresh) a plugin panel and return a host-allocated handle.
+    fn open_panel(&mut self, _def: &PanelDef) -> Result<PanelHandle, PanelError> {
+        Err(PanelError::Unsupported)
+    }
+    /// Close a previously opened plugin panel.
+    fn close_panel(&mut self, _handle: PanelHandle) -> Result<(), PanelError> {
+        Err(PanelError::Unsupported)
+    }
+    /// Move an open panel to logical window coordinates `(x, y)`.
+    fn move_panel(&mut self, _handle: PanelHandle, _x: f32, _y: f32) -> Result<(), PanelError> {
+        Err(PanelError::NotImplemented)
+    }
+    /// Resize an open panel. Values are clamped to the panel's minimum size.
+    fn resize_panel(
+        &mut self,
+        _handle: PanelHandle,
+        _width: f32,
+        _height: f32,
+    ) -> Result<(), PanelError> {
+        Err(PanelError::NotImplemented)
+    }
+    /// Dock an open panel to `zone`.
+    fn dock_panel(&mut self, _handle: PanelHandle, _zone: DockZone) -> Result<(), PanelError> {
+        Err(PanelError::Unsupported)
+    }
+    /// Undock an open panel and place it at logical window coordinates `(x, y)`.
+    fn undock_panel(&mut self, _handle: PanelHandle, _x: f32, _y: f32) -> Result<(), PanelError> {
+        Err(PanelError::Unsupported)
+    }
+    /// Forward a user-generated panel event to the plugin.
+    fn post_panel_event(
+        &mut self,
+        _handle: PanelHandle,
+        _event: PanelEvent,
+    ) -> Result<(), PanelError> {
+        Err(PanelError::Unsupported)
+    }
+
+    /// Send an asynchronous plugin event to the host (API v3). In-process hosts
+    /// and hosts that do not support panels can leave this as a no-op.
+    fn send_async(&mut self, _event: PluginAsync) {}
+
+    /// Request a point pick from the host (API v3). The host will start its
+    /// normal point-collection flow and deliver the result back to the plugin
+    /// via `HostAsync::CoordinatesPicked`. Out-of-process hosts route this as a
+    /// `PluginRequest::RequestPointPick`; in-process hosts that do not support
+    /// point picks can leave the default error implementation.
+    fn request_point_pick(&mut self, _panel_id: &str) -> Result<(), String> {
+        Err("point pick requires an out-of-process plugin host".to_string())
+    }
+
+    /// Set the plugin process currently dispatching a request on this host.
+    /// Used by the host to route panel open/close/event operations back to the
+    /// owning process. Default no-op.
+    fn set_current_process(
+        &mut self,
+        _process: Option<std::sync::Arc<crate::process::PluginProcess>>,
+    ) {
+    }
+
+    /// Current plugin process dispatching on this host, if any.
+    fn current_process(&self) -> Option<std::sync::Arc<crate::process::PluginProcess>> {
+        None
+    }
 
     // ── Per-tab plugin state (object-safe; use the typed helpers below) ──────
     fn plugin_state_any(&self, plugin_id: &str) -> Option<&(dyn Any + Send + Sync)>;
@@ -202,6 +310,14 @@ pub trait HostApi {
     /// out-of-process plugin proxies return `None`.
     fn document_view(&mut self) -> Option<crate::shm::DocumentViewInfo> {
         None
+    }
+
+    /// Set the active document tab for subsequent host operations (API v3).
+    /// Out-of-process hosts route this as a `PluginRequest::SetActiveTab`;
+    /// in-process hosts that do not support tab switching can leave the default
+    /// error implementation. V2 hosts therefore keep compiling without changes.
+    fn set_active_tab(&mut self, _tab: usize) -> Result<(), String> {
+        Err("set_active_tab requires an out-of-process plugin host".to_string())
     }
 }
 

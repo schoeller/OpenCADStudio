@@ -1,0 +1,15 @@
+[package]
+name = "plugin-template-api3"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ocs_plugin_api = { path = "../ocs_plugin_api", features = ["host"] }
+acadrust = "0.4"
+
+[dev-dependencies]
+acadrust = "0.4"
+toml = "0.8"

@@ -1,6 +1,6 @@
 [package]
 name = "ocs_plugin_api"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Stable, dependency-free contract for Open CAD Studio add-on packages: plugin manifest, version handshake, and ribbon/CadModule types."
 license = "GPL-3.0-only"
@@ -25,4 +25,18 @@ getrandom = { version = "0.2", optional = true }
 # Enables the runtime host surface (`HostApi` trait) and the out-of-process
 # plugin runtime. The OpenCADStudio binary turns this on; pure-data consumers
 # leave it off.
-host = ["dep:acadrust", "dep:interprocess", "dep:serde", "dep:bincode", "dep:thiserror", "dep:libloading", "dep:memmap2", "dep:rkyv", "dep:getrandom"]
+host = [
+    "dep:acadrust",
+    "dep:interprocess",
+    "dep:serde",
+    "dep:bincode",
+    "dep:thiserror",
+    "dep:libloading",
+    "dep:memmap2",
+    "dep:rkyv",
+    "dep:getrandom",
+    "dep:windows-sys",
+]
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_System_Diagnostics_Debug", "Win32_System_Kernel"], optional = true }

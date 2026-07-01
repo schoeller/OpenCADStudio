@@ -56,7 +56,7 @@ mod tests {
             cmd: "LINE".to_string(),
         };
         send(&mut a, &HostToPlugin::Request(req)).unwrap();
-        let got = recv::<HostToPlugin>(&mut b).unwrap();
+        let got = recv(&mut b).unwrap();
         match got {
             HostToPlugin::Request(HostRequest::Dispatch { cmd }) => assert_eq!(cmd, "LINE"),
             other => panic!("unexpected: {other:?}"),
@@ -70,7 +70,7 @@ mod tests {
             "hello".to_string(),
         ));
         send(&mut a, &req).unwrap();
-        let got = recv::<PluginToHost>(&mut b).unwrap();
+        let got = recv(&mut b).unwrap();
         match got {
             PluginToHost::Request(crate::ipc::protocol::PluginRequest::PushInfo(msg)) => {
                 assert_eq!(msg, "hello")
@@ -107,6 +107,72 @@ mod tests {
         match got {
             PluginToHost::Response(HostResponse::Bool(b)) => assert!(b),
             other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn protocol_panel_move_resize_serde_roundtrip() {
+        use crate::ipc::protocol::PluginRequest;
+        use crate::panel::PanelHandle;
+
+        let handle = PanelHandle(7);
+        let move_req = PluginRequest::MovePanel {
+            handle,
+            x: 12.5,
+            y: 34.0,
+        };
+        let bytes = bincode::serialize(&PluginToHost::Request(move_req)).unwrap();
+        let got: PluginToHost = bincode::deserialize(&bytes).unwrap();
+        match got {
+            PluginToHost::Request(PluginRequest::MovePanel { handle: h, x, y }) => {
+                assert_eq!(h.0, 7);
+                assert_eq!(x, 12.5);
+                assert_eq!(y, 34.0);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+
+        let resize_req = PluginRequest::ResizePanel {
+            handle,
+            width: 260.0,
+            height: 400.0,
+        };
+        let bytes = bincode::serialize(&PluginToHost::Request(resize_req)).unwrap();
+        let got: PluginToHost = bincode::deserialize(&bytes).unwrap();
+        match got {
+            PluginToHost::Request(PluginRequest::ResizePanel {
+                handle: h,
+                width,
+                height,
+            }) => {
+                assert_eq!(h.0, 7);
+                assert_eq!(width, 260.0);
+                assert_eq!(height, 400.0);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn protocol_panel_event_serde_roundtrip() {
+        use crate::panel::{DockZone, PanelEvent};
+
+        let events = vec![
+            PanelEvent::Moved { x: 10.0, y: 20.0 },
+            PanelEvent::Resized {
+                width: 100.0,
+                height: 200.0,
+            },
+            PanelEvent::Focused,
+            PanelEvent::Docked {
+                zone: DockZone::Left,
+            },
+            PanelEvent::Undocked,
+        ];
+        for event in events {
+            let bytes = bincode::serialize(&event).unwrap();
+            let got: PanelEvent = bincode::deserialize(&bytes).unwrap();
+            assert_eq!(got, event);
         }
     }
 }

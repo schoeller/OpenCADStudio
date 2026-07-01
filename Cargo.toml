@@ -5,14 +5,19 @@ edition = "2021"
 build = "build.rs"
 
 [workspace]
-# `dwg-thumbnailer-win` is a Windows-only COM DLL (`#![cfg(windows)]`): it
-# compiles to an empty cdylib on Linux/macOS and to the real handler on Windows,
-# where the `build-windows` CI job (`cargo build --release`) compiles and thus
-# verifies it.
 members = [
     "crates/ocs_plugin_api",
     "crates/dwg-thumbnailer",
     "crates/dwg-thumbnailer-win",
+    "crates/ocs_plugin_runner",
+    "crates/ocs_pythonshell",
+    "crates/ocs_python_lsp",
+    "crates/plugin-template-api3",
+    "crates/ocs_plugin_api/tests/fixtures/test_v2_plugin",
+    "crates/ocs_plugin_api/tests/fixtures/test_old_v3_plugin",
+    "crates/ocs_plugin_api/tests/fixtures/test_v3_async_plugin",
+    "crates/ocs_plugin_api/tests/fixtures/test_v2_hang_plugin",
+    "crates/ocs_plugin_api/tests/fixtures/test_v3_hang_plugin",
 ]
 
 # Embed the application icon into the Windows .exe so Explorer, the taskbar,

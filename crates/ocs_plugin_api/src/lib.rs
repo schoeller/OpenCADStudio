@@ -19,6 +19,11 @@
 pub mod manifest;
 pub mod ribbon;
 
+/// Panel vocabulary — only built with the `host` feature because it depends on
+/// the IPC-serializable owned ribbon types.
+#[cfg(feature = "host")]
+pub mod panel;
+
 /// Runtime host surface — only built with the `host` feature (pulls `acadrust`).
 #[cfg(feature = "host")]
 pub mod host;
@@ -42,9 +47,13 @@ pub mod shm;
 pub mod runner;
 
 pub use manifest::{
-    host_accepts_plugin_version, ApiVersion, PluginManifest, API_VERSION, API_VERSION_MIN_SUPPORTED,
+    host_accepts_plugin_version, ApiVersion, PluginManifest, ABI_REVISION, API_VERSION,
+    API_VERSION_MIN_SUPPORTED,
 };
 pub use ribbon::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, StyleKey, ToolDef};
+
+#[cfg(feature = "host")]
+pub use panel::{PanelDef, PanelError, PanelEvent, PanelHandle, Widget};
 
 #[cfg(feature = "host")]
 pub use process::{DispatchResult, PluginError, PluginManager, PluginProcess};

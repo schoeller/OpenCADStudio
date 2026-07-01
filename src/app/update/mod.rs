@@ -153,6 +153,10 @@ impl OpenCADStudio {
                 return Task::none();
             }
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(task) = crate::plugin::on_message(self, &msg) {
+            return task;
+        }
         let task = self.update_inner(msg);
         // After every message, mirror the active command step's prompt so
         // its history line stays pinned (non-fading) until the step changes.
@@ -181,6 +185,10 @@ impl OpenCADStudio {
             self.snapper.clear_tracking();
             self.otrack_active = None;
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::plugin::drain_async_events(self);
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::plugin::on_document_changed(self, self.active_tab);
         task
     }
 
@@ -717,6 +725,8 @@ impl OpenCADStudio {
                 self.sync_ribbon_from_selection();
                 // A fresh drawing starts with grid/snap off (its tile defaults).
                 self.adopt_view_display(self.active_tab);
+                #[cfg(not(target_arch = "wasm32"))]
+                crate::plugin::on_document_activated(self, idx);
                 Task::none()
             }
 
@@ -751,6 +761,8 @@ impl OpenCADStudio {
                         crate::scene::text::ttf_glyph::clear_fallback_cache();
                         self.tabs[idx].scene.bump_geometry();
                     }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    crate::plugin::on_document_activated(self, idx);
                 }
                 Task::none()
             }
@@ -1433,6 +1445,8 @@ impl OpenCADStudio {
             Message::WindowResized(w, h) => {
                 self.vp_size = ((w - 440.0).max(200.0), h);
                 self.win_size = (w, h);
+                #[cfg(not(target_arch = "wasm32"))]
+                crate::plugin::external::with_manager(|mgr| mgr.set_window_size(w, h));
                 Task::none()
             }
 
@@ -4293,6 +4307,19 @@ impl OpenCADStudio {
             }
             Message::ColorWindowPick(color) => self.on_color_window_pick(color),
             Message::DsSetHandle { field, value } => self.on_ds_set_handle(field, value),
+            // Plugin panel interactions are handled by the plugin runtime
+            // pre-dispatch hook; this arm exists only to keep the match
+            // exhaustive when a message reaches this point.
+            Message::PluginPanelEvent { .. } => Task::none(),
+            Message::PluginDrainTick => {
+                crate::plugin::drain_async_events(self);
+                Task::none()
+            }
+            Message::PanelDragStart(_)
+            | Message::PanelResizeStart(_)
+            | Message::PanelPointerMove { .. }
+            | Message::PanelPointerRelease
+            | Message::PanelFocus(_) => Task::none(),
         }
     }
 

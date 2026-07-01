@@ -70,8 +70,8 @@ pub struct Cli {
     #[arg(long, value_name = "LEVEL")]
     pub log: Option<String>,
 
-    /// Internal: run as the plugin runner child process.
-    #[arg(long, value_names = ["SOCKET", "CDYLIB"], num_args = 2, hide = true)]
+    /// Internal: run as the plugin runner child process (`<sync> <async> <cdylib>`).
+    #[arg(long, value_names = ["SYNC", "ASYNC", "CDYLIB"], num_args = 3, hide = true)]
     pub ocs_plugin_runner: Option<Vec<String>>,
 
     /// Internal: write a DWG's embedded preview to a PNG for the OS file-manager

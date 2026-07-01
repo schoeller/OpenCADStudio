@@ -1,0 +1,23 @@
+﻿{
+  // Attach the VS Code Python debugger to the OCS Python Shell worker.
+  // Set OCS_PYTHON_DEBUG=1 before starting OpenCAD Studio so the worker
+  // launches debugpy on 127.0.0.1:5678.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Attach to OCS Python Shell worker",
+      "type": "debugpy",
+      "request": "attach",
+      "connect": {
+        "host": "127.0.0.1",
+        "port": 5678
+      },
+      "pathMappings": [
+        {
+          "localRoot": "${workspaceFolder}",
+          "remoteRoot": "${workspaceFolder}"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+﻿[plugin]
+id = "ocs.python_lsp"
+name = "Python LSP Editor"
+version = "0.1.0"
+description = "LSP-bridged Python editor integration for OpenCAD Studio."
+author = "Open CAD Studio contributors"
+license = "GPL-3.0-only"
+
+[opencad]
+api_version = 3
+ribbon_order = 210
+command_prefixes = ["PYTHONEDIT"]
+xdata_apps = ["PY_LSP"]

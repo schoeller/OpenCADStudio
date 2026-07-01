@@ -5,6 +5,7 @@
 pub mod external;
 pub mod host;
 pub mod marketplace;
+pub mod panels;
 pub mod registry;
 
 pub use registry::{all_ribbon_modules, plugin_command_names, ribbon_modules_enabled};
@@ -79,4 +80,66 @@ mod tests {
             "expected an error queued for the command line, got: {queued:?}"
         );
     }
+}
+
+// ── Public plugin lifecycle hooks (thin delegation to the panel manager) ────
+
+/// The active document tab changed. Forwarded to every plugin process that
+/// owns an open panel.
+pub(crate) fn on_document_activated(app: &mut crate::app::OpenCADStudio, tab: usize) {
+    let _ = app;
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::plugin::external::with_manager(|mgr| {
+        mgr.broadcast_document_event(tab, crate::plugin::panels::DocumentEvent::Activated);
+    });
+}
+
+pub(crate) fn on_document_changed(app: &mut crate::app::OpenCADStudio, tab: usize) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let version = app.geometry_epoch(tab);
+        crate::plugin::external::with_manager(|mgr| {
+            mgr.broadcast_document_event(tab, crate::plugin::panels::DocumentEvent::Changed { version });
+        });
+    }
+}
+
+pub(crate) fn on_tab_closed(app: &mut crate::app::OpenCADStudio, tab: usize) {
+    let _ = app;
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::plugin::external::with_manager(|mgr| {
+        mgr.broadcast_document_event(tab, crate::plugin::panels::DocumentEvent::Closed);
+    });
+}
+
+pub(crate) fn on_message(
+    app: &mut crate::app::OpenCADStudio,
+    msg: &crate::app::Message,
+) -> Option<iced::Task<crate::app::Message>> {
+    let _ = app;
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        crate::plugin::external::with_manager(|mgr| mgr.handle_message(msg))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        None
+    }
+}
+
+fn host_log(_msg: &str) {
+    // Disabled in release builds to avoid synchronous file I/O on the async
+    // drain path. Re-enable locally when debugging plugin IPC.
+}
+
+pub(crate) fn drain_async_events(app: &mut crate::app::OpenCADStudio) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        host_log("drain_async_events start");
+        let active_tab = app.active_tab();
+        let mut host = crate::app::plugin_host::HostSession::new(app, active_tab);
+        crate::plugin::external::with_manager(|mgr| mgr.drain_and_handle_async(&mut host));
+        host_log("drain_async_events end");
+    }
+    let _ = app;
 }

@@ -132,6 +132,7 @@ impl DocumentSnapshotStore {
         control
             .version
             .store(self.current_version, Ordering::Release);
+        self.mmap.flush()?;
         Ok(())
     }
 

@@ -2,7 +2,6 @@
 
 use std::io::{Read, Write};
 
-use interprocess::local_socket::Stream;
 use serde::{de::DeserializeOwned, Serialize};
 
 /// Maximum serialized message size accepted over the wire (64 MiB). Prevents
@@ -23,7 +22,10 @@ pub enum TransportError {
 }
 
 /// Send a length-framed serialized message.
-pub fn send<T: Serialize>(stream: &mut Stream, msg: &T) -> Result<(), TransportError> {
+pub fn send<T: Serialize, W: Write + ?Sized>(
+    stream: &mut W,
+    msg: &T,
+) -> Result<(), TransportError> {
     let bytes = bincode::serialize(msg)?;
     if bytes.len() > MAX_MESSAGE_SIZE {
         return Err(TransportError::TooLarge(bytes.len()));
@@ -36,16 +38,20 @@ pub fn send<T: Serialize>(stream: &mut Stream, msg: &T) -> Result<(), TransportE
 }
 
 /// Receive a length-framed serialized message.
-pub fn recv<T: DeserializeOwned>(stream: &mut Stream) -> Result<T, TransportError> {
+pub fn recv<T: DeserializeOwned, R: Read + ?Sized>(stream: &mut R) -> Result<T, TransportError> {
     let mut len_buf = [0u8; 8];
     stream.read_exact(&mut len_buf)?;
-    let len = u64::from_le_bytes(len_buf) as usize;
-    if len == 0 {
+    let len_u64 = u64::from_le_bytes(len_buf);
+    if len_u64 == 0 {
         return Err(TransportError::Empty);
     }
-    if len > MAX_MESSAGE_SIZE {
-        return Err(TransportError::TooLarge(len));
+    if len_u64 > MAX_MESSAGE_SIZE as u64 {
+        return Err(TransportError::TooLarge(len_u64 as usize));
     }
+    let len = match usize::try_from(len_u64) {
+        Ok(n) => n,
+        Err(_) => return Err(TransportError::TooLarge(usize::MAX)),
+    };
     let mut buf = vec![0u8; len];
     stream.read_exact(&mut buf)?;
     Ok(bincode::deserialize(&buf)?)

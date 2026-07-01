@@ -59,6 +59,8 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 self.sync_ribbon_layers();
                 self.sync_ribbon_styles();
                 self.sync_ribbon_from_selection();
+                #[cfg(not(target_arch = "wasm32"))]
+                crate::plugin::on_tab_closed(self, idx);
                 Task::none()
     }
 

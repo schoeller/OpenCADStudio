@@ -45,12 +45,12 @@ engine crate, and user-installable packages from a curated index.
 │  Layer A — Host (OpenCADStudio)                                     │
 │  iced UI · Scene · Document · Undo · Command line                   │
 │  Core ribbon tabs: Home, Model, View, … (NOT plugins)              │
-│  Generic plugin runtime: discovery, spawn, dispatch                │
+│  Generic plugin runtime: discovery, spawn, dispatch, panel manager  │
 └───────────────────────────────┬────────────────────────────────────┘
                                 │ IPC over local socket (ocs_plugin_api)
 ┌───────────────────────────────▼────────────────────────────────────┐
 │  Layer B — Plugin process  (external repo, cdylib)                  │
-│  host spawns itself in runner mode · Cargo.toml · plugin.toml       │
+│  host spawns ocs_plugin_runner · Cargo.toml · plugin.toml           │
 │  PluginManifest · CadModule ribbon · BuiltinPlugin · export_plugin! │
 └───────────────────────────────┬────────────────────────────────────┘
                                 │ pure Rust API
@@ -63,7 +63,7 @@ engine crate, and user-installable packages from a curated index.
 | Layer | Lives in | May depend on |
 |-------|----------|---------------|
 | **A — Host** | this repo: `src/`, `crates/ocs_plugin_api` runtime | everything |
-| **B — Plugin** | a separate repo (cdylib), spawned by the host in runner mode | `ocs_plugin_api` + optional engine |
+| **B — Plugin** | a separate repo (cdylib), spawned by the host via `ocs_plugin_runner` | `ocs_plugin_api` + optional engine |
 | **C — Engine** | the plugin's own crate or crates.io | `std` only (WASM/CLI-capable) |
 
 **Hard rules**
@@ -111,6 +111,9 @@ pub trait BuiltinPlugin: Send + Sync {
     fn manifest(&self) -> &'static PluginManifest;
     fn ribbon(&self) -> Box<dyn CadModule>;            // the ribbon tab
     fn dispatch(&self, host: &mut dyn HostApi, cmd: &str) -> bool;
+    // API v3 additions:
+    fn panels(&self) -> Vec<PanelDef> { Vec::new() }
+    fn on_async_event(&mut self, host: &mut dyn HostApi, event: HostAsync);
 }
 ```
 
@@ -127,6 +130,7 @@ concrete types:
 | Command line | `push_info`, `push_output`, `push_error` |
 | Undo / dirty | `push_undo`, `set_dirty` |
 | Tab | `tab_index()` |
+| Panels (v3) | `open_panel`, `close_panel`, `post_panel_event`, `send_async` |
 
 ### `export_plugin!` — the C-ABI export
 
@@ -134,14 +138,17 @@ concrete types:
 ocs_plugin_api::export_plugin!(MyPlugin);
 ```
 
-emits the two symbols the loader looks for:
+emits the three symbols the loader looks for:
 
-- `ocs_plugin_api_version() -> u32` — checked **first**, so an API-incompatible
-  build never runs its code.
+- `ocs_plugin_api_version() -> u32` — checked **first**, so an ABI-incompatible
+  major version never runs its code.
+- `ocs_plugin_abi_revision() -> u64` — checked for API v3 plugins, so old v3
+  cdylibs compiled against a previous v3 trait layout are rejected safely.
 - `ocs_plugin_register() -> *mut Box<dyn BuiltinPlugin>` — constructs the plugin
   and hands ownership to the host.
 
 ---
+
 
 ## Writing a plugin
 
@@ -257,6 +264,27 @@ Store domain data on entities as XDATA (under your `xdata_apps` ids), not in a
 side database, so it round-trips through DWG/DXF. `write_record` also registers
 the APPID. Document your schemas in the plugin's own `PLUGIN.md`.
 
+### Panels (API v3)
+
+Plugins can declare host-rendered panels by implementing `BuiltinPlugin::panels`.
+Each panel contains abstract widgets (`Label`, `Button`, `TextInput`,
+`MultilineOutput`, `List`). The plugin updates widgets by sending
+`PluginAsync::PanelUpdate` via `HostApi::send_async`; the host forwards user
+actions back as `HostAsync::PanelEvent` to `BuiltinPlugin::on_async_event`.
+Panels are opened/closed through `HostApi::open_panel` and `close_panel`.
+
+A complete, tested reference implementation lives in
+[`crates/plugin-template-api3`](../crates/plugin-template-api3); it covers the
+full panel + async event surface end-to-end.
+
+### Async events (API v3)
+
+Out-of-band events travel on the same local socket as synchronous RPCs. The
+host can push document lifecycle events (`DocumentActivated`, `DocumentChanged`,
+`TabClosed`) and panel interactions to a plugin at any time; the plugin can push
+panel updates and closures to the host. Both sides enqueue async messages that
+arrive during a synchronous call instead of erroring.
+
 ---
 
 ## Building & distribution
@@ -294,16 +322,32 @@ On startup the host scans `<config>/OpenCADStudio/plugins/<id>/` for a
     libocs_example_plugin.so      # any name with the platform extension
 ```
 
-For each compatible package the host spawns **itself** in runner mode
-(`--ocs-plugin-runner <socket> <cdylib>`). The child process loads the `cdylib`
-in its own address space and connects back to the host over an `interprocess`
-local socket. The runner checks `ocs_plugin_api_version` and refuses on
-mismatch, then calls `ocs_plugin_register` to obtain the boxed `BuiltinPlugin`.
-Each plugin runs in a separate OS process, so a plugin crash or memory
-corruption cannot affect the host or other plugins. Plugin processes stay
-**resident for the session**; external plugins merge into the same ribbon and
-`try_dispatch` path the host uses and honour the enable/disable set
-(`disabled_plugins` in `settings.txt`).
+For each compatible package the host spawns the separate `ocs_plugin_runner`
+binary (found next to the host executable or via `OCS_PLUGIN_RUNNER_EXE`). The
+runner loads the `cdylib` in its own address space and connects back to the host
+over an `interprocess` local socket. The runner checks `ocs_plugin_api_version`
+first, then `ocs_plugin_abi_revision` for API v3 plugins, and refuses on
+mismatch before calling `ocs_plugin_register`. Each plugin runs in a separate OS
+process, so a plugin crash or memory corruption cannot affect the host or other
+plugins. Plugin processes stay **resident for the session**; external plugins
+merge into the same ribbon and `try_dispatch` path the host uses and honour the
+enable/disable set (`disabled_plugins` in `settings.txt`).
+
+> **Development note:** `cargo run` and `cargo build --bin OpenCADStudio` only
+> build the host binary, not the separate plugin-runner binary. Build both
+> before loading plugins:
+> ```
+> cargo build -p OpenCADStudio -p ocs_plugin_runner
+> cargo run -p OpenCADStudio -p ocs_plugin_runner
+> ```
+> or use the provided alias:
+> ```
+> cargo build-studio
+> ```
+> The host looks for `ocs_plugin_runner` next to its own executable. If the
+> runner is in a different profile (e.g. release runner, debug host), the host
+> will also try the sibling `debug`/`release` folder. For arbitrary layouts,
+> set `OCS_PLUGIN_RUNNER_EXE`.
 
 Two timeouts protect the host from a stuck runner:
 
@@ -357,13 +401,15 @@ installs plugins from GitHub Releases:
 
 ## Compatibility & ABI
 
-Plugins are loaded as `cdylib`s by a plugin-runner child process. The host spawns
-this child from its own executable (`--ocs-plugin-runner` mode), so the runner
-and host always share the same `ocs_plugin_api` build. The runner checks
-`ocs_plugin_api_version` before any plugin code runs. Each plugin runs in its
-own OS process, so the host is protected from plugin crashes and memory
-corruption. Process isolation removes the need for the host and plugin to share
-a Rust toolchain ABI beyond the stable `ocs_plugin_api` contract.
+Plugins are loaded as `cdylib`s by the separate `ocs_plugin_runner` binary. The
+host spawns this runner from the executable next to it (or from
+`OCS_PLUGIN_RUNNER_EXE`), so the runner and host always share the same
+`ocs_plugin_api` build. The runner checks `ocs_plugin_api_version` first; for
+API v3 plugins it also checks `ocs_plugin_abi_revision` and refuses on mismatch
+before any plugin code runs. Each plugin runs in its own OS process, so the host
+is protected from plugin crashes and memory corruption. Process isolation
+removes the need for the host and plugin to share a Rust toolchain ABI beyond
+the stable `ocs_plugin_api` contract.
 
 A future hardening step is a `#[repr(C)]` vtable (a true C ABI) so binaries built
 by any toolchain interoperate — required before trusting prebuilt binaries from
@@ -377,13 +423,16 @@ Done:
 
 - [x] Stable `ocs_plugin_api` crate — dependency-free core + `host` feature
       (`HostApi` / `BuiltinPlugin` / `export_plugin!`).
-- [x] Runtime discovery + out-of-process loading (host spawns itself in runner
-      mode) with an `api_version` gate and `interprocess` local-socket IPC.
+- [x] Runtime discovery + out-of-process loading (host spawns `ocs_plugin_runner`)
+      with an `api_version` + `abi_revision` gate and `interprocess` local-socket IPC.
 - [x] XDATA helpers, `ModuleEvent::PluginFileDialog`, per-tab plugin state.
 - [x] Marketplace — curated registry + manual repo link, install / upgrade /
       reinstall / uninstall, enable/disable.
 - [x] Interactive command round-trip over IPC (prompt, point/enter/object-pick).
 - [x] Spawn and per-call IPC timeouts so a stuck runner cannot freeze the host.
+- [x] Separate lightweight `ocs_plugin_runner` binary (no iced/wgpu).
+- [x] API v3 panels + async events (`HostAsync` / `PluginAsync`).
+- [x] Autonomous Python shell plugin (`crates/ocs_pythonshell`).
 
 Next:
 
@@ -400,10 +449,13 @@ Next:
 | Piece | Location |
 |-------|----------|
 | Contract crate + runtime | [`crates/ocs_plugin_api`](../crates/ocs_plugin_api) |
+| Plugin runner binary | [`crates/ocs_plugin_runner`](../crates/ocs_plugin_runner) |
 | Plugin runner implementation | [`crates/ocs_plugin_api/src/runner.rs`](../crates/ocs_plugin_api/src/runner.rs) |
 | Host spawn logic | [`crates/ocs_plugin_api/src/process.rs`](../crates/ocs_plugin_api/src/process.rs) |
 | Host plugin integration | `src/plugin/`, `src/app/plugin_host.rs` |
+| Python shell plugin | [`crates/ocs_pythonshell`](../crates/ocs_pythonshell) |
 | Core module registry generator | `build.rs` (writes to `OUT_DIR`, included by `src/modules/registry.rs`) |
 | Marketplace + registry | `src/plugin/marketplace.rs`, [`plugins/registry.json`](../plugins/registry.json) |
 | Template scaffold | [`docs/plugin-template/`](plugin-template) |
+| API v3 panel + async reference | [`crates/plugin-template-api3`](../crates/plugin-template-api3) |
 | Live example plugin | [`opencad-example-plugin`](https://github.com/HakanSeven12/opencad-example-plugin) |

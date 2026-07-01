@@ -7,6 +7,10 @@
 /// vtable so API v2 plugins keep working.
 pub const API_VERSION: u32 = 3;
 
+/// ABI revision for API v3. Bump whenever the v3 trait layout or protocol
+/// changes so old v3 cdylibs compiled against a previous layout are rejected.
+pub const ABI_REVISION: u64 = 2;
+
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the
 /// current `HostApi` trait.
