@@ -71,6 +71,12 @@ fn drawing_dir_str(d: &DrawingDirection) -> &'static str {
 /// Per-visible-character world-space boxes for the MText editor's
 /// click-to-select preview. Uses the exact same layout opts as `to_truck`
 /// so the boxes line up with the rendered glyphs.
+/// The MTEXT string to render: the live re-evaluated value when the entity
+/// hosts a dynamic field, otherwise its stored (cached) value.
+fn display_value(t: &MText, document: &acadrust::CadDocument) -> String {
+    crate::entities::field::resolve(document, t.common.handle).unwrap_or_else(|| t.value.clone())
+}
+
 pub fn glyph_boxes(t: &MText, document: &acadrust::CadDocument) -> Vec<GlyphBox> {
     let resolved_style = resolve_text_style(&t.style, document);
     let attach_h_anchor: f32 = match t.attachment_point {
@@ -98,8 +104,9 @@ pub fn glyph_boxes(t: &MText, document: &acadrust::CadDocument) -> Vec<GlyphBox>
     } else {
         t.rotation as f32
     };
+    let display = display_value(t, document);
     let layout = layout_mtext(&MTextRenderOpts {
-        value: &t.value,
+        value: &display,
         insertion: [
             t.insertion_point.x,
             t.insertion_point.y,
@@ -146,8 +153,9 @@ fn to_truck(t: &MText, document: &acadrust::CadDocument) -> TruckEntity {
     } else {
         t.rotation as f32
     };
+    let display = display_value(t, document);
     let layout = layout_mtext(&MTextRenderOpts {
-        value: &t.value,
+        value: &display,
         insertion: [
             t.insertion_point.x,
             t.insertion_point.y,

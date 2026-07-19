@@ -5,6 +5,7 @@ pub mod common;
 pub mod dim_override;
 pub mod dimension;
 pub mod ellipse;
+pub mod field;
 pub mod hatch;
 pub mod helix;
 pub mod insert;
