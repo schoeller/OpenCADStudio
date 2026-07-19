@@ -421,6 +421,7 @@ pub fn tessellate(
     // Relative-PDSIZE points size their glyph from the current zoom so they
     // stay a roughly constant on-screen size; otherwise the header-driven path.
     let te = crate::entities::point::relative_truck(entity, document, world_per_pixel)
+        .or_else(|| crate::entities::light::relative_truck(entity, document, world_per_pixel))
         .or_else(|| convert(entity, document));
     if let Some(te) = te {
         match te.object {

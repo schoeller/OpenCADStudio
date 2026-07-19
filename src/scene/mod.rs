@@ -18,6 +18,7 @@ pub mod view;
 // blocks and/or free functions). Pure text-move from the original mod.rs.
 mod entity;
 mod group_layer;
+mod scene_markers;
 mod camera_ops;
 mod layout;
 mod modify;
@@ -2915,6 +2916,12 @@ impl Scene {
         let t_tess = iced::time::Instant::now();
         let mut wires =
             self.wires_for_block_culled(block, None, None, frozen_layers, anno_scale_override);
+        // Synthesized nonprint markers (geo-location daisy) live in model space
+        // only and are derived from document objects, not entities — append them
+        // to the freshly built resident set (incremental patches preserve them).
+        if block == self.model_space_block_handle() {
+            self.append_scene_markers(&mut wires, bg);
+        }
         self.apply_refedit_fade(&mut wires, bg);
         self.last_tess_ms.set(t_tess.elapsed().as_secs_f32() * 1000.0);
         self.last_tess_wires.set(wires.len());

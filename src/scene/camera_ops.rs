@@ -86,6 +86,8 @@ impl Scene {
             front_clip: 0.0,
             back_clip: 0.0,
             twist_angle: 0.0,
+            // OCS saves an orthographic model view, not a perspective camera.
+            perspective: false,
         }
     }
 

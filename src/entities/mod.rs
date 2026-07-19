@@ -9,6 +9,7 @@ pub mod hatch;
 pub mod helix;
 pub mod insert;
 pub mod leader;
+pub mod light;
 pub mod line;
 pub mod lwpolyline;
 pub mod mesh;
