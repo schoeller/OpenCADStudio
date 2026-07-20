@@ -334,6 +334,64 @@ pub(crate) fn wide_band_tris(origin: [f64; 2], fills: &[Vec<[f32; 2]>]) -> Vec<[
     out
 }
 
+/// Extrude a wide-polyline band (from `wide_fills`) into a solid tube for a DXF
+/// thickness (code 39): a vertical wall between every band-boundary point and
+/// its `thickness`-along-`normal` copy, plus triangulated bottom and top caps.
+/// Returns `(fill_tris, edge_lines)` as flat WCS f64 lists — the caller wraps
+/// them in a `TruckEntity` (object = `Lines(edge_lines)`, `fill_tris`, and
+/// `pick_tris = fill_tris`). Shared by LwPolyline and Polyline2D so both wide
+/// polyline kinds extrude the same solid instead of just their centre-line.
+///
+/// `polyline_segment_fill` emits each band loop as the outer boundary forward
+/// then the inner boundary back, so its two transition edges (`half-1 → half`
+/// and `n-1 → 0`) are radial cap ends inside the band — no wall is drawn there.
+pub(crate) fn thick_band_tube(
+    origin: [f64; 2],
+    fills: &[Vec<[f32; 2]>],
+    thickness: f64,
+    normal: (f64, f64, f64),
+    to_wcs: &dyn Fn(f64, f64) -> (f64, f64, f64),
+) -> (Vec<[f64; 3]>, Vec<[f64; 3]>) {
+    let (nx, ny, nz) = normal;
+    let t = thickness;
+    let off = |p: [f64; 3]| -> [f64; 3] { [p[0] + t * nx, p[1] + t * ny, p[2] + t * nz] };
+    let push_seg = |lines: &mut Vec<[f64; 3]>, a: [f64; 3], b: [f64; 3]| {
+        lines.push(a);
+        lines.push(b);
+        lines.push([f64::NAN; 3]);
+    };
+    let mut lines: Vec<[f64; 3]> = Vec::new();
+    let mut fill_tris: Vec<[f64; 3]> = Vec::new();
+    for poly in fills {
+        let n = poly.len();
+        if n < 4 {
+            continue;
+        }
+        let half = n / 2;
+        let bot: Vec<[f64; 3]> = poly
+            .iter()
+            .map(|&[x, y]| {
+                let (wx, wy, wz) = to_wcs(origin[0] + x as f64, origin[1] + y as f64);
+                [wx, wy, wz]
+            })
+            .collect();
+        let top: Vec<[f64; 3]> = bot.iter().map(|&p| off(p)).collect();
+        for k in 0..n {
+            push_seg(&mut lines, bot[k], top[k]);
+            if k == half - 1 || k == n - 1 {
+                continue;
+            }
+            let kn = (k + 1) % n;
+            push_seg(&mut lines, bot[k], bot[kn]);
+            push_seg(&mut lines, top[k], top[kn]);
+            fill_tris.extend_from_slice(&[bot[k], bot[kn], top[kn], bot[k], top[kn], top[k]]);
+        }
+        fill_tris.extend(crate::entities::mesh::triangulate_planar(&bot));
+        fill_tris.extend(crate::entities::mesh::triangulate_planar(&top));
+    }
+    (fill_tris, lines)
+}
+
 /// Compute the filled boundary polygon for one polyline segment.
 /// For straight segments: a rectangle/trapezoid.
 /// For arc segments: an arc band (outer arc + reversed inner arc).

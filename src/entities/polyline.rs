@@ -238,6 +238,28 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
             let (wbx, wby, wbz) = to_wcs(ox1, oy1);
             kv.push([wbx, wby, wbz]);
         }
+        // A wide Polyline2D extrudes its whole band into a solid tube (walls +
+        // caps), same as a thickened LwPolyline; a zero-width one falls through
+        // to the centre-line extrusion below.
+        let is_wide = pl.start_width > 1e-9
+            || pl.end_width > 1e-9
+            || pl
+                .vertices
+                .iter()
+                .any(|v| v.start_width > 1e-9 || v.end_width > 1e-9);
+        if is_wide {
+            let (origin, fills) = wide_fills(pl);
+            let (fill_tris, lines) =
+                crate::entities::common::thick_band_tube(origin, &fills, t, normal, &to_wcs);
+            return TruckEntity {
+                pick_tris: fill_tris.clone(),
+                object: TruckObject::Lines(lines),
+                snap_pts: vec![],
+                tangent_geoms: tgs,
+                key_vertices: kv,
+                fill_tris,
+            };
+        }
         let mut pts: Vec<[f64; 3]> = Vec::with_capacity(path.len() * 2 + kv.len() * 3 + 4);
         pts.extend_from_slice(&path);
         pts.push([f64::NAN; 3]);

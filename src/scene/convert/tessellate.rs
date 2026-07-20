@@ -1068,7 +1068,7 @@ pub fn tessellate(
                     // linetype dashes it); the band also backs pick.
                     let (pick_tris, pick_tris_low) = points_to_ds(te.pick_tris);
                     return vec![WireModel {
-                        world_width: lwpolyline_band_width(entity),
+                        world_width: polyline_band_width(entity),
                         fill_is_3d: false,
                         pick_tris,
                         pick_tris_low,
@@ -1130,13 +1130,18 @@ pub fn tessellate(
                 let mut out = Vec::new();
                 let mut is_first = true;
 
-                // A thickened wide polyline's extrusion — its corner / cap edges
+                // A thickened polyline's extrusion — its corner / cap edges
                 // frame the solid tube and read black (like solid-with-edges
-                // outlines), while the tube fill keeps the entity colour.
-                let edge_color = if matches!(
+                // outlines), while the tube fill keeps the entity colour. Both
+                // wide polyline kinds (LwPolyline + Polyline2D) extrude tubes.
+                let is_thick_extrusion = matches!(
                     entity,
                     EntityType::LwPolyline(p) if p.thickness.abs() > 1e-10
-                ) {
+                ) || matches!(
+                    entity,
+                    EntityType::Polyline2D(p) if p.thickness.abs() > 1e-10
+                );
+                let edge_color = if is_thick_extrusion {
                     [0.0, 0.0, 0.0, 1.0]
                 } else {
                     color
@@ -1260,7 +1265,7 @@ pub fn tessellate(
                 // treatment as the Contour arm, restarting the dash per segment.
                 let (pick_tris, pick_tris_low) = points_to_ds(te.pick_tris);
                 return vec![WireModel {
-                    world_width: lwpolyline_band_width(entity),
+                    world_width: polyline_band_width(entity),
                     fill_is_3d: false,
                     pick_tris,
                     pick_tris_low,
@@ -1509,26 +1514,35 @@ pub(crate) fn entity_z(entity: &EntityType) -> f32 {
     }
 }
 
-/// Band width (drawing units) of a wide LwPolyline whose flat band is drawn by
-/// expanding its centre-line wire in the shader. `0.0` = a zero-width polyline
-/// or a non-LwPolyline (a normal screen-pixel wire). A thickness-extruded
-/// polyline is excluded: its band becomes a 3-D tube (`thick_wide_band`), not a
-/// flat shader band. A tapering polyline (per-vertex start/end widths) collapses
-/// to its widest edge — the shader carries one width per wire.
-fn lwpolyline_band_width(entity: &EntityType) -> f32 {
-    match entity {
+/// Band width (drawing units) of a wide polyline whose flat band is drawn by
+/// expanding its centre-line wire in the shader. `0.0` = a zero-width polyline,
+/// a non-polyline (a normal screen-pixel wire), or a thickness-extruded one — an
+/// LwPolyline thickens into a 3-D tube (`thick_wide_band`) and a Polyline2D
+/// keeps its hatch band (only its centre-line extrudes; no tube yet), so neither
+/// takes the flat shader band. A tapering polyline (per-vertex start/end widths)
+/// collapses to its widest edge — the shader carries one width per wire.
+fn polyline_band_width(entity: &EntityType) -> f32 {
+    let w = match entity {
         EntityType::LwPolyline(p) if p.thickness.abs() <= 1e-10 => {
             let mut w = p.constant_width;
             for v in &p.vertices {
                 w = w.max(v.start_width).max(v.end_width);
             }
-            if w > 1e-9 {
-                w as f32
-            } else {
-                0.0
+            w
+        }
+        EntityType::Polyline2D(p) if p.thickness.abs() <= 1e-10 => {
+            let mut w = p.start_width.max(p.end_width);
+            for v in &p.vertices {
+                w = w.max(v.start_width).max(v.end_width);
             }
+            w
         }
         _ => 0.0,
+    };
+    if w > 1e-9 {
+        w as f32
+    } else {
+        0.0
     }
 }
 

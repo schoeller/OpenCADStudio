@@ -61,6 +61,10 @@ pub struct LocalWire {
     pub pattern_length: f32,
     pub pattern: [f32; 8],
     pub line_weight_px: f32,
+    /// World-space band width for a wide polyline (see `WireModel.world_width`).
+    /// Block-local; the expand-time transform scales it by the insert so the
+    /// shader band grows with a scaled insert. `0.0` = a normal wire.
+    pub world_width: f32,
     pub plinegen: bool,
     /// Set at construction; used to discriminate fill-only GPU batches from
     /// stroke batches in [`StyleKey`]. Derived from
@@ -325,12 +329,10 @@ fn build_defn(
                 subs.push(LocalSub::Nested(build_nested_ref(nested_ins, doc, bg_color)));
             }
             _ => {
-                // A wide polyline inside a block keeps its thin centre-line
-                // here (`LocalWire` carries no `world_width`, and `finalize`
-                // rebuilds every block wire with `world_width: 0.0`); its band
-                // is drawn by the hatch pipeline (`push_block_wide_fills`),
-                // which transforms with the block instance so the band scales
-                // correctly. The shader band is a top-level-entity path only.
+                // A wide polyline inside a block carries its `world_width` on
+                // the LocalWire; `emit_wire` scales it by the insert transform
+                // so the shader band matches the scaled geometry (same band the
+                // top-level path draws — depth-tested + linetype-dashed).
                 for lw in tessellate_sub_local(doc, entity, anno_scale, bg_color) {
                     subs.push(LocalSub::Wire(lw));
                 }
@@ -493,6 +495,7 @@ fn tessellate_sub_local(
             pattern_length: pat_len,
             pattern: pat,
             line_weight_px: lw_px,
+            world_width: wire.world_width,
             plinegen: wire.plinegen,
             is_fill_only,
             color_is_byblock: color_is_byblock && wire_on_base_color,
@@ -744,6 +747,10 @@ struct StyleKey {
     pattern_length: u32,
     pattern: [u32; 8],
     line_weight_px: u32,
+    /// Wide-polyline band width (bit-cast). Keeps bands of different widths — and
+    /// bands vs thin wires of the same colour/style — in separate batches so the
+    /// finalized WireModel carries one correct `world_width`.
+    world_width: u32,
     aci: u8,
     plinegen: bool,
     /// Marks batches that emit only `fill_tris` with no wire `points`. The
@@ -759,6 +766,7 @@ struct BatchEntry {
     pattern_length: f32,
     pattern: [f32; 8],
     line_weight_px: f32,
+    world_width: f32,
     aci: u8,
     plinegen: bool,
     points: Vec<[f32; 3]>,
@@ -809,6 +817,7 @@ impl BatchEntry {
         pat_len: f32,
         pat: [f32; 8],
         lw_px: f32,
+        world_width: f32,
         aci: u8,
         plinegen: bool,
         _is_fill_only: bool,
@@ -823,6 +832,7 @@ impl BatchEntry {
             pattern_length: pat_len,
             pattern: pat,
             line_weight_px: lw_px,
+            world_width,
             aci,
             plinegen,
             min_x: f32::INFINITY,
@@ -854,7 +864,7 @@ impl Batches {
                 // the cached defn.
                 let color = crate::scene::view::render::adapt_to_bg(b.color, bg_color);
                 WireModel {
-                    world_width: 0.0,
+                    world_width: b.world_width,
                     fill_is_3d: false,
                     pick_tris: b.pick_tris,
                     pick_tris_low: b.pick_tris_low,
@@ -896,6 +906,7 @@ fn style_key(
     pat_len: f32,
     pat: [f32; 8],
     lw_px: f32,
+    world_width: f32,
     aci: u8,
     plinegen: bool,
     is_fill_only: bool,
@@ -919,6 +930,7 @@ fn style_key(
             pat[7].to_bits(),
         ],
         line_weight_px: lw_px.to_bits(),
+        world_width: world_width.to_bits(),
         aci,
         plinegen,
         is_fill_only,
@@ -1145,11 +1157,27 @@ fn emit_wire(
     let final_pat_len = final_pat_len * ctx.pslt_factor;
     let final_pat = final_pat.map(|v| v * ctx.pslt_factor);
 
+    // A wide polyline's band width is baked in block-local units; scale it by
+    // the insert transform so the shader band matches the scaled geometry.
+    // Average the X and Y axis image lengths — exact for a uniform insert, a
+    // sensible mean for a non-uniform one (the band carries one width).
+    let final_world_width = if lw.world_width > 0.0 {
+        let o = accum_xform.apply(Vector3::new(0.0, 0.0, 0.0));
+        let ax = accum_xform.apply(Vector3::new(1.0, 0.0, 0.0));
+        let ay = accum_xform.apply(Vector3::new(0.0, 1.0, 0.0));
+        let sx = ((ax.x - o.x).powi(2) + (ax.y - o.y).powi(2) + (ax.z - o.z).powi(2)).sqrt();
+        let sy = ((ay.x - o.x).powi(2) + (ay.y - o.y).powi(2) + (ay.z - o.z).powi(2)).sqrt();
+        lw.world_width * ((sx + sy) * 0.5) as f32
+    } else {
+        0.0
+    };
+
     let key = style_key(
         final_color,
         final_pat_len,
         final_pat,
         final_lw_px,
+        final_world_width,
         lw.aci,
         lw.plinegen,
         lw.is_fill_only,
@@ -1170,6 +1198,7 @@ fn emit_wire(
             final_pat_len,
             final_pat,
             final_lw_px,
+            final_world_width,
             lw.aci,
             lw.plinegen,
             lw.is_fill_only,
