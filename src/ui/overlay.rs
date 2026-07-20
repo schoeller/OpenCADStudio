@@ -235,6 +235,9 @@ pub fn selection_overlay<'a>(
     parallel_ref_marker: Option<Point>,
     show_viewcube: bool,
     dividers: Vec<iced::Rectangle>,
+    /* Bounding rectangles of open plugin panels in window coordinates. The
+       crosshair is suppressed while the cursor is over any of them. */
+    plugin_panels: Vec<iced::Rectangle>,
     pane_move_rect: Option<iced::Rectangle>,
     pane_drop_rect: Option<iced::Rectangle>,
     pan_mode: bool,
@@ -253,6 +256,7 @@ pub fn selection_overlay<'a>(
         parallel_ref_marker,
         show_viewcube,
         dividers,
+        plugin_panels,
         pane_move_rect,
         pane_drop_rect,
         pan_mode,
@@ -291,6 +295,9 @@ struct SelectionCanvas {
     /// Divider bars (pixel rects, canvas-relative) between Model panes — drawn
     /// as filled lines and used to suppress the crosshair over a divider.
     dividers: Vec<iced::Rectangle>,
+    /// Bounding rectangles of open plugin panels in window coordinates. The
+    /// crosshair is suppressed while the cursor is over any of them.
+    plugin_panels: Vec<iced::Rectangle>,
     /// When a pane move is armed (drag handle pressed), the source pane's rect
     /// (px) — dimmed, with a ghost card dragged along under the cursor.
     pane_move_rect: Option<iced::Rectangle>,
@@ -324,6 +331,17 @@ impl SelectionCanvas {
                 && pos.y <= d.y + d.height + TOL_PX
         })
     }
+
+    /// True when the cursor sits inside any open plugin panel. Panel rectangles
+    /// are in window coordinates, so we map the cursor into the same space.
+    fn plugin_panel_under(&self, cursor: mouse::Cursor, bounds: iced::Rectangle) -> bool {
+        let Some(pos) = cursor.position_in(bounds) else {
+            return false;
+        };
+        self.plugin_panels.iter().any(|r| {
+            pos.x >= r.x && pos.x <= r.x + r.width && pos.y >= r.y && pos.y <= r.y + r.height
+        })
+    }
 }
 
 impl canvas::Program<Message> for SelectionCanvas {
@@ -338,7 +356,7 @@ impl canvas::Program<Message> for SelectionCanvas {
         // A dropdown/overlay is open over the viewport — show the normal OS
         // cursor over the whole canvas instead of hiding it for the crosshair,
         // so the cursor doesn't vanish while using the panel. (#227)
-        if self.suppressed {
+        if self.suppressed || self.plugin_panel_under(cursor, bounds) {
             return mouse::Interaction::default();
         }
         // PAN mode owns the whole viewport: an open hand when hovering, a
@@ -961,7 +979,9 @@ impl canvas::Program<Message> for SelectionCanvas {
         // top of it would double up the visual feedback.
         let over_divider = self.divider_under(cursor, bounds);
         // PAN mode replaces the crosshair with a hand cursor.
-        if !over_viewcube && !over_divider && !self.pan_mode && !self.suppressed {
+        if !over_viewcube && !over_divider && !self.pan_mode && !self.suppressed
+            && !self.plugin_panel_under(cursor, bounds)
+        {
             if let Some(cp) = self.selection.last_move_pos {
                 let color = Color {
                     r: 0.85,

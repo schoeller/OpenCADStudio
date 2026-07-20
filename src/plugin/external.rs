@@ -275,6 +275,11 @@ mod loader {
             self.panels.borrow().cursor_over_panel(cursor)
         }
 
+        /// Returns the bounding rectangles of all open panels in window coordinates.
+        pub fn panel_rects(&self) -> Vec<iced::Rectangle> {
+            self.panels.borrow().panel_rects()
+        }
+
         /// Open (or refresh) a panel for `def` owned by `process`.
         pub fn open_panel(
             &self,

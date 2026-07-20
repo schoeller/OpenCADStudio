@@ -496,14 +496,7 @@ impl OpenCADStudio {
                 .hover_highlight
                 .map(|h| tab.scene.is_layer_locked(h))
                 .unwrap_or(false);
-            let plugin_panel_under_mouse = tab
-                .scene
-                .selection
-                .borrow()
-                .last_move_pos
-                .map_or(false, |p| {
-                    crate::plugin::external::with_manager(|mgr| mgr.cursor_over_panel(p))
-                });
+            let plugin_panel_rects = crate::plugin::external::with_manager(|mgr| mgr.panel_rects());
             crate::ui::overlay::selection_overlay(
                 sel,
                 snap_info,
@@ -517,10 +510,11 @@ impl OpenCADStudio {
                 // ViewCube hover region matches the drawn cube — gone when hidden.
                 !is_paper && viewcube_visible,
                 dividers,
+                plugin_panel_rects,
                 pane_move_rect,
                 pane_drop_rect,
                 tab.pan_mode,
-                self.ribbon.open_dropdown.is_some() || plugin_panel_under_mouse,
+                self.ribbon.open_dropdown.is_some(),
                 hover_locked,
             )
         };

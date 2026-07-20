@@ -149,6 +149,22 @@ impl PanelManager {
         })
     }
 
+    /// Returns the bounding rectangles of all open panels in window coordinates.
+    pub fn panel_rects(&self) -> Vec<iced::Rectangle> {
+        self.panels
+            .values()
+            .map(|p| {
+                let g = &p.geometry;
+                iced::Rectangle {
+                    x: g.x,
+                    y: g.y,
+                    width: g.width,
+                    height: g.height,
+                }
+            })
+            .collect()
+    }
+
     /// Register a panel declaration from a loaded plugin. The panel is not
     /// opened until the plugin (or user) requests it.
     pub fn register_def(&mut self, def: &PanelDef) {
