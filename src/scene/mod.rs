@@ -2160,17 +2160,20 @@ impl Scene {
     }
 
     /// PlotSettings store the paper size and plot margins in millimetres, but a
-    /// layout's paper space may be laid out in inches — its viewports, drawing
-    /// limits and the sheet the user sees are all in inch units. Return the
-    /// factor that converts those millimetre plot-settings values into the
-    /// active layout's paper-space units: `1.0` for a millimetre layout,
-    /// `1/25.4` for an inch layout.
+    /// layout's paper space is laid out in its own units — its viewports,
+    /// drawing limits and the sheet the user sees can be in inches, millimetres,
+    /// or an arbitrary scaled unit. Return the factor that converts those
+    /// millimetre plot-settings values into the active layout's paper-space
+    /// units (`1.0` for a millimetre paper space, `1/25.4` for an inch one, and
+    /// anything else for a scaled layout).
     ///
-    /// The unit is inferred from the layout's drawing limits — the only
-    /// per-layout tie between paper-space coordinates and the physical sheet.
-    /// `plot_paper_units` (code 72) records the plot *output* unit and can
-    /// disagree with the paper-space geometry (a layout can carry inch output
-    /// units over a millimetre paper space and vice-versa), so it is not used.
+    /// The unit is derived from the plot scale, which maps paper-space units to
+    /// the physical page: `mm_per_unit = (scale_num / scale_den) × page_unit_mm`
+    /// where `page_unit_mm` is 25.4 for an inch page (code 72 == 0) or 1 for a
+    /// millimetre page. The scale and the page unit are a matched pair, so this
+    /// is correct even when the page unit alone looks wrong (an inch page at
+    /// scale 1:25.4 is a millimetre paper space). Falls back to `1.0` when the
+    /// scale is missing or degenerate.
     pub fn paper_space_unit_factor(&self) -> f64 {
         if self.current_layout == "Model" {
             return 1.0;
@@ -2190,28 +2193,19 @@ impl Scene {
     /// Millimetre → paper-space-unit factor for a specific layout (see
     /// [`Scene::paper_space_unit_factor`]).
     fn layout_unit_factor(l: &acadrust::objects::Layout) -> f64 {
-        if l.paper_width <= 1e-6 || l.paper_height <= 1e-6 {
-            return 1.0;
+        // Millimetres represented by one plotted page unit: an inch page
+        // (plot_paper_units == 0) is 25.4 mm, a millimetre page is 1 mm.
+        let page_unit_mm = if l.plot_paper_units == 0 { 25.4 } else { 1.0 };
+        let (num, den) = (l.plot_scale_numerator, l.plot_scale_denominator);
+        if num > 1e-12 && den > 1e-12 {
+            // One paper-space unit spans this many millimetres on the page.
+            let mm_per_unit = (num / den) * page_unit_mm;
+            if mm_per_unit > 1e-9 {
+                return 1.0 / mm_per_unit;
+            }
         }
-        // Match the rotation swap `paper_limits` applies so the span/paper axes
-        // line up.
-        let (pw, ph) = if l.plot_rotation == 1 || l.plot_rotation == 3 {
-            (l.paper_height, l.paper_width)
-        } else {
-            (l.paper_width, l.paper_height)
-        };
-        let span_w = (l.max_limits.0 - l.min_limits.0).abs();
-        let span_h = (l.max_limits.1 - l.min_limits.1).abs();
-        // The paper-space span ≈ physical_mm × factor. Solve factor = span / mm
-        // on whichever axis carries a usable span, then snap to inch when it
-        // lands near 1/25.4; otherwise treat the layout as millimetre (default).
-        let ratio = [(span_w, pw), (span_h, ph)]
-            .into_iter()
-            .find_map(|(s, p)| (s > 1e-6 && p > 1e-6).then_some(s / p));
-        match ratio {
-            Some(r) if (r - 1.0 / 25.4).abs() < 0.15 / 25.4 => 1.0 / 25.4,
-            _ => 1.0,
-        }
+        // No usable plot scale — assume the paper space is already millimetres.
+        1.0
     }
 
     pub fn paper_limits(&self) -> Option<((f64, f64), (f64, f64))> {
