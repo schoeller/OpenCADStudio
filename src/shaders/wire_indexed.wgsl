@@ -44,6 +44,10 @@ struct InstanceIn {
     @location(4) distance_a: f32,
     @location(5) distance_b: f32,
     @location(6) wire_id:    u32,
+    // Per-endpoint world half-width for a tapered band (0 = use the per-wire
+    // constant `world_half_width`).
+    @location(7) world_hw_a: f32,
+    @location(8) world_hw_b: f32,
 }
 
 const DRAW_ORDER_BIAS: f32 = 0.001;
@@ -97,10 +101,15 @@ struct VertexOut {
     // by `world_half_width / world_per_pixel` (screen pixels) so the band grows
     // and shrinks with zoom. A normal wire (world_half_width == 0) uses the
     // screen-pixel half-width, honouring the LWDISPLAY toggle.
+    // A tapered band carries a per-endpoint world half-width on the instance:
+    // interpolate across the segment so the band narrows/widens smoothly. A
+    // constant band uses the per-wire `world_half_width`. Both clamp to a
+    // half-pixel so a zoomed-out band stays a hairline instead of vanishing.
+    let taper_hw = mix(in.world_hw_a, in.world_hw_b, which_end);
     var hw: f32;
-    if c.world_half_width > 0.0 {
-        // Clamp to a half-pixel so a zoomed-out band never drops below a
-        // hairline (its centre-line) instead of vanishing.
+    if taper_hw > 0.0 {
+        hw = max(taper_hw / u.world_per_pixel, 0.5);
+    } else if c.world_half_width > 0.0 {
         hw = max(c.world_half_width / u.world_per_pixel, 0.5);
     } else {
         hw = select(0.5, c.half_width, u.lwdisplay_enable > 0.5);

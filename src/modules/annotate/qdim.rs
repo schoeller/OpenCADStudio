@@ -90,6 +90,7 @@ impl CadCommand for QdimCommand {
         }
         let d = 0.5_f32;
         Some(WireModel {
+            taper_widths: Vec::new(),
             world_width: 0.0,
             fill_is_3d: false,
             pick_tris: Vec::new(),

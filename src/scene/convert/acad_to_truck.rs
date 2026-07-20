@@ -56,6 +56,11 @@ pub enum TruckObject {
     Lines(Vec<[f64; 3]>),
     /// Like Lines but linetype pattern restarts at each NaN-separated segment (plinegen=false).
     SegmentedLines(Vec<[f64; 3]>),
+    /// A wide polyline whose band width VARIES (a taper): a continuous WCS point
+    /// list paired index-for-index with a per-point full band width. The wire
+    /// shader interpolates the two endpoint widths of each segment so the band
+    /// tapers smoothly. Points hold no NaN breaks (one continuous band).
+    TaperedLines(Vec<[f64; 3]>, Vec<f32>),
     Volume(Solid),
 }
 

@@ -81,6 +81,7 @@ impl CadCommand for MviewCommand {
         let pt = pt.as_vec3();
         let c1 = self.corner1?;
         Some(WireModel {
+            taper_widths: Vec::new(),
             world_width: 0.0,
             fill_is_3d: false,
             pick_tris: Vec::new(),

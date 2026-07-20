@@ -121,6 +121,7 @@ fn ordinate_elbow(feature: DVec3, leader: DVec3, is_x: bool) -> DVec3 {
 
 fn preview_wire(points: Vec<Vec3>) -> WireModel {
     WireModel {
+        taper_widths: Vec::new(),
         world_width: 0.0,
         fill_is_3d: false,
         pick_tris: Vec::new(),

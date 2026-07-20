@@ -189,6 +189,8 @@ fn blank_instance() -> WireInstance {
         distance_a: 0.0,
         distance_b: 0.0,
         wire_id: 0,
+        world_hw_a: 0.0,
+        world_hw_b: 0.0,
     }
 }
 

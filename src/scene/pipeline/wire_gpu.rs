@@ -80,6 +80,11 @@ pub struct WireInstance {
     pub distance_b: f32,
     /// Index into the per-wire `WireConst` storage buffer (group 1).
     pub wire_id: u32,
+    /// World-space half-width at each endpoint for a TAPERED band. `0.0` =
+    /// use the per-wire constant (`WireConst.world_half_width`). The shader
+    /// interpolates between the two so the band tapers across the segment.
+    pub world_hw_a: f32,
+    pub world_hw_b: f32,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -94,6 +99,8 @@ impl WireInstance {
             wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, distance_a) as u64, shader_location: 4, format: wgpu::VertexFormat::Float32   },
             wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, distance_b) as u64, shader_location: 5, format: wgpu::VertexFormat::Float32   },
             wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, wire_id) as u64,    shader_location: 6, format: wgpu::VertexFormat::Uint32    },
+            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, world_hw_a) as u64, shader_location: 7, format: wgpu::VertexFormat::Float32   },
+            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, world_hw_b) as u64, shader_location: 8, format: wgpu::VertexFormat::Float32   },
         ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<WireInstance>() as u64,
@@ -178,6 +185,10 @@ pub struct WireInstance {
     /// World-space half-width for a wide-polyline band (see `WireConst`). `0.0`
     /// = a normal wire (uses `half_width`, screen pixels).
     pub world_half_width: f32,
+    /// Per-endpoint world half-width for a tapered band (0 = use the constant
+    /// `world_half_width`). The shader interpolates across the segment.
+    pub world_hw_a: f32,
+    pub world_hw_b: f32,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -202,6 +213,8 @@ impl WireInstance {
             wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, align_end) as u64,      shader_location: 12, format: wgpu::VertexFormat::Float32   },
             wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, align_total) as u64,    shader_location: 13, format: wgpu::VertexFormat::Float32   },
             wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, world_half_width) as u64, shader_location: 14, format: wgpu::VertexFormat::Float32 },
+            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, world_hw_a) as u64, shader_location: 15, format: wgpu::VertexFormat::Float32 },
+            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, world_hw_b) as u64, shader_location: 16, format: wgpu::VertexFormat::Float32 },
         ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<WireInstance>() as u64,
@@ -389,6 +402,7 @@ fn emit_wire_instances(wire: &WireModel, color: [f32; 4], draw_depth: f32) -> Ve
     }
     let (dists, align_end, align_total) = wire_distances(wire);
     let low = |i: usize| -> [f32; 3] { wire.points_low.get(i).copied().unwrap_or([0.0; 3]) };
+    let tw = |i: usize| -> f32 { wire.taper_widths.get(i).copied().unwrap_or(0.0) * 0.5 };
     let mut instances: Vec<WireInstance> = Vec::with_capacity(seg_count);
     for i in 0..seg_count {
         let a = wire.points[i];
@@ -412,6 +426,8 @@ fn emit_wire_instances(wire: &WireModel, color: [f32; 4], draw_depth: f32) -> Ve
             align_end,
             align_total,
             world_half_width: wire.world_width * 0.5,
+            world_hw_a: tw(i),
+            world_hw_b: tw(i + 1),
         });
     }
     instances
@@ -446,6 +462,9 @@ pub(crate) fn emit_wire_native(
         return (Vec::new(), cst);
     }
     let low = |i: usize| -> [f32; 3] { wire.points_low.get(i).copied().unwrap_or([0.0; 3]) };
+    // Per-point half-width for a tapered band (empty ⇒ 0 ⇒ shader uses the
+    // per-wire constant width).
+    let tw = |i: usize| -> f32 { wire.taper_widths.get(i).copied().unwrap_or(0.0) * 0.5 };
     let mut instances: Vec<WireInstance> = Vec::with_capacity(seg_count);
     for i in 0..seg_count {
         let a = wire.points[i];
@@ -461,6 +480,8 @@ pub(crate) fn emit_wire_native(
             distance_a: dists[i],
             distance_b: dists[i + 1],
             wire_id,
+            world_hw_a: tw(i),
+            world_hw_b: tw(i + 1),
         });
     }
     (instances, cst)

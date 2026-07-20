@@ -326,13 +326,52 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
     }
 
     let (fill_origin, fills) = wide_fills(pl);
+    // A wide Polyline2D whose per-vertex widths VARY renders a smooth taper; a
+    // uniform-width one keeps the constant-band Contour.
+    let object = match tapered_band_verts_2d(pl) {
+        Some(band_verts) => {
+            let (pts, widths) = crate::entities::common::tapered_band_points(
+                &band_verts,
+                pl.is_closed(),
+                &to_wcs,
+            );
+            TruckObject::TaperedLines(pts, widths)
+        }
+        None => TruckObject::Contour(edges.into_iter().collect::<Wire>()),
+    };
     TruckEntity {
         pick_tris: crate::entities::common::wide_band_tris(fill_origin, &fills),
-        object: TruckObject::Contour(edges.into_iter().collect::<Wire>()),
+        object,
         snap_pts: vec![],
         tangent_geoms: tangents,
         key_vertices: key_verts,
         fill_tris: vec![],
+    }
+}
+
+/// Per-vertex `(location, bulge, start_width, end_width)` band description for a
+/// wide Polyline2D whose width VARIES — `None` when the width is uniform.
+fn tapered_band_verts_2d(
+    pl: &acadrust::entities::Polyline2D,
+) -> Option<Vec<([f64; 2], f64, f64, f64)>> {
+    let d = pl.start_width.max(pl.end_width);
+    let band: Vec<([f64; 2], f64, f64, f64)> = pl
+        .vertices
+        .iter()
+        .map(|v| {
+            let sw = if v.start_width > 1e-9 { v.start_width } else { d };
+            let ew = if v.end_width > 1e-9 { v.end_width } else { d };
+            ([v.location.x, v.location.y], v.bulge, sw, ew)
+        })
+        .collect();
+    let w0 = band.first().map_or(0.0, |v| v.2);
+    let varies = band
+        .iter()
+        .any(|&(_, _, sw, ew)| (sw - w0).abs() > 1e-9 || (ew - w0).abs() > 1e-9);
+    if varies && w0.max(band.iter().map(|v| v.3).fold(0.0, f64::max)) > 1e-9 {
+        Some(band)
+    } else {
+        None
     }
 }
 

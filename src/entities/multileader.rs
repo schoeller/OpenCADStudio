@@ -1404,6 +1404,7 @@ impl MultiLeaderTess for MultiLeader {
         // WireModels so the renderer respects per-piece coloring.
         let mut wires: Vec<WireModel> = Vec::new();
         wires.push(WireModel {
+            taper_widths: Vec::new(),
             world_width: 0.0,
             fill_is_3d: false,
             pick_tris: Vec::new(),
@@ -1694,6 +1695,7 @@ impl MultiLeaderTess for MultiLeader {
                         xy = xy.max(y);
                     }
                     wires.push(WireModel {
+                        taper_widths: Vec::new(),
                         world_width: 0.0,
                         fill_is_3d: false,
                         pick_tris: Vec::new(),
@@ -1762,6 +1764,7 @@ impl MultiLeaderTess for MultiLeader {
                         wcs_corners[3],
                     ];
                     wires.push(WireModel {
+                        taper_widths: Vec::new(),
                         world_width: 0.0,
                         fill_is_3d: false,
                         pick_tris: Vec::new(),
@@ -1798,6 +1801,7 @@ impl MultiLeaderTess for MultiLeader {
                         wcs_corners[0],
                     ];
                     wires.push(WireModel {
+                        taper_widths: Vec::new(),
                         world_width: 0.0,
                         fill_is_3d: false,
                         pick_tris: Vec::new(),

@@ -213,6 +213,51 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
         return thick_segments(&seg_data, &path, pline.thickness, normal, kv, tgs);
     }
 
+    // A wide polyline whose per-vertex widths VARY renders a smooth taper —
+    // handled here, before the PLINEGEN split, so both cases get it. A
+    // uniform-width polyline falls through to the constant-band paths below.
+    if let Some(band_verts) = tapered_band_verts(pline) {
+        let mut kv: Vec<[f64; 3]> = Vec::new();
+        let mut tgs: Vec<TangentGeom> = Vec::new();
+        for i in 0..seg_count {
+            let v0 = &verts[i];
+            let v1 = &verts[(i + 1) % count];
+            let p0 = to_pt(v0);
+            let p1 = to_pt(v1);
+            if i == 0 {
+                kv.push([p0.x, p0.y, p0.z]);
+            }
+            kv.push([p1.x, p1.y, p1.z]);
+            if v0.bulge.abs() < 1e-9 {
+                tgs.push(TangentGeom::Line {
+                    p1: [p0.x as f32, p0.y as f32, p0.z as f32],
+                    p2: [p1.x as f32, p1.y as f32, p1.z as f32],
+                });
+            } else if let Some(arc) = crate::entities::common::BulgeArc::from_bulge(
+                [v0.location.x, v0.location.y],
+                [v1.location.x, v1.location.y],
+                v0.bulge,
+            ) {
+                let (wcx, wcy, wcz) = to_wcs(arc.center[0], arc.center[1]);
+                tgs.push(TangentGeom::Circle {
+                    center: [wcx as f32, wcy as f32, wcz as f32],
+                    radius: arc.radius as f32,
+                });
+            }
+        }
+        let (pts, widths) =
+            crate::entities::common::tapered_band_points(&band_verts, pline.is_closed, &to_wcs);
+        let (fill_origin, fills) = wide_fills(pline);
+        return TruckEntity {
+            pick_tris: crate::entities::common::wide_band_tris(fill_origin, &fills),
+            object: TruckObject::TaperedLines(pts, widths),
+            snap_pts: vec![],
+            tangent_geoms: tgs,
+            key_vertices: kv,
+            fill_tris: vec![],
+        };
+    }
+
     // plinegen=false: NaN-separated segments so the linetype pattern restarts per vertex.
     if !pline.plinegen {
         let mut pts: Vec<[f64; 3]> = Vec::new();
@@ -318,6 +363,32 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
         tangent_geoms: tangents,
         key_vertices: key_verts,
         fill_tris: vec![],
+    }
+}
+
+/// The per-vertex `(location, bulge, start_width, end_width)` band description
+/// for a wide LwPolyline whose width VARIES — `None` when the width is uniform
+/// (a constant band) so the caller keeps the cheaper constant-width path.
+fn tapered_band_verts(pline: &LwPolyline) -> Option<Vec<([f64; 2], f64, f64, f64)>> {
+    let c = pline.constant_width;
+    let band: Vec<([f64; 2], f64, f64, f64)> = pline
+        .vertices
+        .iter()
+        .map(|v| {
+            let sw = if v.start_width > 1e-9 { v.start_width } else { c };
+            let ew = if v.end_width > 1e-9 { v.end_width } else { c };
+            ([v.location.x, v.location.y], v.bulge, sw, ew)
+        })
+        .collect();
+    let w0 = band.first().map_or(0.0, |v| v.2);
+    let varies = band
+        .iter()
+        .any(|&(_, _, sw, ew)| (sw - w0).abs() > 1e-9 || (ew - w0).abs() > 1e-9);
+    // Only a genuine, non-zero-width taper takes the per-point path.
+    if varies && w0.max(band.iter().map(|v| v.3).fold(0.0, f64::max)) > 1e-9 {
+        Some(band)
+    } else {
+        None
     }
 }
 

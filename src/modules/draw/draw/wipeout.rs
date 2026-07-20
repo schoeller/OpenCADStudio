@@ -114,6 +114,7 @@ impl CadCommand for WipeoutCommand {
                 let min = p1.min(pt);
                 let max = p1.max(pt);
                 Some(WireModel {
+                    taper_widths: Vec::new(),
                     world_width: 0.0,
                     fill_is_3d: false,
                     pick_tris: Vec::new(),
@@ -161,6 +162,7 @@ impl CadCommand for WipeoutCommand {
                     self.poly_pts[0].z as f32,
                 ]);
                 Some(WireModel {
+                    taper_widths: Vec::new(),
                     world_width: 0.0,
                     fill_is_3d: false,
                     pick_tris: Vec::new(),

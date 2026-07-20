@@ -392,6 +392,47 @@ pub(crate) fn thick_band_tube(
     (fill_tris, lines)
 }
 
+/// Build a continuous WCS point list + a per-point FULL band width for a
+/// tapered wide polyline, so the wire shader can interpolate each segment's two
+/// endpoint widths. Each `verts` entry is `(location_xy, bulge_to_next,
+/// start_width, end_width)` — the effective full widths at that vertex's segment
+/// start and end (already resolved against the polyline's constant width). Arcs
+/// are sampled in 16 steps with the width interpolated linearly along the arc.
+/// A shared vertex is emitted once (carrying the previous segment's end width),
+/// which is exact for the usual continuous taper.
+pub(crate) fn tapered_band_points(
+    verts: &[([f64; 2], f64, f64, f64)],
+    is_closed: bool,
+    to_wcs: &dyn Fn(f64, f64) -> (f64, f64, f64),
+) -> (Vec<[f64; 3]>, Vec<f32>) {
+    let n = verts.len();
+    let seg_count = if is_closed { n } else { n.saturating_sub(1) };
+    let mut pts: Vec<[f64; 3]> = Vec::new();
+    let mut widths: Vec<f32> = Vec::new();
+    let mut push = |x: f64, y: f64, w: f32| {
+        let (wx, wy, wz) = to_wcs(x, y);
+        pts.push([wx, wy, wz]);
+        widths.push(w);
+    };
+    for i in 0..seg_count {
+        let (p0, bulge, sw0, ew0) = verts[i];
+        let (p1, _, _, _) = verts[(i + 1) % n];
+        if i == 0 {
+            push(p0[0], p0[1], sw0 as f32);
+        }
+        if bulge.abs() < 1e-9 {
+            push(p1[0], p1[1], ew0 as f32);
+        } else if let Some(arc) = BulgeArc::from_bulge(p0, p1, bulge) {
+            for j in 1..=16usize {
+                let t = j as f64 / 16.0;
+                let s = arc.sample(t);
+                push(s[0], s[1], (sw0 + (ew0 - sw0) * t) as f32);
+            }
+        }
+    }
+    (pts, widths)
+}
+
 /// Compute the filled boundary polygon for one polyline segment.
 /// For straight segments: a rectangle/trapezoid.
 /// For arc segments: an arc band (outer arc + reversed inner arc).

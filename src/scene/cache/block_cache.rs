@@ -864,6 +864,7 @@ impl Batches {
                 // the cached defn.
                 let color = crate::scene::view::render::adapt_to_bg(b.color, bg_color);
                 WireModel {
+                    taper_widths: Vec::new(),
                     world_width: b.world_width,
                     fill_is_3d: false,
                     pick_tris: b.pick_tris,

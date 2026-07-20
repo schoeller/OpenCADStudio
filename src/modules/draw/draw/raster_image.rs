@@ -108,6 +108,7 @@ impl CadCommand for ImageCommand {
         let p3 = [origin.x, origin.y + world_height, origin.z];
 
         Some(WireModel {
+            taper_widths: Vec::new(),
             world_width: 0.0,
             fill_is_3d: false,
             pick_tris: Vec::new(),

@@ -370,6 +370,7 @@ pub fn tessellate(
                     None
                 };
                 elem_wires.push(WireModel {
+                    taper_widths: Vec::new(),
                     world_width: 0.0,
                     fill_is_3d: false,
                     pick_tris: Vec::new(),
@@ -661,6 +662,7 @@ pub fn tessellate(
                                         ftl.push(lo);
                                     }
                                     wires.push(WireModel {
+                                        taper_widths: Vec::new(),
                                         world_width: 0.0,
                                         fill_is_3d: false,
                                         pick_tris: Vec::new(),
@@ -699,6 +701,7 @@ pub fn tessellate(
                                         fpl.push(lo);
                                     }
                                     wires.push(WireModel {
+                                        taper_widths: Vec::new(),
                                         world_width: 0.0,
                                         fill_is_3d: false,
                                         pick_tris: Vec::new(),
@@ -744,6 +747,7 @@ pub fn tessellate(
                             low.push(ll);
                         }
                         wires.push(WireModel {
+                            taper_widths: Vec::new(),
                             world_width: 0.0,
                             fill_is_3d: false,
                             pick_tris: Vec::new(),
@@ -770,6 +774,7 @@ pub fn tessellate(
                         });
                     }
                     wires.push(WireModel {
+                        taper_widths: Vec::new(),
                         world_width: 0.0,
                         fill_is_3d: false,
                         pick_tris: Vec::new(),
@@ -826,6 +831,7 @@ pub fn tessellate(
                             (Vec::new(), Vec::new(), Vec::new())
                         };
                         out.push(WireModel {
+                            taper_widths: Vec::new(),
                             world_width: 0.0,
                             fill_is_3d: false,
                             pick_tris: Vec::new(),
@@ -864,6 +870,7 @@ pub fn tessellate(
                             (Vec::new(), Vec::new(), Vec::new())
                         };
                         out.push(WireModel {
+                            taper_widths: Vec::new(),
                             world_width: 0.0,
                             fill_is_3d: false,
                             pick_tris: Vec::new(),
@@ -899,6 +906,7 @@ pub fn tessellate(
                 // are empty → the early-return path above).
                 if !sdf_verts.is_empty() {
                     out.push(WireModel {
+                        taper_widths: Vec::new(),
                         world_width: 0.0,
                         fill_is_3d: false,
                         pick_tris: Vec::new(),
@@ -927,6 +935,7 @@ pub fn tessellate(
 
                 if out.is_empty() {
                     out.push(WireModel {
+                        taper_widths: Vec::new(),
                         world_width: 0.0,
                         fill_is_3d: false,
                         pick_tris: Vec::new(),
@@ -977,6 +986,7 @@ pub fn tessellate(
                             .map(|[kx, ky, kz]| [kx, ky, kz])
                             .collect();
                         return vec![WireModel {
+                            taper_widths: Vec::new(),
                             world_width: 0.0,
                             fill_is_3d: false,
                             pick_tris: Vec::new(),
@@ -1026,6 +1036,7 @@ pub fn tessellate(
                         .map(|[x, y, z]| [x, y, z])
                         .collect();
                     return vec![WireModel {
+                        taper_widths: Vec::new(),
                         world_width: 0.0,
                         fill_is_3d: false,
                         pick_tris: Vec::new(),
@@ -1068,6 +1079,7 @@ pub fn tessellate(
                     // linetype dashes it); the band also backs pick.
                     let (pick_tris, pick_tris_low) = points_to_ds(te.pick_tris);
                     return vec![WireModel {
+                        taper_widths: Vec::new(),
                         world_width: polyline_band_width(entity),
                         fill_is_3d: false,
                         pick_tris,
@@ -1159,6 +1171,7 @@ pub fn tessellate(
                         (Vec::new(), Vec::new(), Vec::new())
                     };
                     out.push(WireModel {
+                        taper_widths: Vec::new(),
                         world_width: 0.0,
                         fill_is_3d: false,
                         pick_tris,
@@ -1196,6 +1209,7 @@ pub fn tessellate(
                         (Vec::new(), Vec::new(), Vec::new())
                     };
                     out.push(WireModel {
+                        taper_widths: Vec::new(),
                         world_width: 0.0,
                         pick_tris: Vec::new(),
                         pick_tris_low: Vec::new(),
@@ -1224,6 +1238,7 @@ pub fn tessellate(
 
                 if out.is_empty() {
                     out.push(WireModel {
+                        taper_widths: Vec::new(),
                         world_width: 0.0,
                         fill_is_3d: false,
                         pick_tris: Vec::new(),
@@ -1265,6 +1280,7 @@ pub fn tessellate(
                 // treatment as the Contour arm, restarting the dash per segment.
                 let (pick_tris, pick_tris_low) = points_to_ds(te.pick_tris);
                 return vec![WireModel {
+                    taper_widths: Vec::new(),
                     world_width: polyline_band_width(entity),
                     fill_is_3d: false,
                     pick_tris,
@@ -1285,6 +1301,49 @@ pub fn tessellate(
                     aci: 0,
                     key_vertices,
                     plinegen: false,
+                    aabb: WireModel::UNBOUNDED_AABB,
+                    fill_tris: vec![],
+                    fill_tris_low: Vec::new(),
+                }];
+            }
+
+            TruckObject::TaperedLines(points, widths) => {
+                // A wide polyline whose width varies: one continuous band wire
+                // carrying a per-point width; the shader interpolates each
+                // segment's two endpoint widths. `world_width` (the widest edge)
+                // stays as the constant fallback for PDF export + a hairline
+                // floor when zoomed out.
+                let (local_pts, local_pts_low) = points_to_ds(points);
+                let snap_pts = te.snap_pts;
+                let key_vertices: Vec<[f64; 3]> = te
+                    .key_vertices
+                    .into_iter()
+                    .map(|[x, y, z]| [x, y, z])
+                    .collect();
+                let (pick_tris, pick_tris_low) = points_to_ds(te.pick_tris);
+                let world_width = widths.iter().copied().fold(0.0f32, f32::max);
+                return vec![WireModel {
+                    taper_widths: widths,
+                    world_width,
+                    fill_is_3d: false,
+                    pick_tris,
+                    pick_tris_low,
+                    dash_from_start: false,
+                    dash_align_end: None,
+                    text_verts: Vec::new(),
+                    name,
+                    points: local_pts,
+                    points_low: local_pts_low,
+                    color,
+                    selected,
+                    pattern_length,
+                    pattern,
+                    line_weight_px,
+                    snap_pts,
+                    tangent_geoms: te.tangent_geoms,
+                    aci: 0,
+                    key_vertices,
+                    plinegen: true,
                     aabb: WireModel::UNBOUNDED_AABB,
                     fill_tris: vec![],
                     fill_tris_low: Vec::new(),
@@ -1334,6 +1393,7 @@ pub fn tessellate(
     let snap_pts: Vec<(glam::DVec3, SnapHint)> =
         snap_pts.into_iter().map(|(p, h)| (p.as_dvec3(), h)).collect();
     vec![WireModel {
+        taper_widths: Vec::new(),
         world_width: 0.0,
         fill_is_3d: false,
         pick_tris: Vec::new(),
