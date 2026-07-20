@@ -230,26 +230,6 @@ pub trait HostApi {
 
     /// Add an entity to the active document, returning its handle.
     fn add_entity(&mut self, entity: EntityType) -> Handle;
-    /// Replace the existing entity that carries `entity`'s handle, preserving
-    /// its identity (handle and owning block). Returns `false` when no entity
-    /// has that handle. This is the sanctioned way to commit in-place edits
-    /// from an out-of-process plugin — mutating `document_mut()` does not work
-    /// across the process boundary.
-    fn update_entity(&mut self, entity: EntityType) -> bool {
-        let handle = entity.common().handle;
-        match self.document_mut().get_entity_mut(handle) {
-            Some(slot) => {
-                *slot = entity;
-                true
-            }
-            None => false,
-        }
-    }
-    /// Delete the entity with `handle` (and any derived render caches). Returns
-    /// `true` when an entity was removed.
-    fn remove_entity(&mut self, handle: Handle) -> bool {
-        self.document_mut().remove_entity(handle).is_some()
-    }
 
     // ── XDATA ───────────────────────────────────────────────────────────────
     /// Mark the scene geometry dirty so it is re-tessellated next frame.
@@ -285,6 +265,30 @@ pub trait HostApi {
         plugin_id: &'static str,
         init: &mut dyn FnMut() -> Box<dyn Any + Send + Sync>,
     ) -> &mut (dyn Any + Send + Sync);
+
+    // ── Entity editing (API v3; placed after the V2 surface so vtable indices
+    // for the V2 methods stay stable for old cdylibs) ────────────────────────
+    /// Replace the existing entity that carries `entity`'s handle, preserving
+    /// its identity (handle and owning block). Returns `false` when no entity
+    /// has that handle. This is the sanctioned way to commit in-place edits
+    /// from an out-of-process plugin — mutating `document_mut()` does not work
+    /// across the process boundary.
+    fn update_entity(&mut self, entity: EntityType) -> bool {
+        let handle = entity.common().handle;
+        match self.document_mut().get_entity_mut(handle) {
+            Some(slot) => {
+                *slot = entity;
+                true
+            }
+            None => false,
+        }
+    }
+    /// Delete the entity with `handle` (and any derived render caches). Returns
+    /// `true` when an entity was removed.
+    fn remove_entity(&mut self, handle: Handle) -> bool {
+        self.document_mut().remove_entity(handle).is_some()
+    }
+
     // ── DocumentReader (added in API v3; appended at the end to keep vtable
     // indices stable for API v2 plugins) ─────────────────────────────────────
 
