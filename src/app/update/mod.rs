@@ -66,6 +66,50 @@ mod util;
 mod viewport;
 
 impl OpenCADStudio {
+    /// Switch the UI to document tab `idx` and sync ribbon / view settings.
+    /// This is the implementation shared by the UI tab switch and the plugin
+    /// `HostApi::set_active_tab` request.
+    pub(crate) fn switch_to_tab(&mut self, idx: usize) -> Result<(), String> {
+        if idx >= self.tabs.len() {
+            return Err(format!(
+                "tab index {idx} out of range ({} tabs)",
+                self.tabs.len()
+            ));
+        }
+        if idx != self.active_tab {
+            // The attribute editor is tab-scoped; leaving its tab
+            // drops it (its handle is that document's, not this one's).
+            self.cancel_attr_editor();
+            // Persist the outgoing drawing's Ortho / running OSNAP
+            // before leaving it, so switching back restores them.
+            let prev = self.active_tab;
+            self.stamp_header_sysvars(prev);
+        }
+        self.active_tab = idx;
+        self.sync_ribbon_layers();
+        self.sync_ribbon_styles();
+        // #21: also re-seed ribbon Color / Linetype / Lineweight
+        // from the newly active tab so they reflect that doc's
+        // CECOLOR / CELTYPE / CELWEIGHT (or its current selection
+        // if there is one), not the prior tab's choice.
+        self.sync_ribbon_from_selection();
+        // Grid/snap follow the newly active drawing's viewport.
+        self.adopt_view_display(idx);
+        // Ortho / running OSNAP follow the newly active drawing.
+        self.adopt_header_sysvars(idx);
+        // Shared CJK ideographs follow the newly active drawing's
+        // language; re-tessellate if it differs from the last. (#141)
+        if crate::scene::text::web_font::set_cjk_lang_from_codepage(
+            &self.tabs[idx].scene.document.header.code_page,
+        ) {
+            crate::scene::text::ttf_glyph::clear_fallback_cache();
+            self.tabs[idx].scene.bump_geometry();
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::plugin::on_document_activated(self, idx);
+        Ok(())
+    }
+
     /// Close the active in-canvas modal (Plan B), mirroring what closing the
     /// old OS window did: a style editor discards its staged (un-applied)
     /// changes, and the ribbon tool that launched the dialog is de-highlighted.
@@ -731,39 +775,7 @@ impl OpenCADStudio {
             }
 
             Message::TabSwitch(idx) => {
-                if idx < self.tabs.len() {
-                    if idx != self.active_tab {
-                        // The attribute editor is tab-scoped; leaving its tab
-                        // drops it (its handle is that document's, not this one's).
-                        self.cancel_attr_editor();
-                        // Persist the outgoing drawing's Ortho / running OSNAP
-                        // before leaving it, so switching back restores them.
-                        let prev = self.active_tab;
-                        self.stamp_header_sysvars(prev);
-                    }
-                    self.active_tab = idx;
-                    self.sync_ribbon_layers();
-                    self.sync_ribbon_styles();
-                    // #21: also re-seed ribbon Color / Linetype / Lineweight
-                    // from the newly active tab so they reflect that doc's
-                    // CECOLOR / CELTYPE / CELWEIGHT (or its current selection
-                    // if there is one), not the prior tab's choice.
-                    self.sync_ribbon_from_selection();
-                    // Grid/snap follow the newly active drawing's viewport.
-                    self.adopt_view_display(idx);
-                    // Ortho / running OSNAP follow the newly active drawing.
-                    self.adopt_header_sysvars(idx);
-                    // Shared CJK ideographs follow the newly active drawing's
-                    // language; re-tessellate if it differs from the last. (#141)
-                    if crate::scene::text::web_font::set_cjk_lang_from_codepage(
-                        &self.tabs[idx].scene.document.header.code_page,
-                    ) {
-                        crate::scene::text::ttf_glyph::clear_fallback_cache();
-                        self.tabs[idx].scene.bump_geometry();
-                    }
-                    #[cfg(not(target_arch = "wasm32"))]
-                    crate::plugin::on_document_activated(self, idx);
-                }
+                let _ = self.switch_to_tab(idx);
                 Task::none()
             }
 

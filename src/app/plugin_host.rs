@@ -208,12 +208,7 @@ impl<'a> HostSession<'a> {
     }
 
     pub fn set_active_tab(&mut self, tab: usize) -> Result<(), String> {
-        if tab >= self.app.tabs.len() {
-            return Err(format!(
-                "tab index {tab} out of range ({} tabs)",
-                self.app.tabs.len()
-            ));
-        }
+        self.app.switch_to_tab(tab)?;
         self.tab = tab;
         Ok(())
     }
