@@ -113,6 +113,8 @@ pub fn visualization_section(entity: &EntityType) -> Option<PropSection> {
             | EntityType::Seqend(_)
             | EntityType::Leader(_)
             | EntityType::Unknown(_)
+            // Non-plotting drawing-view border: never rendered, no properties.
+            | EntityType::ViewBorder(_)
     ) {
         return None;
     }

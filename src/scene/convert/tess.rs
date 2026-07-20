@@ -24,8 +24,8 @@ fn fade_if_locked(
 /// 2. The parent's refs name the section view's `AcDbViewRep` (any ref that
 ///    owns an `AcDbViewRepSectionDefinition`), falling back to the document's
 ///    section views.
-/// 3. Each view's refs include its `AcDbViewBorder`, whose first handle is the
-///    view's *active* viewport — the entity carrying the real camera.
+/// 3. Each view's refs include its `AcDbViewBorder` entity, which carries the
+///    view's *active* viewport — the entity holding the real camera.
 /// 4. The section camera's sight (−view_direction) is projected onto the parent
 ///    camera's right/up basis (same convention as `camera_from_view`), giving
 ///    the on-paper arrow direction.
@@ -40,20 +40,23 @@ fn section_arrow_dir_from_views(
     if s.view_rep_handle == 0 {
         return None;
     }
+    // A view's active viewport, via its border entity among the ViewRep refs.
+    let border_vp = |h: &AHandle| -> Option<AHandle> {
+        match document.get_entity(*h)? {
+            EntityType::ViewBorder(b) if !b.active_viewport.is_null() => Some(b.active_viewport),
+            _ => None,
+        }
+    };
     let parent_vr = AHandle::from(s.view_rep_handle);
     let parent_refs = document.view_rep_refs.get(&parent_vr)?;
-    let parent_vp_h = parent_refs
-        .iter()
-        .find_map(|h| document.view_border_viewport.get(h))?;
+    let parent_vp_h = parent_refs.iter().find_map(border_vp)?;
     let sect_vr = parent_refs
         .iter()
         .find(|h| **h != parent_vr && document.section_view_reps.contains(h))
         .or_else(|| document.section_view_reps.iter().find(|&&h| h != parent_vr))
         .copied()?;
     let sect_refs = document.view_rep_refs.get(&sect_vr)?;
-    let sect_vp_h = sect_refs
-        .iter()
-        .find_map(|h| document.view_border_viewport.get(h))?;
+    let sect_vp_h = sect_refs.iter().find_map(border_vp)?;
 
     let viewport = |h: &AHandle| {
         document.entities().find_map(|e| match e {
@@ -61,8 +64,8 @@ fn section_arrow_dir_from_views(
             _ => None,
         })
     };
-    let pvp = viewport(parent_vp_h)?;
-    let svp = viewport(sect_vp_h)?;
+    let pvp = viewport(&parent_vp_h)?;
+    let svp = viewport(&sect_vp_h)?;
 
     // Section sight: view_direction points target→camera, sight is its inverse.
     let sight = -glam::DVec3::new(
@@ -606,23 +609,24 @@ pub(crate) fn tessellate_entity(
 
     // ── Section symbol (AcDbSectionSymbol): draw the "A-A" cut mark ──────────
     //
-    // Model-Documentation section marks arrive as `Unknown` (class 825); the
-    // DWG reader decodes the two cut-line endpoints, the signed end ticks and
-    // the identifier. Synthesize the cut line + end ticks + label glyphs so the
-    // mark is visible on the layout, the way AutoCAD draws it. The raw record is
-    // still preserved for lossless write-back.
-    if let EntityType::Unknown(u) = e {
-        if let Some(s) = u.section_symbol.as_ref() {
-            return section_symbol_wires(
-                document,
-                s,
-                document.section_view_style.as_ref(),
-                h,
-                entity_color,
-                sel,
-                line_weight_px,
-            );
-        }
+    // The DWG reader decodes the two cut-line endpoints, the signed end ticks
+    // and the identifier. Synthesize the end ticks + arrowheads + label glyphs
+    // so the mark is visible on the layout, the way AutoCAD draws it. The raw
+    // record is still preserved for lossless write-back.
+    if let EntityType::SectionSymbol(s) = e {
+        return section_symbol_wires(
+            document,
+            s,
+            document.section_view_style.as_ref(),
+            h,
+            entity_color,
+            sel,
+            line_weight_px,
+        );
+    }
+    // Drawing-view borders are non-plotting aids: nothing is drawn.
+    if let EntityType::ViewBorder(_) = e {
+        return vec![];
     }
 
     // ── Dimension baked-block fast path ─────────────────────────────────────

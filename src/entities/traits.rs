@@ -143,6 +143,8 @@ pub fn entity_type_name(et: &EntityType) -> &'static str {
         EntityType::Ole2Frame(_) => "Ole2Frame",
         EntityType::PolygonMesh(_) => "PolygonMesh",
         EntityType::Light(_) => "Light",
+        EntityType::SectionSymbol(_) => "SectionSymbol",
+        EntityType::ViewBorder(_) => "ViewBorder",
         EntityType::Unknown(_) => "Unknown",
     }
 }

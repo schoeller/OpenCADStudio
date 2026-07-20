@@ -338,7 +338,12 @@ pub fn dropped_on_save_count(
         })
         .count();
     for e in doc.entities() {
-        if matches!(e, acadrust::EntityType::Unknown(_)) {
+        if matches!(
+            e,
+            acadrust::EntityType::Unknown(_)
+                | acadrust::EntityType::SectionSymbol(_)
+                | acadrust::EntityType::ViewBorder(_)
+        ) {
             n += 1;
         }
     }
