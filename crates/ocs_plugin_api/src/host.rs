@@ -39,19 +39,24 @@ pub trait BuiltinPlugin: Send + Sync {
     }
 }
 
-/// API v2 plugin entry point. Kept as a separate trait so v2 cdylibs can be
-/// loaded and adapted to the API v3 `BuiltinPlugin` trait without recompiling.
-/// The v2 surface has no panels, async events, document reader, or interactive
-/// object pick.
+/// API v2 plugin surface. The v2 subset is the first three methods of
+/// `BuiltinPlugin` (manifest, ribbon, dispatch). V2 cdylibs report
+/// `ocs_plugin_api_version() == 2` and export `*mut Box<dyn BuiltinPlugin>`. The
+/// runner loads them through `V2ToV3Adapter`, which supplies the default no-op
+/// implementations for v3-only methods (`panels`, `on_async_event`) so that old
+/// plugins do not need to be recompiled. Plugins may also use this trait
+/// explicitly if they prefer a separate v2-only contract.
 pub trait BuiltinPluginV2: Send + Sync {
     fn manifest(&self) -> &'static PluginManifest;
     fn ribbon(&self) -> Box<dyn CadModule>;
     fn dispatch(&self, host: &mut dyn HostApi, cmd: &str) -> bool;
 }
 
-/// Adapter that wraps an API v2 plugin so it satisfies the API v3
-/// `BuiltinPlugin` trait. New v3 methods (`panels`, `on_async_event`) are no-ops.
-pub struct V2ToV3Adapter(pub Box<dyn BuiltinPluginV2>);
+/// Adapter that wraps an API v2 plugin (exported as `Box<dyn BuiltinPlugin>`)
+/// so it satisfies the API v3 `BuiltinPlugin` trait. New v3 methods (`panels`,
+/// `on_async_event`) are left as the built-in no-op defaults, masking any
+/// missing/incomplete entries in the v2 vtable.
+pub struct V2ToV3Adapter(pub Box<dyn BuiltinPlugin>);
 
 impl BuiltinPlugin for V2ToV3Adapter {
     fn manifest(&self) -> &'static PluginManifest {

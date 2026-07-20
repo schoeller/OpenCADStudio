@@ -9,7 +9,7 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use crate::host::{BuiltinPlugin, BuiltinPluginV2, HostApi, InteractiveCommand, V2ToV3Adapter};
+use crate::host::{BuiltinPlugin, HostApi, InteractiveCommand, V2ToV3Adapter};
 use crate::ipc::client::{InteractiveRegistry, IpcClient, PluginHostApi};
 use crate::ipc::protocol::{
     HostRequest, HostResponse, HostToPlugin, InteractiveEvent, PluginToHost, PLUGIN_TOKEN_ENV,
@@ -308,7 +308,11 @@ unsafe fn load_plugin(path: &Path) -> Result<Box<dyn BuiltinPlugin>, Box<dyn std
     }
 
     let plugin: Box<dyn BuiltinPlugin> = if v == 2 {
-        let register: libloading::Symbol<extern "C" fn() -> *mut Box<dyn BuiltinPluginV2>> = lib
+        // API v2 cdylibs export `*mut Box<dyn BuiltinPlugin>` using only the
+        // first three trait methods (manifest, ribbon, dispatch). Wrap the
+        // returned object so the v3 `BuiltinPlugin` view uses safe no-op
+        // defaults for panels and async events, masking any incomplete v2 vtable.
+        let register: libloading::Symbol<extern "C" fn() -> *mut Box<dyn BuiltinPlugin>> = lib
             .get(b"ocs_plugin_register")
             .map_err(|_| "missing ocs_plugin_register symbol")?;
         let raw = register();

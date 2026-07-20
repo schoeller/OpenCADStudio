@@ -1,11 +1,12 @@
 //! Minimal API v2-compatible fixture plugin for runner validation.
 //!
 //! This plugin deliberately reports API major version 2 via the
-//! `ocs_plugin_api_version` C symbol while still implementing the current
-//! `BuiltinPluginV2` trait (the API v2 surface). That lets Stage 1 tests verify
-//! that the host still loads v2 plugins.
+//! `ocs_plugin_api_version` C symbol while implementing the current
+//! `BuiltinPlugin` trait (the first three methods are the API v2 surface). That
+//! lets Stage 1 tests verify that the host still loads v2 plugins without
+//! requiring them to be rebuilt for the V2-specific trait.
 
-use ocs_plugin_api::host::{BuiltinPluginV2, HostApi};
+use ocs_plugin_api::host::{BuiltinPlugin, HostApi};
 use ocs_plugin_api::manifest::{ApiVersion, PluginManifest};
 use ocs_plugin_api::ribbon::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
 
@@ -52,7 +53,7 @@ impl CadModule for TestModule {
     }
 }
 
-impl BuiltinPluginV2 for TestV2Plugin {
+impl BuiltinPlugin for TestV2Plugin {
     fn manifest(&self) -> &'static PluginManifest {
         &MANIFEST
     }
@@ -76,9 +77,9 @@ pub extern "C" fn ocs_plugin_api_version() -> u32 {
 }
 
 #[no_mangle]
-pub extern "C" fn ocs_plugin_register() -> *mut Box<dyn BuiltinPluginV2> {
+pub extern "C" fn ocs_plugin_register() -> *mut Box<dyn BuiltinPlugin> {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let plugin: Box<dyn BuiltinPluginV2> = Box::new(TestV2Plugin::new());
+        let plugin: Box<dyn BuiltinPlugin> = Box::new(TestV2Plugin::new());
         Box::into_raw(Box::new(plugin))
     })) {
         Ok(ptr) => ptr,

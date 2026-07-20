@@ -10,9 +10,9 @@ out-of-process plugin runtime.
 
 ## API versions
 
-### V2 (`BuiltinPluginV2`)
+### V2 (`BuiltinPlugin`)
 
-The legacy API surface:
+The legacy API surface (the first three methods of `BuiltinPlugin`):
 
 - `manifest()` — static plugin metadata.
 - `ribbon()` — ribbon tab/group/tool definitions.
@@ -20,7 +20,10 @@ The legacy API surface:
   handler.
 
 V2 plugins have no panels, async events, document reader, interactive object
-pick, or entity removal. They are still supported through `V2ToV3Adapter`.
+pick, or entity removal. They are still supported through `V2ToV3Adapter`. A v2
+cdylib reports `ocs_plugin_api_version() == 2` and exports `*mut Box<dyn
+BuiltinPlugin>`; the runner loads it through the adapter so the v3 `BuiltinPlugin`
+methods that a v2 cdylib does not implement are safely masked as no-ops.
 
 ### V3 (`BuiltinPlugin`)
 
@@ -97,8 +100,9 @@ See `src/ipc/protocol.rs` for all variants.
 
 ## V2 to V3 adapter
 
-`V2ToV3Adapter` wraps a `BuiltinPluginV2` so it satisfies `BuiltinPlugin`.
-V2-only methods (`panels`, `on_async_event`) are no-ops.
+`V2ToV3Adapter` wraps a v2 cdylib's `Box<dyn BuiltinPlugin>` so it satisfies
+`BuiltinPlugin`. V2-only methods (`panels`, `on_async_event`) are no-ops, which
+masks the incomplete v2 vtable without recompiling the plugin.
 
 ## Version constants
 
