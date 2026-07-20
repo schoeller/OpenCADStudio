@@ -242,10 +242,15 @@ impl Scene {
             projection: view::camera::Projection::Orthographic,
             yaw,
             pitch,
-            // Sized from the saved view height rather than a zoom-scaled range,
-            // so a restored view keeps stable depth precision. `view_height` is
-            // the visible extent; a few multiples cover the drawing's depth.
-            depth_half_range: (view_height as f32 * 4.0).max(1.0),
+            // Sized from the saved view height (not a zoom-scaled range) so a
+            // restored view keeps stable depth precision. A THIN projection —
+            // e.g. a model-documentation section/side view whose cut plane sits
+            // half an object-depth from the view target — has content much
+            // deeper than its visible height, so the depth half-range must be a
+            // generous multiple: `×4` clipped a section view's outline that was
+            // ~6× the view height deep. Orthographic depth precision is linear,
+            // so the wide range costs no z-fighting.
+            depth_half_range: (view_height as f32 * 64.0).max(1.0),
         })
     }
 

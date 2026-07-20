@@ -324,6 +324,16 @@ impl Scene {
         let saved_h = vp.view_height.abs();
         let aspect_d = (vp.width / vp.height.max(1.0)).max(1e-9);
         let cluster_half = self.local_extent_max.max(1.0) as f64;
+        // Full model-space bounds. The overlap test below accepts the saved view
+        // when its frame touches ANY drawn geometry — not just the dense median
+        // cluster (`local_center ± cluster_half`). A drawing with a second,
+        // sparser cluster (e.g. model-documentation view geometry sitting apart
+        // from a big symbol library) has viewports legitimately aimed at that
+        // second cluster; testing only the dense one wrongly auto-fits them onto
+        // the library. Fall back to the cluster box when no extents are known.
+        let full_bounds = self.model_space_extents().map(|(mn, mx)| {
+            (mn.x as f64, mn.y as f64, mx.x as f64, mx.y as f64)
+        });
         // Absolute drawing centre. Geometry now reaches the scene at absolute
         // (UTM) coordinates — the old code centred the overlap test and the
         // auto-fit on the origin, which was right only while world_offset
@@ -346,6 +356,25 @@ impl Scene {
                 .unwrap_or((0.0, 0.0))
         };
 
+        // A non-zero `view_target` is a deliberately-aimed saved view (a model
+        // documentation drawing view, a detail/section viewport, any viewport
+        // panned onto a specific WCS point). It is authoritative — use it as-is.
+        // The overlap test / auto-fit below only rescues the STALE default,
+        // where `view_target == (0,0,0)` points at empty WCS while the model
+        // sits at UTM. Guarding on the target avoids the tight median cluster
+        // (which collapses onto the densest sub-cluster) wrongly rejecting a
+        // valid view that frames a smaller, off-centre sub-cluster.
+        let target_set =
+            vp.view_target.x.abs() > 1e-6 || vp.view_target.y.abs() > 1e-6;
+        // A fully-uninitialised view (target AND centre both zero) is a stale
+        // placeholder viewport — frame its saved view (the origin) and leave it
+        // empty rather than auto-fitting the whole model into it. The auto-fit
+        // rescue is meant only for a stale target=(0,0,0) paired with a NON-zero
+        // (pre-georeference) view_centre that points at empty WCS while the model
+        // sits far away — that case still falls through to the overlap test.
+        let center_set =
+            vp.view_center.x.abs() > 1e-6 || vp.view_center.y.abs() > 1e-6;
+
         if let Some(cam) = self.camera_from_view(
             vp.view_direction,
             vp.view_target,
@@ -356,13 +385,23 @@ impl Scene {
             saved_h,
             vp.twist_angle,
         ) {
+            if target_set || !center_set {
+                return Some(cam);
+            }
             let half_h = saved_h * 0.5;
             let half_w = half_h * aspect_d;
             let (tx, ty) = (cam.target.x as f64, cam.target.y as f64);
-            let overlaps = tx + half_w >= cx - cluster_half
-                && tx - half_w <= cx + cluster_half
-                && ty + half_h >= cy - cluster_half
-                && ty - half_h <= cy + cluster_half;
+            // Prefer the true model bounds; fall back to the median cluster box.
+            let (bx0, by0, bx1, by1) = full_bounds.unwrap_or((
+                cx - cluster_half,
+                cy - cluster_half,
+                cx + cluster_half,
+                cy + cluster_half,
+            ));
+            let overlaps = tx + half_w >= bx0
+                && tx - half_w <= bx1
+                && ty + half_h >= by0
+                && ty - half_h <= by1;
             if overlaps {
                 return Some(cam);
             }
