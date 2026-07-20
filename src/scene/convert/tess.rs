@@ -17,67 +17,227 @@ fn fade_if_locked(
     }
 }
 
-/// Build the display wires for a decoded `AcDbSectionSymbol` (the "A-A" cut
-/// mark on a Model-Documentation view): the cut line through both endpoints —
-/// extended past each end by its signed tick — plus a short perpendicular arrow
-/// barb and the identifier glyph at each end. Coordinates are paper-space (the
-/// symbol is owned by a layout's paper space).
-fn section_symbol_wires(
+/// The section mark's viewing direction (paper-space, unit), derived entirely
+/// from the decoded model-documentation view graph:
+///
+/// 1. `symbol.view_rep_handle` → the parent view's `AcDbViewRep`.
+/// 2. The parent's refs name the section view's `AcDbViewRep` (any ref that
+///    owns an `AcDbViewRepSectionDefinition`), falling back to the document's
+///    section views.
+/// 3. Each view's refs include its `AcDbViewBorder`, whose first handle is the
+///    view's *active* viewport — the entity carrying the real camera.
+/// 4. The section camera's sight (−view_direction) is projected onto the parent
+///    camera's right/up basis (same convention as `camera_from_view`), giving
+///    the on-paper arrow direction.
+///
+/// `None` when any link is missing (DXF files, older DWGs) — the caller then
+/// falls back to a geometric heuristic.
+fn section_arrow_dir_from_views(
+    document: &acadrust::CadDocument,
     s: &acadrust::entities::SectionSymbol,
+) -> Option<[f64; 2]> {
+    use acadrust::types::Handle as AHandle;
+    if s.view_rep_handle == 0 {
+        return None;
+    }
+    let parent_vr = AHandle::from(s.view_rep_handle);
+    let parent_refs = document.view_rep_refs.get(&parent_vr)?;
+    let parent_vp_h = parent_refs
+        .iter()
+        .find_map(|h| document.view_border_viewport.get(h))?;
+    let sect_vr = parent_refs
+        .iter()
+        .find(|h| **h != parent_vr && document.section_view_reps.contains(h))
+        .or_else(|| document.section_view_reps.iter().find(|&&h| h != parent_vr))
+        .copied()?;
+    let sect_refs = document.view_rep_refs.get(&sect_vr)?;
+    let sect_vp_h = sect_refs
+        .iter()
+        .find_map(|h| document.view_border_viewport.get(h))?;
+
+    let viewport = |h: &AHandle| {
+        document.entities().find_map(|e| match e {
+            EntityType::Viewport(v) if v.common.handle == *h => Some(v),
+            _ => None,
+        })
+    };
+    let pvp = viewport(parent_vp_h)?;
+    let svp = viewport(sect_vp_h)?;
+
+    // Section sight: view_direction points target→camera, sight is its inverse.
+    let sight = -glam::DVec3::new(
+        svp.view_direction.x,
+        svp.view_direction.y,
+        svp.view_direction.z,
+    )
+    .try_normalize()?;
+
+    // Parent camera basis — the same yaw/pitch/roll convention the viewport
+    // renderer uses (`camera_from_view`), so the arrow lands exactly where the
+    // view content does.
+    let vd = glam::Vec3::new(
+        pvp.view_direction.x as f32,
+        pvp.view_direction.y as f32,
+        pvp.view_direction.z as f32,
+    )
+    .normalize_or(glam::Vec3::Z);
+    let pitch = vd.z.clamp(-1.0, 1.0).asin();
+    let yaw = if vd.x.abs() < 1e-6 && vd.y.abs() < 1e-6 {
+        0.0_f32
+    } else {
+        vd.x.atan2(-vd.y)
+    };
+    let rotation = view::camera::yaw_pitch_to_quat(yaw, pitch, -(pvp.twist_angle as f32));
+    let right = (rotation * glam::Vec3::X).as_dvec3();
+    let up = (rotation * glam::Vec3::Y).as_dvec3();
+
+    let d = glam::DVec2::new(sight.dot(right), sight.dot(up));
+    let len = d.length();
+    (len > 1e-6).then(|| [d.x / len, d.y / len])
+}
+
+/// Build the display wires for a decoded `AcDbSectionSymbol` (the "A-A" cut
+/// mark on a Model-Documentation view), styled from its `AcDbSectionViewStyle`.
+///
+/// Everything drawn here is decoded from the file:
+/// - Endpoints, end-tick lengths and the identifier come from the symbol.
+/// - Whether the full cutting line is drawn (`show_plane_line` — off gives the
+///   familiar broken line), the end segments (`show_end_lines`), the arrows
+///   (`show_arrows`), and all sizes come from the section-view style's flags.
+/// - The arrowhead shape resolves through the style's arrow block handle via
+///   the shared dimension/leader arrow table (`arrow_from_block`); a null
+///   handle is the standard ClosedFilled default.
+/// - The arrow direction comes from the view graph
+///   ([`section_arrow_dir_from_views`]); only when that chain is unavailable
+///   does it fall back to the 90°-CCW rotation of END-A→END-B.
+fn section_symbol_wires(
+    document: &acadrust::CadDocument,
+    s: &acadrust::entities::SectionSymbol,
+    style: Option<&acadrust::entities::SectionViewStyle>,
     h: Handle,
     color: [f32; 4],
     sel: bool,
     lw_px: f32,
 ) -> Vec<WireModel> {
-    let nan = [f64::NAN; 3];
-    let a = [s.end_a[0], s.end_a[1], 0.0];
-    let b = [s.end_b[0], s.end_b[1], 0.0];
-    // Unit direction B → A along the cut, and its left-hand perpendicular.
-    let (dx, dy) = (a[0] - b[0], a[1] - b[1]);
-    let len = (dx * dx + dy * dy).sqrt();
-    let (ux, uy) = if len > 1e-9 { (dx / len, dy / len) } else { (0.0, 1.0) };
-    let (px, py) = (-uy, ux);
-    let ta = s.tick_a.abs();
-    let tb = s.tick_b.abs();
-    // Cut line, extended outward (away from the opposite end) past each end.
-    let a_out = [a[0] + ux * ta, a[1] + uy * ta, 0.0];
-    let b_out = [b[0] - ux * tb, b[1] - uy * tb, 0.0];
+    use crate::scene::convert::tessellate::{append_arrow, arrow_from_block, ArrowKind, DimGeom};
 
-    let mut pts: Vec<[f64; 3]> = vec![b_out, a_out];
-    // Perpendicular arrow barbs at each outer tip (a short V), pointing along
-    // the cut so the mark reads as a section line rather than a plain segment.
-    let barb = ta.max(tb).max(1.0) * 0.6;
-    for (tip, along) in [(a_out, (ux, uy)), (b_out, (-ux, -uy))] {
-        let back = [tip[0] - along.0 * barb, tip[1] - along.1 * barb, 0.0];
-        pts.push(nan);
-        pts.push([back[0] + px * barb * 0.5, back[1] + py * barb * 0.5, 0.0]);
-        pts.push(tip);
-        pts.push(nan);
-        pts.push([back[0] - px * barb * 0.5, back[1] - py * barb * 0.5, 0.0]);
-        pts.push(tip);
+    let nan = [f64::NAN; 3];
+    let (ax, ay) = (s.end_a[0], s.end_a[1]);
+    let (bx, by) = (s.end_b[0], s.end_b[1]);
+    // Unit along the cut, pointing from END-B toward END-A (each end's tick
+    // extends *outward*, away from the other end).
+    let (dx, dy) = (ax - bx, ay - by);
+    let clen = (dx * dx + dy * dy).sqrt().max(1e-9);
+    let (ux, uy) = (dx / clen, dy / clen);
+    // Viewing direction: from the decoded view graph when the chain resolves,
+    // else the 90°-CCW rotation of (END-A → END-B).
+    let [vx, vy] = section_arrow_dir_from_views(document, s).unwrap_or_else(|| {
+        let (vx0, vy0) = (ay - by, bx - ax);
+        let vlen = (vx0 * vx0 + vy0 * vy0).sqrt().max(1e-9);
+        [vx0 / vlen, vy0 / vlen]
+    });
+
+    let (show_arrows, show_plane_line, show_end_lines, arrow_size, arrow_ext, label_h) =
+        match style {
+            Some(st) => (
+                st.show_arrows,
+                st.show_plane_line,
+                st.show_end_lines,
+                st.arrow_size,
+                st.arrow_extension,
+                st.label_height,
+            ),
+            None => {
+                let t = s.tick_a.abs().max(s.tick_b.abs());
+                (true, false, true, (t * 0.66).max(2.5), t.max(5.0), t.max(2.5))
+            }
+        };
+    // Arrowhead via the shared dimension/leader arrow table: the style's arrow
+    // block handle (null → ClosedFilled), sized from the style.
+    let arrow_kind = match style {
+        Some(st) if st.arrow_start_handle != 0 => arrow_from_block(
+            document,
+            acadrust::types::Handle::from(st.arrow_start_handle),
+            arrow_size as f32,
+        ),
+        _ => ArrowKind::Triangle {
+            size: arrow_size as f32,
+            filled: true,
+            size_mul: 1.0,
+        },
+    };
+
+    let mut lines: Vec<[f64; 3]> = Vec::new();
+    let mut fill: Vec<[f64; 3]> = Vec::new();
+
+    // Full cutting-plane line through the view, only when the style asks.
+    if show_plane_line {
+        lines.push([bx, by, 0.0]);
+        lines.push([ax, ay, 0.0]);
     }
 
-    let mut wires = Vec::new();
-    let (dpts, dpts_low) = convert::tessellate::points_to_ds(pts);
-    let mut w = WireModel::solid(h.value().to_string(), dpts, color, sel);
-    w.points_low = dpts_low;
-    w.line_weight_px = lw_px;
-    wires.push(w);
+    // Each end: (endpoint, tick length, outward sign along the cut).
+    for (ex, ey, tick, osign) in [(ax, ay, s.tick_a.abs(), 1.0), (bx, by, s.tick_b.abs(), -1.0)] {
+        let (ox, oy) = (ux * osign, uy * osign); // outward along the cut
+        let tip = [ex + ox * tick, ey + oy * tick, 0.0]; // outer tick tip
+        // End segment: the short drawn extension past the end (the "broken"
+        // section line when show_plane_line is off).
+        if show_end_lines && tick > 1e-9 {
+            lines.push(nan);
+            lines.push([ex, ey, 0.0]);
+            lines.push(tip);
+        }
 
-    // Identifier glyph beyond each tip, centred on the cut line.
-    let txt_h = ta.max(tb).max(2.0);
-    if !s.label.trim().is_empty() {
-        let approx_w = txt_h * 0.7 * s.label.chars().count().max(1) as f64;
-        for (tip, along) in [(a_out, (ux, uy)), (b_out, (-ux, -uy))] {
-            // Baseline origin: past the tip by ~half a text height, shifted so
-            // the glyph run is centred across the cut line.
-            let base = [
-                tip[0] + along.0 * txt_h * 0.6 - ux * approx_w * 0.5 - px * txt_h * 0.5,
-                tip[1] + along.1 * txt_h * 0.6 - uy * approx_w * 0.5 - py * txt_h * 0.5,
-            ];
+        if show_arrows {
+            // Arrowhead at the end of a short shaft along the viewing
+            // direction, apex landing `arrow_ext` out from the tick tip. The
+            // shared `append_arrow` takes the apex and the tip→base direction.
+            let apex = [tip[0] + vx * arrow_ext, tip[1] + vy * arrow_ext, 0.0];
+            let mut g = DimGeom::new();
+            append_arrow(
+                &mut g,
+                glam::Vec3::new(apex[0] as f32, apex[1] as f32, 0.0),
+                glam::Vec3::new(-vx as f32, -vy as f32, 0.0),
+                &arrow_kind,
+            );
+            // Shaft from the tick tip to the arrowhead base.
+            let a_len = match arrow_kind {
+                ArrowKind::Triangle { size, size_mul, .. } => (size * size_mul) as f64,
+                _ => arrow_size,
+            };
+            let base = [apex[0] - vx * a_len, apex[1] - vy * a_len, 0.0];
+            lines.push(nan);
+            lines.push(tip);
+            lines.push(base);
+            let mut it = g.dim_lines.chunks_exact(2);
+            while let Some([p0, p1]) = it.next() {
+                lines.push(nan);
+                lines.push([p0[0] as f64, p0[1] as f64, 0.0]);
+                lines.push([p1[0] as f64, p1[1] as f64, 0.0]);
+            }
+            for t in g.arrow_fill.chunks_exact(3) {
+                for p in t {
+                    fill.push([p[0] as f64, p[1] as f64, 0.0]);
+                }
+            }
+        }
+
+        // Identifier glyph outboard of the tick tip, centred on the cut line.
+        if !s.label.trim().is_empty() && label_h > 1e-6 {
+            let approx_w = label_h * 0.7 * s.label.chars().count().max(1) as f64;
+            // Gap past the tip along the outward direction — the style's
+            // `identifier_offset` when decoded; for the far (negative-outward)
+            // end drop a text height so the glyph clears the tick. Centre the
+            // run on the cut line's X.
+            let gap = style
+                .map(|st| st.label_offset)
+                .filter(|v| *v > 1e-9)
+                .unwrap_or(label_h * 0.35);
+            let drop = if osign < 0.0 { label_h } else { 0.0 };
+            let base = [ex - approx_w * 0.5, tip[1] + oy * gap - drop];
             let (strokes, _) = crate::scene::text::lff::tessellate_text_ex(
                 [0.0, 0.0],
-                txt_h as f32,
+                label_h as f32,
                 0.0,
                 1.0,
                 0.0,
@@ -96,14 +256,26 @@ fn section_symbol_wires(
                     tp.push([base[0] + gx as f64, base[1] + gy as f64, 0.0]);
                 }
             }
-            if tp.len() >= 2 {
-                let (lp, lp_low) = convert::tessellate::points_to_ds(tp);
-                let mut lw = WireModel::solid(h.value().to_string(), lp, color, sel);
-                lw.points_low = lp_low;
-                lw.line_weight_px = lw_px;
-                wires.push(lw);
-            }
+            lines.push(nan);
+            lines.extend(tp);
         }
+    }
+
+    let mut wires = Vec::new();
+    // Lines (ticks + shafts + glyphs): a fill-free wire so the strokes render.
+    let (lp, lp_low) = convert::tessellate::points_to_ds(lines);
+    let mut lw = WireModel::solid(h.value().to_string(), lp, color, sel);
+    lw.points_low = lp_low;
+    lw.line_weight_px = lw_px;
+    wires.push(lw);
+    // Filled arrowheads: a separate wire carrying only triangles.
+    if !fill.is_empty() {
+        let (fp, fp_low) = convert::tessellate::points_to_ds(fill);
+        let mut fw = WireModel::solid(h.value().to_string(), Vec::new(), color, sel);
+        fw.fill_tris = fp;
+        fw.fill_tris_low = fp_low;
+        fw.line_weight_px = lw_px;
+        wires.push(fw);
     }
     wires
 }
@@ -441,7 +613,15 @@ pub(crate) fn tessellate_entity(
     // still preserved for lossless write-back.
     if let EntityType::Unknown(u) = e {
         if let Some(s) = u.section_symbol.as_ref() {
-            return section_symbol_wires(s, h, entity_color, sel, line_weight_px);
+            return section_symbol_wires(
+                document,
+                s,
+                document.section_view_style.as_ref(),
+                h,
+                entity_color,
+                sel,
+                line_weight_px,
+            );
         }
     }
 
