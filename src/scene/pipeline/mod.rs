@@ -39,6 +39,8 @@ const MSAA_SAMPLES: u32 = 4;
 
 pub struct Pipeline {
     wire_pipeline: wgpu::RenderPipeline,
+    /// Stamps clip-boundary polygons into the stencil buffer (viewports + XCLIP).
+    clip_mask_pipeline: wgpu::RenderPipeline,
     /// Black-fragment variant of `wire_pipeline` for 3D mesh outline edges in
     /// filled render modes.
     wire_black_pipeline: wgpu::RenderPipeline,
@@ -169,6 +171,12 @@ pub struct Pipeline {
     pub(crate) wire_arena_id: u64,
     /// Pixel scissor rects [x, y, w, h] for viewport-clipped wires. Recomputed each frame.
     wire_pixel_scissors: Vec<Option<[u32; 4]>>,
+    /// This content viewport's non-rectangular clip boundary as a triangle-fan
+    /// vertex buffer in the render target's normalized device coords (`None` =
+    /// rectangular / unclipped, where the viewport's own render rectangle does
+    /// the clipping). Stamped into the stencil once per frame; every content
+    /// pass then draws with stencil reference 1 so only the interior survives.
+    clip_boundary: Option<(wgpu::Buffer, u32)>,
     /// Ghost copies (25% alpha) of selected wires for the X-ray depth pass.
     gpu_selected_wires: Vec<WireGpu>,
     /// Command-preview / interim / grip-drag overlay wires. Re-uploaded every
@@ -350,6 +358,25 @@ impl Pipeline {
             ))),
         });
 
+        // Stencil test shared by every paper content pipeline: draw only where
+        // the stencil equals the bound reference. Non-clipped content binds
+        // reference 0 (matching the frame's stencil, cleared to 0); a clip
+        // region's content binds reference 1 after its boundary has been stamped
+        // into the stencil by the clip-mask pipeline. In Model space nothing
+        // masks the stencil, so it stays 0 and reference 0 always passes.
+        let content_stencil_face = wgpu::StencilFaceState {
+            compare: wgpu::CompareFunction::Equal,
+            fail_op: wgpu::StencilOperation::Keep,
+            depth_fail_op: wgpu::StencilOperation::Keep,
+            pass_op: wgpu::StencilOperation::Keep,
+        };
+        let content_stencil = wgpu::StencilState {
+            front: content_stencil_face,
+            back: content_stencil_face,
+            read_mask: 0xff,
+            write_mask: 0x00,
+        };
+
         let wire_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("wire.pipeline"),
             layout: Some(&wire_layout),
@@ -365,10 +392,10 @@ impl Pipeline {
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
+                format: wgpu::TextureFormat::Depth24PlusStencil8,
                 depth_write_enabled: true,
                 depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: wgpu::StencilState::default(),
+                stencil: content_stencil.clone(),
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
@@ -383,6 +410,85 @@ impl Pipeline {
                     format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            multiview: None,
+            cache: None,
+        });
+
+        // ── Clip-mask pipeline ─────────────────────────────────────────────
+        // Stamps a viewport / XCLIP boundary polygon into the stencil buffer:
+        // no colour, no depth, stencil `Invert` (even-odd fill → interior marked
+        // for any polygon, convex or not). The boundary is drawn as a triangle
+        // fan in paper coordinates and transformed exactly like wires.
+        let clip_mask_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("clip_mask.shader"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
+                "../../shaders/clip_mask.wgsl"
+            ))),
+        });
+        let clip_mask_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("clip_mask.pipeline_layout"),
+            bind_group_layouts: &[],
+            push_constant_ranges: &[],
+        });
+        let clip_mask_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("clip_mask.pipeline"),
+            layout: Some(&clip_mask_layout),
+            vertex: wgpu::VertexState {
+                module: &clip_mask_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: 8,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[wgpu::VertexAttribute {
+                        offset: 0,
+                        shader_location: 0,
+                        format: wgpu::VertexFormat::Float32x2,
+                    }],
+                }],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth24PlusStencil8,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Always,
+                stencil: wgpu::StencilState {
+                    front: wgpu::StencilFaceState {
+                        compare: wgpu::CompareFunction::Always,
+                        fail_op: wgpu::StencilOperation::Keep,
+                        depth_fail_op: wgpu::StencilOperation::Keep,
+                        pass_op: wgpu::StencilOperation::Invert,
+                    },
+                    back: wgpu::StencilFaceState {
+                        compare: wgpu::CompareFunction::Always,
+                        fail_op: wgpu::StencilOperation::Keep,
+                        depth_fail_op: wgpu::StencilOperation::Keep,
+                        pass_op: wgpu::StencilOperation::Invert,
+                    },
+                    read_mask: 0xff,
+                    write_mask: 0xff,
+                },
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: MSAA_SAMPLES,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &clip_mask_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::empty(),
                 })],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             }),
@@ -407,10 +513,10 @@ impl Pipeline {
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
+                format: wgpu::TextureFormat::Depth24PlusStencil8,
                 depth_write_enabled: true,
                 depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: wgpu::StencilState::default(),
+                stencil: content_stencil.clone(),
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
@@ -450,10 +556,10 @@ impl Pipeline {
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
+                format: wgpu::TextureFormat::Depth24PlusStencil8,
                 depth_write_enabled: false,
                 depth_compare: wgpu::CompareFunction::Always,
-                stencil: wgpu::StencilState::default(),
+                stencil: content_stencil.clone(),
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
@@ -529,10 +635,10 @@ impl Pipeline {
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
+                format: wgpu::TextureFormat::Depth24PlusStencil8,
                 depth_write_enabled: true,
                 depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: wgpu::StencilState::default(),
+                stencil: content_stencil.clone(),
                 bias: wgpu::DepthBiasState {
                     constant: 1,
                     slope_scale: 1.0,
@@ -596,10 +702,10 @@ impl Pipeline {
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
+                format: wgpu::TextureFormat::Depth24PlusStencil8,
                 depth_write_enabled: true,
                 depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: wgpu::StencilState::default(),
+                stencil: content_stencil.clone(),
                 bias: wgpu::DepthBiasState {
                     constant: 1,
                     slope_scale: 1.0,
@@ -667,10 +773,10 @@ impl Pipeline {
                     ..Default::default()
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
-                    format: wgpu::TextureFormat::Depth32Float,
+                    format: wgpu::TextureFormat::Depth24PlusStencil8,
                     depth_write_enabled: true,
                     depth_compare: wgpu::CompareFunction::LessEqual,
-                    stencil: wgpu::StencilState::default(),
+                    stencil: content_stencil.clone(),
                     bias: wgpu::DepthBiasState {
                         constant: 1,
                         slope_scale: 1.0,
@@ -727,10 +833,10 @@ impl Pipeline {
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
+                format: wgpu::TextureFormat::Depth24PlusStencil8,
                 depth_write_enabled: true,
                 depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: wgpu::StencilState::default(),
+                stencil: content_stencil.clone(),
                 bias: wgpu::DepthBiasState {
                     constant: 1,
                     slope_scale: 1.0,
@@ -776,10 +882,10 @@ impl Pipeline {
                     ..Default::default()
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
-                    format: wgpu::TextureFormat::Depth32Float,
+                    format: wgpu::TextureFormat::Depth24PlusStencil8,
                     depth_write_enabled: false,
                     depth_compare: wgpu::CompareFunction::LessEqual,
-                    stencil: wgpu::StencilState::default(),
+                    stencil: content_stencil.clone(),
                     bias: wgpu::DepthBiasState {
                         constant: 1,
                         slope_scale: 1.0,
@@ -824,10 +930,10 @@ impl Pipeline {
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
+                format: wgpu::TextureFormat::Depth24PlusStencil8,
                 depth_write_enabled: false,
                 depth_compare: wgpu::CompareFunction::Always,
-                stencil: wgpu::StencilState::default(),
+                stencil: content_stencil.clone(),
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
@@ -872,10 +978,10 @@ impl Pipeline {
                     ..Default::default()
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
-                    format: wgpu::TextureFormat::Depth32Float,
+                    format: wgpu::TextureFormat::Depth24PlusStencil8,
                     depth_write_enabled: true,
                     depth_compare: wgpu::CompareFunction::LessEqual,
-                    stencil: wgpu::StencilState::default(),
+                    stencil: content_stencil.clone(),
                     bias: wgpu::DepthBiasState::default(),
                 }),
                 multisample: wgpu::MultisampleState {
@@ -919,10 +1025,10 @@ impl Pipeline {
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
+                format: wgpu::TextureFormat::Depth24PlusStencil8,
                 depth_write_enabled: true,
                 depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: wgpu::StencilState::default(),
+                stencil: content_stencil.clone(),
                 bias: wgpu::DepthBiasState {
                     constant: 1,
                     slope_scale: 1.0,
@@ -977,10 +1083,10 @@ impl Pipeline {
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
+                format: wgpu::TextureFormat::Depth24PlusStencil8,
                 depth_write_enabled: true,
                 depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: wgpu::StencilState::default(),
+                stencil: content_stencil.clone(),
                 bias: wgpu::DepthBiasState {
                     constant: 1,
                     slope_scale: 1.0,
@@ -1024,10 +1130,10 @@ impl Pipeline {
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
+                format: wgpu::TextureFormat::Depth24PlusStencil8,
                 depth_write_enabled: true,
                 depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: wgpu::StencilState::default(),
+                stencil: content_stencil.clone(),
                 bias: wgpu::DepthBiasState {
                     constant: 1,
                     slope_scale: 1.0,
@@ -1118,10 +1224,10 @@ impl Pipeline {
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
+                format: wgpu::TextureFormat::Depth24PlusStencil8,
                 depth_write_enabled: true,
                 depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: wgpu::StencilState::default(),
+                stencil: content_stencil.clone(),
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
@@ -1278,6 +1384,7 @@ impl Pipeline {
 
         Self {
             wire_pipeline,
+            clip_mask_pipeline,
             wire_black_pipeline,
             wire_xray_pipeline,
             #[cfg(not(target_arch = "wasm32"))]
@@ -1336,6 +1443,7 @@ impl Pipeline {
             #[cfg(not(target_arch = "wasm32"))]
             wire_arena_id: u64::MAX,
             wire_pixel_scissors: vec![],
+            clip_boundary: None,
             gpu_selected_wires: vec![],
             gpu_preview_wires: vec![],
             gpu_hatch: None,
@@ -1750,6 +1858,37 @@ impl Pipeline {
             .collect();
     }
 
+    /// Upload this content viewport's non-rectangular clip boundary as a
+    /// triangle-fan vertex buffer in render-target NDC. The boundary is already
+    /// projected (paper shape → the same visible-sub-rect crop as the content),
+    /// so the mask pipeline stamps it straight into the stencil with `Invert`
+    /// (even-odd fill → interior marked, any convexity). Empty input clears the
+    /// boundary so the viewport renders unclipped (its render rectangle clips).
+    pub fn upload_clip_boundary(&mut self, device: &wgpu::Device, boundary_ndc: &[[f32; 2]]) {
+        use wgpu::util::DeviceExt;
+        if boundary_ndc.len() < 3 {
+            self.clip_boundary = None;
+            return;
+        }
+        // Triangle fan (p0, pi, pi+1).
+        let mut verts: Vec<f32> = Vec::with_capacity((boundary_ndc.len() - 2) * 6);
+        for i in 1..boundary_ndc.len() - 1 {
+            for &p in &[boundary_ndc[0], boundary_ndc[i], boundary_ndc[i + 1]] {
+                verts.extend_from_slice(&[p[0], p[1]]);
+            }
+        }
+        if verts.is_empty() {
+            self.clip_boundary = None;
+            return;
+        }
+        let vbuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("clip_boundary.vbuf"),
+            contents: bytemuck::cast_slice(&verts),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        self.clip_boundary = Some((vbuf, (verts.len() / 2) as u32));
+    }
+
     /// Per-frame visibility refresh for the batched hatch path.
     /// Combines Phase 3.3 sub-pixel LOD skip with Phase 2.3 frustum
     /// cull and pushes the resulting 0/1 mask through to the GPU
@@ -2065,6 +2204,13 @@ impl Pipeline {
             b: b as f64,
             a: a as f64,
         };
+        // Non-rectangular viewport clip: the boundary is stamped into the
+        // just-cleared (0x00) stencil with `Invert`, so an odd (interior)
+        // coverage becomes 0xFF. Every content pass then draws with reference
+        // 0xFF so only the interior survives. Rectangular / unclipped viewports
+        // leave the stencil at 0 and draw with reference 0 (the viewport's own
+        // render rectangle does the clipping).
+        let stencil_ref: u32 = if self.clip_boundary.is_some() { 0xFF } else { 0 };
 
         // Scene-render cache: when `prepare` found this frame pixel-identical
         // to the last (unchanged view / geometry / selection / preview), the
@@ -2093,13 +2239,26 @@ impl Pipeline {
                         load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,
                     }),
-                    stencil_ops: None,
+                    // Clip stencil starts at 0 (= "unclipped", passes content
+                    // bound to reference 0); clip masks stamp 1 into interiors.
+                    stencil_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(0),
+                        store: wgpu::StoreOp::Store,
+                    }),
                 }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
             // MSAA texture is clip-bounds-sized, so viewport starts at (0, 0).
             pass.set_viewport(0.0, 0.0, vp.width as f32, vp.height as f32, 0.0, 1.0);
+            // Stamp the viewport clip boundary into the just-cleared stencil
+            // (interior → 1) before any content draws, so every pass below can
+            // clip to the shape with reference 1.
+            if let Some((vbuf, vcount)) = &self.clip_boundary {
+                pass.set_pipeline(&self.clip_mask_pipeline);
+                pass.set_vertex_buffer(0, vbuf.slice(..));
+                pass.draw(0..*vcount, 0..1);
+            }
             // Phase 4-B — single batched draw covers every hatch.
             // Vertex shader culls per-instance via the `visibility`
             // buffer (sub-pixel LOD + frustum cull written each frame
@@ -2113,6 +2272,7 @@ impl Pipeline {
                 // hatch pass dominates the GPU frame on hatch-heavy drawings.
                 if !self.skip_hatch_frame {
                     pass.set_pipeline(pipeline);
+                    pass.set_stencil_reference(stencil_ref);
                     pass.set_bind_group(0, &self.uniform_bind_group, &[]);
                     pass.set_bind_group(1, &batch.bind_group, &[]);
                     pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
@@ -2127,6 +2287,7 @@ impl Pipeline {
             if !self.skip_hatch_frame {
                 pass.set_pipeline(&self.hatch_web_pipeline);
                 pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                pass.set_stencil_reference(stencil_ref);
                 for hatch in &self.gpu_hatches_web {
                     pass.set_bind_group(1, &hatch.bind_group, &[]);
                     pass.set_vertex_buffer(0, hatch.vertex_buffer.slice(..));
@@ -2154,7 +2315,7 @@ impl Pipeline {
                         load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     }),
-                    stencil_ops: None,
+                    stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store }),
                 }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
@@ -2162,6 +2323,7 @@ impl Pipeline {
             pass.set_viewport(0.0, 0.0, vp.width as f32, vp.height as f32, 0.0, 1.0);
             pass.set_pipeline(&self.image_pipeline);
             pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+            pass.set_stencil_reference(stencil_ref);
             let mut scissor_active = false;
             for (i, img) in self.gpu_images.iter().enumerate() {
                 match self.image_pixel_scissors.get(i) {
@@ -2203,13 +2365,14 @@ impl Pipeline {
                         load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     }),
-                    stencil_ops: None,
+                    stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store }),
                 }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
             pass.set_viewport(0.0, 0.0, vp.width as f32, vp.height as f32, 0.0, 1.0);
             pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+            pass.set_stencil_reference(stencil_ref);
             // Four draw paths share this pass:
             //  - Solid:           `mesh_pipeline` + triangle index buf.
             //  - Wireframe:       `mesh_wireframe_pipeline` + the
@@ -2382,13 +2545,14 @@ impl Pipeline {
                             load: wgpu::LoadOp::Load,
                             store: wgpu::StoreOp::Store,
                         }),
-                        stencil_ops: None,
+                        stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store }),
                     }),
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });
                 pass.set_viewport(0.0, 0.0, vp.width as f32, vp.height as f32, 0.0, 1.0);
                 pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                pass.set_stencil_reference(stencil_ref);
                 if !fill.chunks_3d.is_empty() {
                     if hidden_line {
                         pass.set_pipeline(&self.face3d_depth_pipeline);
@@ -2431,7 +2595,7 @@ impl Pipeline {
                         load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     }),
-                    stencil_ops: None,
+                    stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store }),
                 }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
@@ -2439,6 +2603,7 @@ impl Pipeline {
             pass.set_viewport(0.0, 0.0, vp.width as f32, vp.height as f32, 0.0, 1.0);
             pass.set_pipeline(&self.wire_pipeline);
             pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+            pass.set_stencil_reference(stencil_ref);
             for edges in &self.gpu_face3d_edges {
                 if edges.instance_count > 0 {
                     if let Some(bg) = &edges.const_bind_group {
@@ -2469,7 +2634,7 @@ impl Pipeline {
                         load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     }),
-                    stencil_ops: None,
+                    stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store }),
                 }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
@@ -2484,6 +2649,7 @@ impl Pipeline {
             let want_solid_with_edges = !hidden_line && !mesh_wireframe && show_3d_edges;
             let mut scissor_active = false;
             let mut black_active = false;
+            pass.set_stencil_reference(stencil_ref);
             for (i, wire) in self.gpu_wires.iter().enumerate() {
                 if wire.instance_count == 0 {
                     continue;
@@ -2498,6 +2664,7 @@ impl Pipeline {
                     continue;
                 }
                 let use_black = want_solid_with_edges && wire.is_3d_mesh_edge;
+
                 if use_black != black_active {
                     pass.set_pipeline(if use_black {
                         &self.wire_black_pipeline
@@ -2571,7 +2738,7 @@ impl Pipeline {
                             load: wgpu::LoadOp::Load,
                             store: wgpu::StoreOp::Store,
                         }),
-                        stencil_ops: None,
+                        stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store }),
                     }),
                     timestamp_writes: None,
                     occlusion_query_set: None,
@@ -2579,6 +2746,7 @@ impl Pipeline {
                 pass.set_viewport(0.0, 0.0, vp.width as f32, vp.height as f32, 0.0, 1.0);
                 pass.set_pipeline(&self.text_pipeline);
                 pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                pass.set_stencil_reference(stencil_ref);
                 pass.set_bind_group(1, &atlas.bind_group, &[]);
                 if let Some(vbuf) = &self.text_vbuf {
                     if self.text_vcount > 0 {
@@ -2621,7 +2789,7 @@ impl Pipeline {
                         load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     }),
-                    stencil_ops: None,
+                    stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store }),
                 }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
@@ -2629,6 +2797,7 @@ impl Pipeline {
             pass.set_viewport(0.0, 0.0, vp.width as f32, vp.height as f32, 0.0, 1.0);
             pass.set_pipeline(&self.wipeout_pipeline);
             pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+            pass.set_stencil_reference(stencil_ref);
             let mut scissor_active = false;
             for (i, wipeout) in self.gpu_wipeouts.iter().enumerate() {
                 if self.wipeout_skip_flags.get(i).copied().unwrap_or(false) {
@@ -2675,7 +2844,7 @@ impl Pipeline {
                         load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     }),
-                    stencil_ops: None,
+                    stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store }),
                 }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
@@ -2683,6 +2852,7 @@ impl Pipeline {
             pass.set_viewport(0.0, 0.0, vp.width as f32, vp.height as f32, 0.0, 1.0);
             pass.set_pipeline(&self.wire_xray_pipeline);
             pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+            pass.set_stencil_reference(stencil_ref);
             for wire in &self.gpu_selected_wires {
                 if wire.instance_count > 0 {
                     if let Some(bg) = &wire.const_bind_group {
@@ -2997,7 +3167,7 @@ fn create_depth_texture(device: &wgpu::Device, size: Size<u32>) -> wgpu::Texture
         mip_level_count: 1,
         sample_count: MSAA_SAMPLES,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Depth32Float,
+        format: wgpu::TextureFormat::Depth24PlusStencil8,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
         view_formats: &[],
     })

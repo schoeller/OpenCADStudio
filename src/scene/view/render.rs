@@ -37,6 +37,11 @@ pub struct ViewportData {
     /// reused by a different viewport and reset its (index-addressed) caches.
     pub(in crate::scene) instance_id: u64,
     pub(in crate::scene) wires: Arc<Vec<WireModel>>,
+    /// This content viewport's non-rectangular clip boundary (paper layouts
+    /// only), as a polygon already projected into the viewport's render-target
+    /// NDC. The GPU stamps it into the stencil so content is clipped to the
+    /// shape. Empty for rectangular viewports, the paper sheet, and Model space.
+    pub(in crate::scene) clip_boundary_ndc: Arc<Vec<[f32; 2]>>,
     /// Live command-preview / interim / grip-drag overlay wires. Kept out of
     /// the main `wires` buffer so a drag re-uploads only this small set each
     /// frame, never the resident base buffer. Drawn on top in the wire pass.
@@ -570,6 +575,7 @@ impl shader::Primitive for Primitive {
             } else {
                 inner.upload_silhouettes(device, &[], vp.view_dir);
             }
+            inner.upload_clip_boundary(device, &vp.clip_boundary_ndc);
             inner.compute_wire_scissors(view_rot, eye, clip_size.width, clip_size.height);
             inner.compute_wipeout_scissors(view_rot, eye, clip_size.width, clip_size.height);
             inner.compute_image_scissors(view_rot, eye, clip_size.width, clip_size.height);
@@ -1352,9 +1358,24 @@ impl Scene {
         } else {
             0x3000_0000_0000_0000 | inst.handle.value()
         };
+        // A paper content viewport with a non-rectangular clip entity gets its
+        // boundary projected into this render target's NDC (paper shape mapped
+        // through the same visible-sub-rect crop as the content). Rectangular
+        // viewports, the paper sheet and Model tiles clip via their own render
+        // rectangle and need no stencil boundary.
+        let clip_boundary_ndc = if !inst.paper_sheet
+            && inst.tile_idx.is_none()
+            && inst.handle != acadrust::Handle::NULL
+            && self.current_layout != "Model"
+        {
+            Arc::new(self.viewport_clip_boundary_ndc(inst.handle, uo, vo, us, vs))
+        } else {
+            Arc::new(vec![])
+        };
         Some(ViewportData {
             instance_id,
             wires: all_wires,
+            clip_boundary_ndc,
             preview_wires,
             face3d_wires,
             text_verts,
