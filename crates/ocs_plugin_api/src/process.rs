@@ -207,6 +207,42 @@ pub struct PluginProcess {
     stderr_path: PathBuf,
 }
 
+fn tail(path: &Path, max_lines: usize) -> Option<String> {
+    let data = std::fs::read(path).ok()?;
+    let text = String::from_utf8_lossy(&data);
+    let lines: Vec<&str> = text.lines().collect();
+    let start = lines.len().saturating_sub(max_lines);
+    Some(lines[start..].join("\n"))
+}
+
+fn stderr_tail(path: &Path, max_lines: usize) -> String {
+    tail(path, max_lines).unwrap_or_else(|| "(stderr unavailable)".into())
+}
+
+/// Wrap a spawn-time failure so the runner's stderr is surfaced in the host
+/// error message. This is the only way to diagnose runner crashes during the
+/// initial handshake / manifest / ribbon / panels sequence.
+fn fail_spawn(
+    err: PluginError,
+    stderr_path: &Path,
+    child: &Mutex<Option<Child>>,
+) -> PluginError {
+    if let Some(child) = child.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        reap(child);
+    }
+    let tail = stderr_tail(stderr_path, 200);
+    eprintln!(
+        "[plugin] spawn failed; runner stderr tail:\n{}\n(full stderr: {})",
+        tail,
+        stderr_path.display()
+    );
+    let mut detail = format!("{err}");
+    if !tail.is_empty() && tail != "(stderr unavailable)" {
+        detail.push_str(&format!("\nrunner stderr tail:\n{tail}"));
+    }
+    PluginError::Runner(detail)
+}
+
 impl PluginProcess {
     /// Spawn the plugin cdylib in a separate process and connect to it.
     pub fn spawn(cdylib_path: &Path, host: &mut dyn HostApi) -> Result<Self, PluginError> {
@@ -334,9 +370,14 @@ impl PluginProcess {
             HostRequest::GetManifest,
             no_op,
             drop_async,
-        )? {
+        )
+        .map_err(|e| fail_spawn(e, &stderr_path, &child))? {
             HostResponse::Manifest(m) => m,
-            other => return Err(PluginError::UnexpectedResponse(other)),
+            other => return Err(fail_spawn(
+                PluginError::UnexpectedResponse(other),
+                &stderr_path,
+                &child,
+            )),
         };
         eprintln!(
             "Loaded plugin: {} ({} {})",
@@ -349,9 +390,14 @@ impl PluginProcess {
             HostRequest::GetRibbon,
             no_op,
             drop_async,
-        )? {
+        )
+        .map_err(|e| fail_spawn(e, &stderr_path, &child))? {
             HostResponse::Ribbon(r) => r,
-            other => return Err(PluginError::UnexpectedResponse(other)),
+            other => return Err(fail_spawn(
+                PluginError::UnexpectedResponse(other),
+                &stderr_path,
+                &child,
+            )),
         };
         let panels = match call(
             &sync_stream,
@@ -360,9 +406,14 @@ impl PluginProcess {
             HostRequest::GetPanels,
             no_op,
             drop_async,
-        )? {
+        )
+        .map_err(|e| fail_spawn(e, &stderr_path, &child))? {
             HostResponse::Panels(p) => p,
-            other => return Err(PluginError::UnexpectedResponse(other)),
+            other => return Err(fail_spawn(
+                PluginError::UnexpectedResponse(other),
+                &stderr_path,
+                &child,
+            )),
         };
 
         let id = manifest.id.clone();
@@ -578,14 +629,7 @@ impl PluginProcess {
     /// Read the last `max_lines` lines from the runner's stderr capture file.
     /// Used for crash diagnostics when a plugin process exits unexpectedly.
     pub fn stderr_tail(&self, max_lines: usize) -> String {
-        fn tail(path: &Path, max_lines: usize) -> Option<String> {
-            let data = std::fs::read(path).ok()?;
-            let text = String::from_utf8_lossy(&data);
-            let lines: Vec<&str> = text.lines().collect();
-            let start = lines.len().saturating_sub(max_lines);
-            Some(lines[start..].join("\n"))
-        }
-        tail(&self.stderr_path, max_lines).unwrap_or_else(|| "(stderr unavailable)".into())
+        stderr_tail(&self.stderr_path, max_lines)
     }
 
     /// Send an asynchronous host event to the plugin process. Never blocks the
