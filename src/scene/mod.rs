@@ -890,6 +890,17 @@ pub struct Scene {
     image_cache: RefCell<Option<(u64, Arc<Vec<ImageModel>>)>>,
     /// Cached mesh models, keyed by geometry_epoch.
     mesh_cache: RefCell<Option<(u64, Arc<Vec<MeshLodSet>>)>>,
+    /// Per-viewport (VP-frozen-layer) filtered fill / image / mesh sets, keyed by
+    /// the order-independent signature of the viewport's frozen-layer set. A
+    /// content viewport that freezes layers must hide their hatches, 2-D solids,
+    /// images/OLE and 3-D solids too — not just wires — so these hold the
+    /// filtered variants. Viewports sharing a frozen set share one entry (like
+    /// the resident wire set). Empty for a viewport with no frozen layers (it
+    /// reuses the unfiltered `*_arc` sets directly).
+    frozen_hatch_cache: RefCell<HashMap<u64, (u64, u64, Arc<Vec<HatchModel>>)>>,
+    frozen_wipeout_cache: RefCell<HashMap<u64, (u64, Arc<Vec<HatchModel>>)>>,
+    frozen_image_cache: RefCell<HashMap<u64, (u64, Arc<Vec<ImageModel>>)>>,
+    frozen_mesh_cache: RefCell<HashMap<u64, (u64, Arc<Vec<MeshLodSet>>)>>,
     /// Cached block-INSERT hatches for hit-testing, keyed by geometry_epoch.
     /// Building this explodes every model-space INSERT, so without the cache a
     /// heavy block-instanced drawing re-explodes thousands of inserts on every
@@ -1125,6 +1136,10 @@ impl Scene {
             wipeout_cache: RefCell::new(None),
             image_cache: RefCell::new(None),
             mesh_cache: RefCell::new(None),
+            frozen_hatch_cache: RefCell::new(HashMap::default()),
+            frozen_wipeout_cache: RefCell::new(HashMap::default()),
+            frozen_image_cache: RefCell::new(HashMap::default()),
+            frozen_mesh_cache: RefCell::new(HashMap::default()),
             insert_hatch_cache: RefCell::new(None),
             paper_sheet_cache: RefCell::new(None),
             paper_projected_cache: RefCell::new(HashMap::default()),
@@ -3419,7 +3434,7 @@ impl Scene {
                 return arc;
             }
         }
-        let arc = Arc::new(self.synced_hatch_models());
+        let arc = Arc::new(self.synced_hatch_models(None));
         *self.hatch_cache.borrow_mut() = Some((self.geometry_epoch, sel_sig, Arc::clone(&arc)));
         arc
     }
@@ -3462,7 +3477,7 @@ impl Scene {
                 return arc;
             }
         }
-        let arc = Arc::new(self.wipeout_models());
+        let arc = Arc::new(self.wipeout_models(None));
         *self.wipeout_cache.borrow_mut() = Some((self.geometry_epoch, Arc::clone(&arc)));
         arc
     }
@@ -3491,19 +3506,31 @@ impl Scene {
                 return arc;
             }
         }
-        let depth_map = self.draw_depth_map();
-        let arc = Arc::new(
-            self.images
-                .iter()
-                .map(|(handle, model)| {
-                    let mut m = model.clone();
-                    m.draw_depth = depth_map.get(&handle.value()).copied().unwrap_or(0.0);
-                    m
-                })
-                .collect(),
-        );
+        let arc = Arc::new(self.image_models(None));
         *self.image_cache.borrow_mut() = Some((self.geometry_epoch, Arc::clone(&arc)));
         arc
+    }
+
+    /// Model image / OLE-frame models, optionally dropping those whose layer is
+    /// frozen in a content viewport (`frozen`). `None` reproduces the full set.
+    fn image_models(&self, frozen: Option<&HashSet<Handle>>) -> Vec<ImageModel> {
+        let depth_map = self.draw_depth_map();
+        self.images
+            .iter()
+            .filter_map(|(handle, model)| {
+                if frozen.is_some() {
+                    let layer = self.document.get_entity(*handle).map(|e| e.common().layer.clone());
+                    if let Some(layer) = layer {
+                        if self.layer_frozen_in(&layer, frozen) {
+                            return None;
+                        }
+                    }
+                }
+                let mut m = model.clone();
+                m.draw_depth = depth_map.get(&handle.value()).copied().unwrap_or(0.0);
+                Some(m)
+            })
+            .collect()
     }
 
     /// Images owned by the active paper layout block only. The full-canvas
@@ -3561,12 +3588,29 @@ impl Scene {
                 return arc;
             }
         }
+        let arc = Arc::new(self.mesh_models(None));
+        *self.mesh_cache.borrow_mut() = Some((self.geometry_epoch, Arc::clone(&arc)));
+        arc
+    }
+
+    /// Solid-mesh set (top-level + block-instanced), optionally dropping those
+    /// whose layer is frozen in a content viewport (`frozen`). `None` reproduces
+    /// the full set.
+    fn mesh_models(&self, frozen: Option<&HashSet<Handle>>) -> Vec<MeshLodSet> {
         // Top-level solids: drop those whose layer is off/frozen or that are
-        // flagged invisible / isolated-hidden, mirroring the 2D wire path.
+        // flagged invisible / isolated-hidden, mirroring the 2D wire path, plus
+        // any whose layer is frozen in the requesting viewport.
         let mut all: Vec<MeshLodSet> = self
             .meshes
             .iter()
-            .filter(|(&h, _)| self.mesh_entity_visible(h))
+            .filter(|(&h, _)| {
+                self.mesh_entity_visible(h)
+                    && self
+                        .document
+                        .get_entity(h)
+                        .map(|e| !self.layer_frozen_in(&e.common().layer, frozen))
+                        .unwrap_or(true)
+            })
             .map(|(_, set)| set.clone())
             .collect();
         // Block-definition solids are instanced per INSERT of the ACTIVE space's
@@ -3576,10 +3620,9 @@ impl Scene {
         all.extend(self.instanced_block_meshes(
             self.block_edit_block
                 .unwrap_or_else(|| self.model_space_block_handle()),
+            frozen,
         ));
-        let arc = Arc::new(all);
-        *self.mesh_cache.borrow_mut() = Some((self.geometry_epoch, Arc::clone(&arc)));
-        arc
+        all
     }
 
     /// True when `layer` is turned off or frozen — entities on it never render.
@@ -3589,6 +3632,108 @@ impl Scene {
             .get(layer)
             .map(|l| l.flags.off || l.flags.frozen)
             .unwrap_or(false)
+    }
+
+    /// True when `layer`'s handle is in a content viewport's per-viewport
+    /// frozen-layer set (VP freeze). Mirrors the wire path's test in
+    /// [`Scene::resident_entity_visible`] so fills / images / meshes hide on the
+    /// same layers wires do. `None` / empty set → never frozen.
+    fn layer_frozen_in(&self, layer: &str, frozen: Option<&HashSet<Handle>>) -> bool {
+        match frozen {
+            Some(fz) if !fz.is_empty() => self
+                .document
+                .layers
+                .get(layer)
+                .map(|l| fz.contains(&l.handle))
+                .unwrap_or(false),
+            _ => false,
+        }
+    }
+
+    /// Order-independent signature of a per-viewport frozen-layer set, so
+    /// viewports that freeze the same layers share one cached filtered fill /
+    /// image / mesh set. Matches the fold the resident wire cache uses.
+    fn frozen_layers_sig(frozen: &HashSet<Handle>) -> u64 {
+        let mut sig: u64 = frozen.len() as u64;
+        for h in frozen.iter() {
+            sig ^= h.value().wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        }
+        sig
+    }
+
+    /// Hatch / 2-D-solid fills for a content viewport, with its frozen layers
+    /// removed. Cached per frozen-set signature (viewports sharing a frozen set
+    /// share the build). No frozen layers → the shared unfiltered set.
+    pub(super) fn hatch_models_for_viewport(&self, frozen: &HashSet<Handle>) -> Arc<Vec<HatchModel>> {
+        if frozen.is_empty() {
+            return self.hatch_models_arc();
+        }
+        let sig = Self::frozen_layers_sig(frozen);
+        let sel = self.selected_set_sig();
+        if let Some((e, s, arc)) = self.frozen_hatch_cache.borrow().get(&sig) {
+            if *e == self.geometry_epoch && *s == sel {
+                return Arc::clone(arc);
+            }
+        }
+        let arc = Arc::new(self.synced_hatch_models(Some(frozen)));
+        self.frozen_hatch_cache
+            .borrow_mut()
+            .insert(sig, (self.geometry_epoch, sel, Arc::clone(&arc)));
+        arc
+    }
+
+    /// Wipeout fills for a content viewport, with its frozen layers removed.
+    pub(super) fn wipeout_models_for_viewport(&self, frozen: &HashSet<Handle>) -> Arc<Vec<HatchModel>> {
+        if frozen.is_empty() {
+            return self.wipeout_models_arc();
+        }
+        let sig = Self::frozen_layers_sig(frozen);
+        if let Some((e, arc)) = self.frozen_wipeout_cache.borrow().get(&sig) {
+            if *e == self.geometry_epoch {
+                return Arc::clone(arc);
+            }
+        }
+        let arc = Arc::new(self.wipeout_models(Some(frozen)));
+        self.frozen_wipeout_cache
+            .borrow_mut()
+            .insert(sig, (self.geometry_epoch, Arc::clone(&arc)));
+        arc
+    }
+
+    /// Image / OLE models for a content viewport, with its frozen layers removed.
+    pub(super) fn images_for_viewport(&self, frozen: &HashSet<Handle>) -> Arc<Vec<ImageModel>> {
+        if frozen.is_empty() {
+            return self.images_arc();
+        }
+        let sig = Self::frozen_layers_sig(frozen);
+        if let Some((e, arc)) = self.frozen_image_cache.borrow().get(&sig) {
+            if *e == self.geometry_epoch {
+                return Arc::clone(arc);
+            }
+        }
+        let arc = Arc::new(self.image_models(Some(frozen)));
+        self.frozen_image_cache
+            .borrow_mut()
+            .insert(sig, (self.geometry_epoch, Arc::clone(&arc)));
+        arc
+    }
+
+    /// Solid meshes for a content viewport, with its frozen layers removed.
+    pub(super) fn meshes_for_viewport(&self, frozen: &HashSet<Handle>) -> Arc<Vec<MeshLodSet>> {
+        if frozen.is_empty() {
+            return self.meshes_arc();
+        }
+        let sig = Self::frozen_layers_sig(frozen);
+        if let Some((e, arc)) = self.frozen_mesh_cache.borrow().get(&sig) {
+            if *e == self.geometry_epoch {
+                return Arc::clone(arc);
+            }
+        }
+        let arc = Arc::new(self.mesh_models(Some(frozen)));
+        self.frozen_mesh_cache
+            .borrow_mut()
+            .insert(sig, (self.geometry_epoch, Arc::clone(&arc)));
+        arc
     }
 
     /// True when `handle`'s entity sits on a locked layer. Locked objects stay
@@ -3628,7 +3773,11 @@ impl Scene {
     /// One transformed mesh per block-definition solid instance reached from an
     /// INSERT owned by `layout_block`. Nested INSERTs accumulate their
     /// transform. Empty when no block solids exist. (#123)
-    fn instanced_block_meshes(&self, layout_block: Handle) -> Vec<MeshLodSet> {
+    fn instanced_block_meshes(
+        &self,
+        layout_block: Handle,
+        frozen: Option<&HashSet<Handle>>,
+    ) -> Vec<MeshLodSet> {
         if self.block_meshes.is_empty() {
             return Vec::new();
         }
@@ -3639,8 +3788,11 @@ impl Scene {
             }
             if let EntityType::Insert(ins) = e {
                 // INSERT on an off/frozen (or invisible) layer hides the whole
-                // instance, block-internal solids included.
-                if !self.mesh_entity_visible(ins.common.handle) {
+                // instance, block-internal solids included — including a layer
+                // frozen only in the requesting content viewport.
+                if !self.mesh_entity_visible(ins.common.handle)
+                    || self.layer_frozen_in(&ins.common.layer, frozen)
+                {
                     continue;
                 }
                 // Colour inheritance sources for block-internal solids (#221).

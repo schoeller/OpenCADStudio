@@ -568,7 +568,10 @@ impl Scene {
         self.bump_geometry();
     }
 
-    pub(super) fn synced_hatch_models(&self) -> Vec<HatchModel> {
+    pub(super) fn synced_hatch_models(
+        &self,
+        frozen: Option<&rustc_hash::FxHashSet<Handle>>,
+    ) -> Vec<HatchModel> {
         let layout_block = self.current_layout_block_handle();
 
         let layer_hidden = |layer: &str| {
@@ -604,6 +607,11 @@ impl Scene {
                 };
                 let c = entity.common();
                 if c.invisible || layer_hidden(&c.layer) {
+                    return false;
+                }
+                // Per-viewport layer freeze: a content viewport that freezes
+                // this layer hides its fills too, not just its wires.
+                if self.layer_frozen_in(&c.layer, frozen) {
                     return false;
                 }
                 // Reject block-defn-only hatches (entities owned by a
@@ -686,7 +694,7 @@ impl Scene {
         // layout block and materialize its fills at world position. Shared with
         // the export path so a plot draws them identically. (tint_selected =
         // true applies the screen selection highlight.)
-        models.extend(self.exploded_insert_hatch_models(layout_block, hatch_bg, true));
+        models.extend(self.exploded_insert_hatch_models(layout_block, hatch_bg, true, frozen));
 
         // Wide LwPolyline / Polyline2D bands are no longer hatch fills at
         // model level: a flat band is drawn by expanding its centre-line wire
@@ -717,6 +725,7 @@ impl Scene {
         layout_block: Handle,
         hatch_bg: [f32; 4],
         tint_selected: bool,
+        frozen: Option<&rustc_hash::FxHashSet<Handle>>,
     ) -> Vec<HatchModel> {
         let layer_hidden = |layer: &str| {
             self.document
@@ -746,6 +755,11 @@ impl Scene {
                 continue;
             };
             if ins.common.invisible || layer_hidden(&ins.common.layer) {
+                continue;
+            }
+            // Per-viewport freeze: an INSERT on a layer frozen in this content
+            // viewport hides the whole instance, its internal fills included.
+            if self.layer_frozen_in(&ins.common.layer, frozen) {
                 continue;
             }
             if !self.belongs_to_visible_block(
@@ -880,7 +894,10 @@ impl Scene {
 
     /// Wipeout fill models — rendered in a separate pass AFTER wires so that
     /// wipeouts correctly mask everything below them in the draw order.
-    pub(crate) fn wipeout_models(&self) -> Vec<HatchModel> {
+    pub(crate) fn wipeout_models(
+        &self,
+        frozen: Option<&rustc_hash::FxHashSet<Handle>>,
+    ) -> Vec<HatchModel> {
         let is_paper = self.current_layout != "Model";
         let bg_color: [f32; 4] = if is_paper {
             self.paper_bg_color
@@ -908,6 +925,11 @@ impl Scene {
                 .map(|l| l.flags.off || l.flags.frozen)
                 .unwrap_or(false)
             {
+                continue;
+            }
+            // Per-viewport freeze: a wipeout on a layer frozen in this content
+            // viewport is hidden along with the rest of that layer.
+            if self.layer_frozen_in(&entity.common().layer, frozen) {
                 continue;
             }
             // Per-entity world_offset selection so paper-layout content

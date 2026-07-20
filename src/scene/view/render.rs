@@ -1289,6 +1289,23 @@ impl Scene {
         // bleed past the viewport borders whenever model coords overlap the
         // paper area. Content viewports keep the full set (the model camera +
         // per-viewport scissor place / clip them correctly).
+        // Per-viewport frozen-layer set for a paper content viewport. Content
+        // viewports must hide FILLS / IMAGES / SOLIDS on their frozen layers too,
+        // not just wires (which `model_wires_for_viewport_arc` already filters).
+        // Empty for the sheet, model tiles and the implicit-model view — none of
+        // which carry a per-viewport freeze — so those reuse the shared sets.
+        let vp_frozen: rustc_hash::FxHashSet<Handle> = if !inst.paper_sheet
+            && inst.tile_idx.is_none()
+            && inst.handle != acadrust::Handle::NULL
+        {
+            match self.document.get_entity(inst.handle) {
+                Some(EntityType::Viewport(vp)) => vp.frozen_layers.iter().cloned().collect(),
+                _ => rustc_hash::FxHashSet::default(),
+            }
+        } else {
+            rustc_hash::FxHashSet::default()
+        };
+
         let (hatches, wipeout_hatches) = if inst.paper_sheet {
             let mut v: Vec<HatchModel> = Vec::new();
             if let Some(sheet) = self.paper_sheet_fill() {
@@ -1297,12 +1314,15 @@ impl Scene {
             v.extend(self.paper_canvas_hatches().iter().cloned());
             (Arc::new(v), self.paper_canvas_wipeouts())
         } else {
-            (self.hatch_models_arc(), self.wipeout_models_arc())
+            (
+                self.hatch_models_for_viewport(&vp_frozen),
+                self.wipeout_models_for_viewport(&vp_frozen),
+            )
         };
         let images = if inst.paper_sheet {
             self.paper_sheet_images()
         } else {
-            self.images_arc()
+            self.images_for_viewport(&vp_frozen)
         };
         // The paper sheet shows the layout's own 2-D content (fills, borders,
         // annotation) — never the model's 3-D solids. Those are drawn inside
@@ -1314,7 +1334,7 @@ impl Scene {
         let meshes = if inst.paper_sheet {
             Arc::new(Vec::new())
         } else {
-            self.meshes_arc()
+            self.meshes_for_viewport(&vp_frozen)
         };
 
         // SDF text quads (behind OCS_TEXT_SDF). The glyph quads ride on each

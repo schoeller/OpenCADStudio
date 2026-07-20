@@ -238,7 +238,7 @@ impl Scene {
         } else {
             self.bg_color
         };
-        let exploded = self.exploded_insert_hatch_models(layout_block, hatch_bg, false);
+        let exploded = self.exploded_insert_hatch_models(layout_block, hatch_bg, false, None);
         models.extend(exploded);
         Arc::new(models)
     }
