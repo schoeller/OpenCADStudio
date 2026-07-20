@@ -270,6 +270,11 @@ mod loader {
             self.panels.borrow().has_panels()
         }
 
+        /// Returns whether `cursor` lies inside any open plugin panel's bounds.
+        pub fn cursor_over_panel(&self, cursor: iced::Point) -> bool {
+            self.panels.borrow().cursor_over_panel(cursor)
+        }
+
         /// Open (or refresh) a panel for `def` owned by `process`.
         pub fn open_panel(
             &self,

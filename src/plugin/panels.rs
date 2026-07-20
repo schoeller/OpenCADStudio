@@ -137,6 +137,18 @@ impl PanelManager {
             .any(|p| p.geometry.is_interacting())
     }
 
+    /// Returns whether `cursor` lies inside any open panel's bounds. Used to
+    /// suppress the model-space crosshair while the pointer is over a panel.
+    pub fn cursor_over_panel(&self, cursor: Point) -> bool {
+        self.panels.values().any(|p| {
+            let g = &p.geometry;
+            cursor.x >= g.x
+                && cursor.x <= g.x + g.width
+                && cursor.y >= g.y
+                && cursor.y <= g.y + g.height
+        })
+    }
+
     /// Register a panel declaration from a loaded plugin. The panel is not
     /// opened until the plugin (or user) requests it.
     pub fn register_def(&mut self, def: &PanelDef) {
