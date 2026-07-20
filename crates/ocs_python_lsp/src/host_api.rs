@@ -472,11 +472,11 @@ pub fn handle_py_request(
             PyResponse::Bool(host.remove_record(Handle::new(handle), &app_name))
         }
         PyRequest::Erase(handle) => match host.remove_entity(Handle::new(handle)) {
-            Some(_) => {
+            true => {
                 *erased += 1;
                 PyResponse::Ok
             }
-            None => PyResponse::Error(format!("entity {handle} not found")),
+            false => PyResponse::Error(format!("entity {handle} not found")),
         },
         PyRequest::EraseByLayer(_) | PyRequest::EraseAll => {
             PyResponse::Error("erase by layer/all not implemented".to_string())

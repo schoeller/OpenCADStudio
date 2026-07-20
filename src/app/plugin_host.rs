@@ -252,8 +252,8 @@ impl HostApi for HostSession<'_> {
     fn update_entity(&mut self, entity: EntityType) -> bool {
         self.update_entity(entity)
     }
-    fn remove_entity(&mut self, handle: Handle) -> Option<EntityType> {
-        self.remove_entity(handle)
+    fn remove_entity(&mut self, handle: Handle) -> bool {
+        self.remove_entity(handle).is_some()
     }
     fn bump_geometry(&mut self) {
         self.bump_geometry()
@@ -664,13 +664,13 @@ mod tests {
         ))));
         assert!(host.document().get_entity(h).is_some());
 
-        assert!(host.remove_entity(h));
+        assert!(host.remove_entity(h).is_some());
         assert!(host.document().get_entity(h).is_none());
         assert!(!host.app.tabs[0].scene.hatches.contains_key(&h));
         assert!(!host.app.tabs[0].scene.meshes.contains_key(&h));
 
         // Removing an already-gone handle reports false.
-        assert!(!host.remove_entity(h));
+        assert!(host.remove_entity(h).is_none());
     }
 
     /// A plugin command: second point commits a Point and ends.

@@ -49,8 +49,8 @@ impl HostApi for MockHost {
     fn add_entity(&mut self, entity: EntityType) -> Handle {
         self.doc.add_entity(entity).unwrap_or_default()
     }
-    fn remove_entity(&mut self, handle: Handle) -> Option<EntityType> {
-        self.doc.remove_entity(handle)
+    fn remove_entity(&mut self, handle: Handle) -> bool {
+        self.doc.remove_entity(handle).is_some()
     }
     fn bump_geometry(&mut self) {}
     fn read_record(&self, handle: Handle, app_name: &str) -> Option<&ExtendedDataRecord> {

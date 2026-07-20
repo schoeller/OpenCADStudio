@@ -90,13 +90,13 @@ pub fn handle_plugin_request(
             Err(e) => PluginResponse::Error(e),
         },
         RemoveEntity { handle } => match host.remove_entity(handle) {
-            Some(entity) => PluginResponse::Entity(entity),
-            None => PluginResponse::Error(format!("entity {} not found", handle.value())),
+            true => PluginResponse::Bool(true),
+            false => PluginResponse::Error(format!("entity {} not found", handle.value())),
         },
         RemoveEntities { handles } => {
             let mut removed = 0usize;
             for handle in handles {
-                if host.remove_entity(handle).is_some() {
+                if host.remove_entity(handle) {
                     removed += 1;
                 }
             }

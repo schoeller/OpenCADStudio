@@ -176,17 +176,6 @@ pub trait HostApi {
 
     /// Add an entity to the active document, returning its handle.
     fn add_entity(&mut self, entity: EntityType) -> Handle;
-    /// Mark the scene geometry dirty so it is re-tessellated next frame.
-    fn bump_geometry(&mut self);
-    /// Read the XDATA record for `app_name` on entity `handle`, if any.
-    fn read_record(&self, handle: Handle, app_name: &str) -> Option<&ExtendedDataRecord>;
-    /// Attach `record` to entity `handle`, replacing any existing record for the
-    /// same application and registering the APPID. Returns `false` if the entity
-    /// does not exist.
-    fn write_record(&mut self, handle: Handle, record: ExtendedDataRecord) -> bool;
-    /// Remove the XDATA record for `app_name` from entity `handle`. Returns
-    /// `true` if a record was removed.
-    fn remove_record(&mut self, handle: Handle, app_name: &str) -> bool;
     /// Replace the existing entity that carries `entity`'s handle, preserving
     /// its identity (handle and owning block). Returns `false` when no entity
     /// has that handle. This is the sanctioned way to commit in-place edits
@@ -203,10 +192,23 @@ pub trait HostApi {
         }
     }
     /// Delete the entity with `handle` (and any derived render caches). Returns
-    /// the removed entity, if any.
-    fn remove_entity(&mut self, handle: Handle) -> Option<EntityType> {
-        self.document_mut().remove_entity(handle)
+    /// `true` when an entity was removed.
+    fn remove_entity(&mut self, handle: Handle) -> bool {
+        self.document_mut().remove_entity(handle).is_some()
     }
+
+    // ── XDATA ───────────────────────────────────────────────────────────────
+    /// Mark the scene geometry dirty so it is re-tessellated next frame.
+    fn bump_geometry(&mut self);
+    /// Read the XDATA record for `app_name` on entity `handle`, if any.
+    fn read_record(&self, handle: Handle, app_name: &str) -> Option<&ExtendedDataRecord>;
+    /// Attach `record` to entity `handle`, replacing any existing record for the
+    /// same application and registering the APPID. Returns `false` if the entity
+    /// does not exist.
+    fn write_record(&mut self, handle: Handle, record: ExtendedDataRecord) -> bool;
+    /// Remove the XDATA record for `app_name` from entity `handle`. Returns
+    /// `true` if a record was removed.
+    fn remove_record(&mut self, handle: Handle, app_name: &str) -> bool;
 
     // ── Undo / dirty ────────────────────────────────────────────────────────
     fn push_undo(&mut self, label: &str);

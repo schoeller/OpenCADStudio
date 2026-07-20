@@ -725,19 +725,19 @@ impl HostApi for PluginHostApi {
         }
     }
 
-    fn remove_entity(&mut self, handle: Handle) -> Option<EntityType> {
+    fn remove_entity(&mut self, handle: Handle) -> bool {
         match self
             .active_client()
             .request_response(PluginRequest::RemoveEntity { handle })
         {
-            Ok(PluginResponse::Entity(entity)) => Some(entity),
+            Ok(PluginResponse::Bool(true)) => true,
             Ok(other) => {
                 eprintln!("[plugin] unexpected RemoveEntity response: {other:?}");
-                None
+                false
             }
             Err(e) => {
                 eprintln!("[plugin] RemoveEntity failed: {e}");
-                None
+                false
             }
         }
     }
@@ -860,7 +860,7 @@ mod tests {
     }
 
     #[test]
-    fn remove_entity_awaits_entity_response() {
+    fn remove_entity_awaits_bool_response() {
         let (mut api, mut peer) = make_client();
         let peer_handle = thread::spawn(move || {
             let msg = recv(&mut peer).unwrap();
@@ -872,11 +872,11 @@ mod tests {
             }
             send(
                 &mut peer,
-                &HostToPlugin::Response(PluginResponse::Entity(EntityType::Point(Point::new()))),
+                &HostToPlugin::Response(PluginResponse::Bool(true)),
             )
             .unwrap();
         });
-        assert!(api.remove_entity(Handle::new(7)).is_some());
+        assert!(api.remove_entity(Handle::new(7)));
         peer_handle.join().unwrap();
     }
 }

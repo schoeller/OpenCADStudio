@@ -240,9 +240,10 @@ impl BuiltinPlugin for Api3TemplatePlugin {
                     doc.entities().last().map(|e| e.common().handle)
                 };
                 if let Some(handle) = last_handle {
-                    match host.remove_entity(handle) {
-                        Some(_) => host.push_info(&format!("Removed {handle:?}")),
-                        None => host.push_error(&format!("Could not remove {handle:?}")),
+                    if host.remove_entity(handle) {
+                        host.push_info(&format!("Removed {handle:?}"));
+                    } else {
+                        host.push_error(&format!("Could not remove {handle:?}"));
                     }
                 } else {
                     host.push_error("No entity to remove");
@@ -331,12 +332,11 @@ impl BuiltinPlugin for Api3TemplatePlugin {
                         doc.entities().map(|e| e.common().handle).max()
                     };
                     if let Some(handle) = last_handle {
-                        match host.remove_entity(handle) {
-                            Some(_) => {
-                                host.set_dirty();
-                                self.push_log(host, format!("Removed {handle:?}"));
-                            }
-                            None => self.push_log(host, format!("Could not remove {handle:?}")),
+                        if host.remove_entity(handle) {
+                            host.set_dirty();
+                            self.push_log(host, format!("Removed {handle:?}"));
+                        } else {
+                            self.push_log(host, format!("Could not remove {handle:?}"));
                         }
                     } else {
                         self.push_log(host, "No entity to remove".to_string());
