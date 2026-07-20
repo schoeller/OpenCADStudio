@@ -1116,6 +1116,18 @@ pub fn tessellate(
                 let mut out = Vec::new();
                 let mut is_first = true;
 
+                // A thickened wide polyline's extrusion — its corner / cap edges
+                // frame the solid tube and read black (like solid-with-edges
+                // outlines), while the tube fill keeps the entity colour.
+                let edge_color = if matches!(
+                    entity,
+                    EntityType::LwPolyline(p) if p.thickness.abs() > 1e-10
+                ) {
+                    [0.0, 0.0, 0.0, 1.0]
+                } else {
+                    color
+                };
+
                 if !local_pts.is_empty() {
                     let (snap, keys, tangents) = if is_first {
                         is_first = false;
@@ -1137,7 +1149,7 @@ pub fn tessellate(
                         name: name.clone(),
                         points: local_pts,
                         points_low: local_pts_low,
-                        color,
+                        color: edge_color,
                         selected,
                         pattern_length: 0.0,
                         pattern: [0.0; 8],

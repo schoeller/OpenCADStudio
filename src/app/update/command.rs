@@ -1578,7 +1578,13 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                             );
                                         }
                                     }
-                                    "linetype_scale" | "transparency" => {
+                                    "linetype_scale" | "transparency" | "thickness" => {
+                                        // Thickness (DXF 39 extrusion) is a General-
+                                        // group common prop, not a geometry-group one:
+                                        // route it to apply_common_prop (which handles
+                                        // it via set_entity_thickness). apply_geom_prop
+                                        // ignores it, so the edit would otherwise be a
+                                        // silent no-op and revert to the old value.
                                         if let Some(entity) =
                                             self.tabs[i].scene.document.get_entity_mut(handle)
                                         {

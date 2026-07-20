@@ -100,6 +100,83 @@ fn thick_segments(
     }
 }
 
+/// Extrude a *wide* LwPolyline's band into a 3-D tube: each band segment's outer
+/// and inner boundary rises by `thickness` (along the normal) into a wall,
+/// leaving the two radial segment-end edges open (they are internal to the
+/// band). The flat bottom band is already drawn by the wide-fill path; this
+/// adds the vertical walls and their outline. Used instead of `thick_segments`
+/// (which extrudes only the centreline) when the polyline carries a width.
+fn thick_wide_band(
+    pl: &LwPolyline,
+    thickness: f64,
+    to_wcs: &dyn Fn(f64, f64) -> (f64, f64, f64),
+    normal: (f64, f64, f64),
+    key_verts: Vec<[f64; 3]>,
+    tangents: Vec<TangentGeom>,
+) -> TruckEntity {
+    let (origin, fills) = wide_fills(pl);
+    let (nx, ny, nz) = normal;
+    let t = thickness;
+    let off = |p: [f64; 3]| -> [f64; 3] { [p[0] + t * nx, p[1] + t * ny, p[2] + t * nz] };
+    let push_seg = |lines: &mut Vec<[f64; 3]>, a: [f64; 3], b: [f64; 3]| {
+        lines.push(a);
+        lines.push(b);
+        lines.push([f64::NAN; 3]);
+    };
+
+    let mut lines: Vec<[f64; 3]> = Vec::new();
+    // Shaded surfaces: the vertical walls plus the top cap. The flat bottom cap
+    // is already drawn by the wide-fill hatch path, so it is not repeated here.
+    let mut fill_tris: Vec<[f64; 3]> = Vec::new();
+    for poly in &fills {
+        let n = poly.len();
+        if n < 4 {
+            continue;
+        }
+        // `polyline_segment_fill` returns the band loop as the outer boundary
+        // forward then the inner boundary back, so the two transition edges
+        // (half-1 → half and n-1 → 0) are the radial segment ends.
+        let half = n / 2;
+        let bot: Vec<[f64; 3]> = poly
+            .iter()
+            .map(|&[x, y]| {
+                let (wx, wy, wz) = to_wcs(origin[0] + x as f64, origin[1] + y as f64);
+                [wx, wy, wz]
+            })
+            .collect();
+        let top: Vec<[f64; 3]> = bot.iter().map(|&p| off(p)).collect();
+        for k in 0..n {
+            // Vertical at every boundary point.
+            push_seg(&mut lines, bot[k], top[k]);
+            // Skip the two radial cap edges — they stay inside the band.
+            if k == half - 1 || k == n - 1 {
+                continue;
+            }
+            let kn = (k + 1) % n;
+            push_seg(&mut lines, bot[k], bot[kn]); // bottom boundary
+            push_seg(&mut lines, top[k], top[kn]); // top boundary
+            // Wall quad (two triangles).
+            fill_tris.extend_from_slice(&[
+                bot[k], bot[kn], top[kn], bot[k], top[kn], top[k],
+            ]);
+        }
+        // Bottom + top caps — the band ring triangulated at each plane. The
+        // bottom cap is a real 3-D surface (with depth) so the walls occlude it
+        // correctly; the flat 2-D band fill is skipped for thickened polylines.
+        fill_tris.extend(crate::entities::mesh::triangulate_planar(&bot));
+        fill_tris.extend(crate::entities::mesh::triangulate_planar(&top));
+    }
+
+    TruckEntity {
+        pick_tris: fill_tris.clone(),
+        object: TruckObject::Lines(lines),
+        snap_pts: vec![],
+        tangent_geoms: tangents,
+        key_vertices: key_verts,
+        fill_tris,
+    }
+}
+
 fn to_truck(pline: &LwPolyline) -> TruckEntity {
     let verts = &pline.vertices;
     if verts.is_empty() {
@@ -171,6 +248,16 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
             let (wbx, wby, wbz) = to_wcs(ox1, oy1);
             kv.push([wbx, wby, wbz]);
             seg_data.push((ox0, oy0, ox1, oy1));
+        }
+        // A wide polyline extrudes its whole band into a tube (outer + inner
+        // walls); a zero-width one just extrudes its centreline.
+        let is_wide = pline.constant_width > 1e-9
+            || pline
+                .vertices
+                .iter()
+                .any(|v| v.start_width > 1e-9 || v.end_width > 1e-9);
+        if is_wide {
+            return thick_wide_band(pline, pline.thickness, &to_wcs, normal, kv, tgs);
         }
         return thick_segments(&seg_data, &path, pline.thickness, normal, kv, tgs);
     }

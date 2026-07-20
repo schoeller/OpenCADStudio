@@ -691,6 +691,11 @@ impl Scene {
         // Wide LWPolyline and Polyline2D fills
         for entity in self.document.entities() {
             let (common, fill_origin, fills) = match entity {
+                // A thickened wide LwPolyline becomes a 3-D tube: its bottom cap
+                // is drawn as a real depth-tested surface by the tessellator, not
+                // as this flat 2-D band (which, having only draw-order depth,
+                // would show through the tube walls in a 3-D view).
+                EntityType::LwPolyline(pl) if pl.thickness.abs() > 1e-10 => continue,
                 EntityType::LwPolyline(pl) => {
                     let (o, f) = crate::entities::lwpolyline::wide_fills(pl);
                     (&pl.common, o, f)

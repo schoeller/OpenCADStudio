@@ -211,7 +211,18 @@ impl Face3DGpu {
                 }
             } else {
                 let fill_color = [r, g, b, a];
-                let depth = depth_of(wire);
+                // A fill whose triangles span depth is a genuine 3-D surface (an
+                // extruded polyline tube), not a flat coplanar overlay (2-D SOLID,
+                // greek text, dimension background). Keep its real depth so the
+                // fill occludes correctly and its own edge wires — coincident with
+                // the surface — win the depth test and stay visible. A flat overlay
+                // keeps the draw-order bias that layers it in screen order.
+                let (mut zmin, mut zmax) = (f32::INFINITY, f32::NEG_INFINITY);
+                for p in &wire.fill_tris {
+                    zmin = zmin.min(p[2]);
+                    zmax = zmax.max(p[2]);
+                }
+                let depth = if zmax - zmin > 1e-4 { 0.0 } else { depth_of(wire) };
                 for (i, &position) in wire.fill_tris.iter().enumerate() {
                     verts_2d.push(Face3DVertex {
                         position,
