@@ -637,9 +637,11 @@ impl PanelManager {
             .width(Length::Fixed(panel.geometry.width))
             .height(Length::Fixed(panel.geometry.height));
 
-        mouse_area(panel_stack)
-            .on_press(Message::PanelFocus(panel.handle))
-            .into()
+        iced::widget::opaque(
+            mouse_area(panel_stack)
+                .on_press(Message::PanelFocus(panel.handle)),
+        )
+        .into()
     }
 
     fn render_snap_ghost(&self, panel: &OpenPanel, zone: DockZone) -> Element<'static, Message> {

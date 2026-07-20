@@ -338,8 +338,16 @@ impl SelectionCanvas {
         let Some(pos) = cursor.position_in(bounds) else {
             return false;
         };
+        // Panel rectangles are in `plugin_panels_overlay` coordinates (window
+        // space below the ribbon). The canvas is in `viewport_stack` coordinates,
+        // so map the cursor back to window space before comparing.
+        let cursor_x = pos.x + bounds.x;
+        let cursor_y = pos.y + bounds.y;
         self.plugin_panels.iter().any(|r| {
-            pos.x >= r.x && pos.x <= r.x + r.width && pos.y >= r.y && pos.y <= r.y + r.height
+            cursor_x >= r.x
+                && cursor_x <= r.x + r.width
+                && cursor_y >= r.y
+                && cursor_y <= r.y + r.height
         })
     }
 }
