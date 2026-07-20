@@ -17,6 +17,97 @@ fn fade_if_locked(
     }
 }
 
+/// Build the display wires for a decoded `AcDbSectionSymbol` (the "A-A" cut
+/// mark on a Model-Documentation view): the cut line through both endpoints —
+/// extended past each end by its signed tick — plus a short perpendicular arrow
+/// barb and the identifier glyph at each end. Coordinates are paper-space (the
+/// symbol is owned by a layout's paper space).
+fn section_symbol_wires(
+    s: &acadrust::entities::SectionSymbol,
+    h: Handle,
+    color: [f32; 4],
+    sel: bool,
+    lw_px: f32,
+) -> Vec<WireModel> {
+    let nan = [f64::NAN; 3];
+    let a = [s.end_a[0], s.end_a[1], 0.0];
+    let b = [s.end_b[0], s.end_b[1], 0.0];
+    // Unit direction B → A along the cut, and its left-hand perpendicular.
+    let (dx, dy) = (a[0] - b[0], a[1] - b[1]);
+    let len = (dx * dx + dy * dy).sqrt();
+    let (ux, uy) = if len > 1e-9 { (dx / len, dy / len) } else { (0.0, 1.0) };
+    let (px, py) = (-uy, ux);
+    let ta = s.tick_a.abs();
+    let tb = s.tick_b.abs();
+    // Cut line, extended outward (away from the opposite end) past each end.
+    let a_out = [a[0] + ux * ta, a[1] + uy * ta, 0.0];
+    let b_out = [b[0] - ux * tb, b[1] - uy * tb, 0.0];
+
+    let mut pts: Vec<[f64; 3]> = vec![b_out, a_out];
+    // Perpendicular arrow barbs at each outer tip (a short V), pointing along
+    // the cut so the mark reads as a section line rather than a plain segment.
+    let barb = ta.max(tb).max(1.0) * 0.6;
+    for (tip, along) in [(a_out, (ux, uy)), (b_out, (-ux, -uy))] {
+        let back = [tip[0] - along.0 * barb, tip[1] - along.1 * barb, 0.0];
+        pts.push(nan);
+        pts.push([back[0] + px * barb * 0.5, back[1] + py * barb * 0.5, 0.0]);
+        pts.push(tip);
+        pts.push(nan);
+        pts.push([back[0] - px * barb * 0.5, back[1] - py * barb * 0.5, 0.0]);
+        pts.push(tip);
+    }
+
+    let mut wires = Vec::new();
+    let (dpts, dpts_low) = convert::tessellate::points_to_ds(pts);
+    let mut w = WireModel::solid(h.value().to_string(), dpts, color, sel);
+    w.points_low = dpts_low;
+    w.line_weight_px = lw_px;
+    wires.push(w);
+
+    // Identifier glyph beyond each tip, centred on the cut line.
+    let txt_h = ta.max(tb).max(2.0);
+    if !s.label.trim().is_empty() {
+        let approx_w = txt_h * 0.7 * s.label.chars().count().max(1) as f64;
+        for (tip, along) in [(a_out, (ux, uy)), (b_out, (-ux, -uy))] {
+            // Baseline origin: past the tip by ~half a text height, shifted so
+            // the glyph run is centred across the cut line.
+            let base = [
+                tip[0] + along.0 * txt_h * 0.6 - ux * approx_w * 0.5 - px * txt_h * 0.5,
+                tip[1] + along.1 * txt_h * 0.6 - uy * approx_w * 0.5 - py * txt_h * 0.5,
+            ];
+            let (strokes, _) = crate::scene::text::lff::tessellate_text_ex(
+                [0.0, 0.0],
+                txt_h as f32,
+                0.0,
+                1.0,
+                0.0,
+                "standard",
+                &s.label,
+            );
+            let mut tp: Vec<[f64; 3]> = Vec::new();
+            for stroke in &strokes {
+                if stroke.len() < 2 {
+                    continue;
+                }
+                if !tp.is_empty() {
+                    tp.push(nan);
+                }
+                for &[gx, gy] in stroke {
+                    tp.push([base[0] + gx as f64, base[1] + gy as f64, 0.0]);
+                }
+            }
+            if tp.len() >= 2 {
+                let (lp, lp_low) = convert::tessellate::points_to_ds(tp);
+                let mut lw = WireModel::solid(h.value().to_string(), lp, color, sel);
+                lw.points_low = lp_low;
+                lw.line_weight_px = lw_px;
+                wires.push(lw);
+            }
+        }
+    }
+    wires
+}
+
 // ── Parallel tessellation free function ──────────────────────────────────────
 //
 // Takes only the `Send + Sync` data needed for tessellation so that
@@ -338,6 +429,19 @@ pub(crate) fn tessellate_entity(
                     return wires;
                 }
             }
+        }
+    }
+
+    // ── Section symbol (AcDbSectionSymbol): draw the "A-A" cut mark ──────────
+    //
+    // Model-Documentation section marks arrive as `Unknown` (class 825); the
+    // DWG reader decodes the two cut-line endpoints, the signed end ticks and
+    // the identifier. Synthesize the cut line + end ticks + label glyphs so the
+    // mark is visible on the layout, the way AutoCAD draws it. The raw record is
+    // still preserved for lossless write-back.
+    if let EntityType::Unknown(u) = e {
+        if let Some(s) = u.section_symbol.as_ref() {
+            return section_symbol_wires(s, h, entity_color, sel, line_weight_px);
         }
     }
 
