@@ -289,8 +289,21 @@ fn build_pdf(
         // `scale` in both branches so pen widths stay absolute under the scaled
         // CTM above — lineweights are independent of plot scale, so without this
         // a Fit plot of a large window renders near-invisible hairlines.
-        let lw_pt = lw_override
-            .unwrap_or_else(|| (wire.line_weight_px * LW_PX_TO_PT).max(0.1) / scale.max(1e-6));
+        //
+        // A wide polyline is the exception: its band is a geometric width in
+        // drawing units, so it must SCALE with the plot (no `/ scale`). Stroke
+        // the centre-line at `world_width`, converted mm → pt exactly like the
+        // geometry coordinates so the CTM scale renders the band at its true
+        // size; the linetype dash pattern below then strokes it dashed. This
+        // replaces the model-space hatch band that the shader-band change
+        // dropped, and overrides any CTB pen weight (the width is geometry, not
+        // a lineweight).
+        let lw_pt = if wire.world_width > 0.0 {
+            wire.world_width * MM_TO_PT
+        } else {
+            lw_override
+                .unwrap_or_else(|| (wire.line_weight_px * LW_PX_TO_PT).max(0.1) / scale.max(1e-6))
+        };
         if last_lw.map(|l| (l - lw_pt).abs() > 0.01).unwrap_or(true) {
             ops.push(Op::SetOutlineThickness { pt: Pt(lw_pt) });
             last_lw = Some(lw_pt);
