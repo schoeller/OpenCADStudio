@@ -222,7 +222,36 @@ pub trait HostApi {
     /// Start a plugin-defined interactive (click-to-place) command on the active
     /// tab. The host drives it through its normal point-collection flow.
     fn start_interactive(&mut self, command: Box<dyn InteractiveCommand>);
+    // ── Per-tab plugin state (object-safe; use the typed helpers below) ──────
+    fn plugin_state_any(&self, plugin_id: &str) -> Option<&(dyn Any + Send + Sync)>;
+    fn plugin_state_any_mut(&mut self, plugin_id: &str) -> Option<&mut (dyn Any + Send + Sync)>;
+    /// Get the state for `plugin_id`, inserting `init()`'s result if absent.
+    fn ensure_plugin_state_any(
+        &mut self,
+        plugin_id: &'static str,
+        init: &mut dyn FnMut() -> Box<dyn Any + Send + Sync>,
+    ) -> &mut (dyn Any + Send + Sync);
+    // ── DocumentReader (added in API v3; appended at the end to keep vtable
+    // indices stable for API v2 plugins) ─────────────────────────────────────
 
+    /// Read-only, zero-copy view of the active document. For out-of-process
+    /// plugins this is backed by host-owned shared memory; for in-process
+    /// plugins it wraps `document()`.
+    fn document_reader(&self) -> Box<dyn DocumentReader + '_>;
+
+    /// Open (or refresh) the host-side shared document view and return the
+    /// information the plugin needs to map it. In-process hosts implement this;
+    /// out-of-process plugin proxies return `None`.
+    fn document_view(&mut self) -> Option<crate::shm::DocumentViewInfo> {
+        None
+    }
+    /// Set the active document tab for subsequent host operations (API v3).
+    /// Out-of-process hosts route this as a `PluginRequest::SetActiveTab`;
+    /// in-process hosts that do not support tab switching can leave the default
+    /// error implementation. V2 hosts therefore keep compiling without changes.
+    fn set_active_tab(&mut self, _tab: usize) -> Result<(), String> {
+        Err("set_active_tab requires an out-of-process plugin host".to_string())
+    }
     // ── Panels (API v3; default implementations return Unsupported for v2 hosts) ─
     /// Open (or refresh) a plugin panel and return a host-allocated handle.
     fn open_panel(&mut self, _def: &PanelDef) -> Result<PanelHandle, PanelError> {
@@ -287,39 +316,6 @@ pub trait HostApi {
     /// Current plugin process dispatching on this host, if any.
     fn current_process(&self) -> Option<std::sync::Arc<crate::process::PluginProcess>> {
         None
-    }
-
-    // ── Per-tab plugin state (object-safe; use the typed helpers below) ──────
-    fn plugin_state_any(&self, plugin_id: &str) -> Option<&(dyn Any + Send + Sync)>;
-    fn plugin_state_any_mut(&mut self, plugin_id: &str) -> Option<&mut (dyn Any + Send + Sync)>;
-    /// Get the state for `plugin_id`, inserting `init()`'s result if absent.
-    fn ensure_plugin_state_any(
-        &mut self,
-        plugin_id: &'static str,
-        init: &mut dyn FnMut() -> Box<dyn Any + Send + Sync>,
-    ) -> &mut (dyn Any + Send + Sync);
-
-    // ── DocumentReader (added in API v3; appended at the end to keep vtable
-    // indices stable for API v2 plugins) ─────────────────────────────────────
-
-    /// Read-only, zero-copy view of the active document. For out-of-process
-    /// plugins this is backed by host-owned shared memory; for in-process
-    /// plugins it wraps `document()`.
-    fn document_reader(&self) -> Box<dyn DocumentReader + '_>;
-
-    /// Open (or refresh) the host-side shared document view and return the
-    /// information the plugin needs to map it. In-process hosts implement this;
-    /// out-of-process plugin proxies return `None`.
-    fn document_view(&mut self) -> Option<crate::shm::DocumentViewInfo> {
-        None
-    }
-
-    /// Set the active document tab for subsequent host operations (API v3).
-    /// Out-of-process hosts route this as a `PluginRequest::SetActiveTab`;
-    /// in-process hosts that do not support tab switching can leave the default
-    /// error implementation. V2 hosts therefore keep compiling without changes.
-    fn set_active_tab(&mut self, _tab: usize) -> Result<(), String> {
-        Err("set_active_tab requires an out-of-process plugin host".to_string())
     }
 }
 
