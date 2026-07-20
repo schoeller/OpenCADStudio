@@ -180,6 +180,7 @@ fn v3(p: DVec3) -> Vector3 {
 
 fn preview_line(a: Vec3, b: Vec3) -> WireModel {
     WireModel {
+        world_width: 0.0,
         fill_is_3d: false,
         pick_tris: Vec::new(),
         pick_tris_low: Vec::new(),

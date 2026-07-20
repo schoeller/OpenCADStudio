@@ -30,7 +30,7 @@ struct WireConst {
     draw_depth:     f32,
     align_end:      f32,
     align_total:    f32,
-    _pad0:          f32,
+    world_half_width: f32,
     _pad1:          f32,
     _pad2:          f32,
 }
@@ -93,7 +93,18 @@ struct VertexOut {
 
     let clip_pos = mix(clip_a, clip_b, which_end);
 
-    let hw = select(0.5, c.half_width, u.lwdisplay_enable > 0.5);
+    // A wide polyline carries its band width in world units: expand the quad
+    // by `world_half_width / world_per_pixel` (screen pixels) so the band grows
+    // and shrinks with zoom. A normal wire (world_half_width == 0) uses the
+    // screen-pixel half-width, honouring the LWDISPLAY toggle.
+    var hw: f32;
+    if c.world_half_width > 0.0 {
+        // Clamp to a half-pixel so a zoomed-out band never drops below a
+        // hairline (its centre-line) instead of vanishing.
+        hw = max(c.world_half_width / u.world_per_pixel, 0.5);
+    } else {
+        hw = select(0.5, c.half_width, u.lwdisplay_enable > 0.5);
+    }
 
     let ndc_offset = perp_ndc * hw * side;
     let final_clip = clip_pos + vec4<f32>(ndc_offset * clip_pos.w, 0.0, 0.0);

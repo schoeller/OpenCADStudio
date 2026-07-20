@@ -119,7 +119,11 @@ pub struct WireConst {
     pub draw_depth: f32,
     pub align_end: f32,
     pub align_total: f32,
-    pub _pad0: f32,
+    /// World-space half-width for a wide-polyline band. `0.0` = a normal wire
+    /// (uses `half_width`, screen pixels). Non-zero = the vertex shader expands
+    /// the quad by `world_half_width / world_per_pixel` so the band tracks zoom
+    /// in drawing units.
+    pub world_half_width: f32,
     pub _pad1: f32,
     pub _pad2: f32,
 }
@@ -171,6 +175,9 @@ pub struct WireInstance {
     /// and the total wire length. `align_total == 0.0` = not aligned.
     pub align_end: f32,
     pub align_total: f32,
+    /// World-space half-width for a wide-polyline band (see `WireConst`). `0.0`
+    /// = a normal wire (uses `half_width`, screen pixels).
+    pub world_half_width: f32,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -194,6 +201,7 @@ impl WireInstance {
             wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, pos_b_low) as u64,      shader_location: 11, format: wgpu::VertexFormat::Float32x3 },
             wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, align_end) as u64,      shader_location: 12, format: wgpu::VertexFormat::Float32   },
             wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, align_total) as u64,    shader_location: 13, format: wgpu::VertexFormat::Float32   },
+            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, world_half_width) as u64, shader_location: 14, format: wgpu::VertexFormat::Float32 },
         ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<WireInstance>() as u64,
@@ -403,6 +411,7 @@ fn emit_wire_instances(wire: &WireModel, color: [f32; 4], draw_depth: f32) -> Ve
             draw_depth,
             align_end,
             align_total,
+            world_half_width: wire.world_width * 0.5,
         });
     }
     instances
@@ -427,7 +436,7 @@ pub(crate) fn emit_wire_native(
         draw_depth,
         align_end,
         align_total,
-        _pad0: 0.0,
+        world_half_width: wire.world_width * 0.5,
         _pad1: 0.0,
         _pad2: 0.0,
     };

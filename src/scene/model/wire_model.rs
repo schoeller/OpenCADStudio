@@ -54,6 +54,12 @@ pub struct WireModel {
     pub pattern: [f32; 8],
     /// Rendered line width in screen pixels (half-width = line_weight_px / 2).
     pub line_weight_px: f32,
+    /// World-space band width (drawing units). `0.0` = a normal wire whose
+    /// width comes from `line_weight_px` (screen pixels). Non-zero = a wide
+    /// polyline: the shader expands this centre-line to `world_width` world
+    /// units (scaling with zoom) so the band IS the wire — the linetype dash
+    /// pattern then applies to the band instead of a separate hatch fill.
+    pub world_width: f32,
     /// ACI color index (1-255).  0 means true-color or unknown (no CTB lookup).
     pub aci: u8,
     /// Pre-baked snap candidates (Center, Node, Quadrant, Insertion).
@@ -173,6 +179,7 @@ impl WireModel {
     /// Create a solid wire (no dash pattern, 1px weight).
     pub fn solid(name: String, points: Vec<[f32; 3]>, color: [f32; 4], selected: bool) -> Self {
         Self {
+            world_width: 0.0,
             fill_is_3d: false,
             pick_tris: Vec::new(),
             pick_tris_low: Vec::new(),
@@ -394,6 +401,7 @@ impl Default for WireModel {
             pattern_length: 0.0,
             pattern: [0.0; 8],
             line_weight_px: 1.0,
+            world_width: 0.0,
             aci: 0,
             snap_pts: Vec::new(),
             tangent_geoms: Vec::new(),

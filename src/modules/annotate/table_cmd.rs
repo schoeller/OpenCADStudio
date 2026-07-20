@@ -139,6 +139,7 @@ impl CadCommand for TableCommand {
             let y = pt.y;
             let z = pt.z;
             Some(WireModel {
+                world_width: 0.0,
                 fill_is_3d: false,
                 pick_tris: Vec::new(),
                 pick_tris_low: Vec::new(),

@@ -179,6 +179,7 @@ impl CadCommand for DimBaselineCommand {
         let dim_line_pt2 = dim_line_pt2.as_vec3();
         let pt = pt.as_vec3();
         Some(WireModel {
+            world_width: 0.0,
             fill_is_3d: false,
             pick_tris: Vec::new(),
             pick_tris_low: Vec::new(),

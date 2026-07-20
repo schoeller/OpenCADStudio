@@ -325,6 +325,12 @@ fn build_defn(
                 subs.push(LocalSub::Nested(build_nested_ref(nested_ins, doc, bg_color)));
             }
             _ => {
+                // A wide polyline inside a block keeps its thin centre-line
+                // here (`LocalWire` carries no `world_width`, and `finalize`
+                // rebuilds every block wire with `world_width: 0.0`); its band
+                // is drawn by the hatch pipeline (`push_block_wide_fills`),
+                // which transforms with the block instance so the band scales
+                // correctly. The shader band is a top-level-entity path only.
                 for lw in tessellate_sub_local(doc, entity, anno_scale, bg_color) {
                     subs.push(LocalSub::Wire(lw));
                 }
@@ -848,6 +854,7 @@ impl Batches {
                 // the cached defn.
                 let color = crate::scene::view::render::adapt_to_bg(b.color, bg_color);
                 WireModel {
+                    world_width: 0.0,
                     fill_is_3d: false,
                     pick_tris: b.pick_tris,
                     pick_tris_low: b.pick_tris_low,

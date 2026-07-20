@@ -84,6 +84,7 @@ impl CadCommand for ToleranceCommand {
         }
         let d = 0.15_f32;
         Some(WireModel {
+            world_width: 0.0,
             fill_is_3d: false,
             pick_tris: Vec::new(),
             pick_tris_low: Vec::new(),

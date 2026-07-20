@@ -59,6 +59,8 @@ struct InstanceIn {
     // "A"-type endpoint alignment: end-dash length + total wire length.
     @location(12) align_end:     f32,
     @location(13) align_total:   f32,
+    // World-space half-width for a wide-polyline band. 0 = normal wire.
+    @location(14) world_half_width: f32,
 }
 
 // Draw-order depth bias: shifts clip-space z so 2D entities of different
@@ -129,8 +131,18 @@ struct VertexOut {
     // Select the clip-space position for this vertex's endpoint.
     let clip_pos = mix(clip_a, clip_b, which_end);
 
-    // LWDISPLAY off → collapse to a 1-pixel-wide line (half_width = 0.5).
-    let hw = select(0.5, in.half_width, u.lwdisplay_enable > 0.5);
+    // A wide polyline carries its band width in world units: expand the quad by
+    // `world_half_width / world_per_pixel` (pixels) so the band tracks zoom. A
+    // normal wire (world_half_width == 0) uses the screen-pixel half-width,
+    // honouring the LWDISPLAY toggle (off → collapse to a 1-pixel line).
+    var hw: f32;
+    if in.world_half_width > 0.0 {
+        // Clamp to a half-pixel so a zoomed-out band never drops below a
+        // hairline (its centre-line) instead of vanishing.
+        hw = max(in.world_half_width / u.world_per_pixel, 0.5);
+    } else {
+        hw = select(0.5, in.half_width, u.lwdisplay_enable > 0.5);
+    }
 
     // Offset in clip space (multiply by w to un-apply perspective division).
     let ndc_offset = perp_ndc * hw * side;

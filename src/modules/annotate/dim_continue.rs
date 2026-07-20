@@ -159,6 +159,7 @@ impl CadCommand for DimContinueCommand {
         let dim_line_pt = p1 + perp * (dim_line_perp - p1.dot(perp));
         let dim_line_pt2 = pt + perp * (dim_line_perp - pt.dot(perp));
         Some(WireModel {
+            world_width: 0.0,
             fill_is_3d: false,
             pick_tris: Vec::new(),
             pick_tris_low: Vec::new(),
