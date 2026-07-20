@@ -2063,6 +2063,12 @@ impl Scene {
             2 => (right, top, left, bottom),
             _ => (left, bottom, right, top),
         };
+        // Plot margins are millimetres like the paper size; scale them into the
+        // layout's paper-space units so the inset matches the (already scaled)
+        // sheet rect. Without this an inch paper space insets an ~8-inch sheet
+        // by ~6 "inches" of margin and the printable rect collapses.
+        let f = self.paper_space_unit_factor();
+        let (ml, mb, mr, mt) = (ml * f, mb * f, mr * f, mt * f);
         // Nothing to show when there are no margins (printable area == sheet).
         if ml <= 0.0 && mb <= 0.0 && mr <= 0.0 && mt <= 0.0 {
             return None;
@@ -2084,9 +2090,12 @@ impl Scene {
             [0.5, 0.5, 0.5, 1.0],
             false,
         );
-        // Dashed: 4 mm dash, 3 mm gap.
-        wire.pattern_length = 7.0;
-        wire.pattern = [4.0, -3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        // Dashed: 4 mm dash, 3 mm gap. The dash lengths are millimetres, so
+        // scale them into the layout's paper-space units too (`f`) — otherwise
+        // an inch paper space draws 4-"inch" dashes (25.4× too long).
+        let ff = f as f32;
+        wire.pattern_length = 7.0 * ff;
+        wire.pattern = [4.0 * ff, -3.0 * ff, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         Some(wire)
     }
 
@@ -2150,6 +2159,61 @@ impl Scene {
         })
     }
 
+    /// PlotSettings store the paper size and plot margins in millimetres, but a
+    /// layout's paper space may be laid out in inches — its viewports, drawing
+    /// limits and the sheet the user sees are all in inch units. Return the
+    /// factor that converts those millimetre plot-settings values into the
+    /// active layout's paper-space units: `1.0` for a millimetre layout,
+    /// `1/25.4` for an inch layout.
+    ///
+    /// The unit is inferred from the layout's drawing limits — the only
+    /// per-layout tie between paper-space coordinates and the physical sheet.
+    /// `plot_paper_units` (code 72) records the plot *output* unit and can
+    /// disagree with the paper-space geometry (a layout can carry inch output
+    /// units over a millimetre paper space and vice-versa), so it is not used.
+    pub fn paper_space_unit_factor(&self) -> f64 {
+        if self.current_layout == "Model" {
+            return 1.0;
+        }
+        self.document
+            .objects
+            .values()
+            .find_map(|obj| match obj {
+                ObjectType::Layout(l) if l.name == self.current_layout => {
+                    Some(Self::layout_unit_factor(l))
+                }
+                _ => None,
+            })
+            .unwrap_or(1.0)
+    }
+
+    /// Millimetre → paper-space-unit factor for a specific layout (see
+    /// [`Scene::paper_space_unit_factor`]).
+    fn layout_unit_factor(l: &acadrust::objects::Layout) -> f64 {
+        if l.paper_width <= 1e-6 || l.paper_height <= 1e-6 {
+            return 1.0;
+        }
+        // Match the rotation swap `paper_limits` applies so the span/paper axes
+        // line up.
+        let (pw, ph) = if l.plot_rotation == 1 || l.plot_rotation == 3 {
+            (l.paper_height, l.paper_width)
+        } else {
+            (l.paper_width, l.paper_height)
+        };
+        let span_w = (l.max_limits.0 - l.min_limits.0).abs();
+        let span_h = (l.max_limits.1 - l.min_limits.1).abs();
+        // The paper-space span ≈ physical_mm × factor. Solve factor = span / mm
+        // on whichever axis carries a usable span, then snap to inch when it
+        // lands near 1/25.4; otherwise treat the layout as millimetre (default).
+        let ratio = [(span_w, pw), (span_h, ph)]
+            .into_iter()
+            .find_map(|(s, p)| (s > 1e-6 && p > 1e-6).then_some(s / p));
+        match ratio {
+            Some(r) if (r - 1.0 / 25.4).abs() < 0.15 / 25.4 => 1.0 / 25.4,
+            _ => 1.0,
+        }
+    }
+
     pub fn paper_limits(&self) -> Option<((f64, f64), (f64, f64))> {
         if self.current_layout == "Model" {
             return None;
@@ -2173,6 +2237,14 @@ impl Scene {
                         } else {
                             (l.paper_width, l.paper_height)
                         };
+                        // paper_width/height are millimetres; scale them into
+                        // the layout's paper-space units so the sheet lands in
+                        // the same coordinate system as the viewports drawn on
+                        // it. An inch-based paper space would otherwise get a
+                        // 25.4× oversized sheet, shrinking the content into the
+                        // corner.
+                        let f = Self::layout_unit_factor(l);
+                        let (pw, ph) = (pw * f, ph * f);
                         let ox = l.min_limits.0.min(0.0);
                         let oy = l.min_limits.1.min(0.0);
                         return Some(((ox, oy), (ox + pw, oy + ph)));

@@ -1165,7 +1165,11 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                 // Determine paper size and drawing offset.
                 let (paper_w, paper_h, mut draw_ox, mut draw_oy, rotation_deg) =
                     if let Some(((x0, y0), (x1, y1))) = scene.paper_limits() {
-                        let (pw, ph) = (x1 - x0, y1 - y0);
+                        // `paper_limits()` is in paper-space units; the PDF page is
+                // physical millimetres, so scale the sheet size back to mm via
+                // the layout's unit factor (identity for millimetre layouts).
+                let uf = scene.paper_space_unit_factor();
+                let (pw, ph) = ((x1 - x0) / uf, (y1 - y0) / uf);
 
                         // If PlotSettings says Extents, use model space extents instead.
                         let use_extents = ps_snap
@@ -1379,7 +1383,11 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
         let ps_snap = scene.effective_plot_settings();
         let (paper_w, paper_h, draw_ox, draw_oy, rotation_deg) =
             if let Some(((x0, y0), (x1, y1))) = scene.paper_limits() {
-                let (pw, ph) = (x1 - x0, y1 - y0);
+                // `paper_limits()` is in paper-space units; the PDF page is
+                // physical millimetres, so scale the sheet size back to mm via
+                // the layout's unit factor (identity for millimetre layouts).
+                let uf = scene.paper_space_unit_factor();
+                let (pw, ph) = ((x1 - x0) / uf, (y1 - y0) / uf);
                 let use_extents = ps_snap
                     .as_ref()
                     .map(|ps| matches!(ps.plot_type, PlotType::Extents))
