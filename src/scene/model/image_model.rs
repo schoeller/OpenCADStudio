@@ -182,12 +182,13 @@ impl ImageModel {
 }
 
 impl ImageModel {
-    /// Build an ImageModel from an OLE2FRAME's embedded presentation bitmap.
-    /// Returns `None` when the frame is degenerate or carries no decodable
-    /// bitmap (e.g. a metafile-only OLE), so the caller falls back to the frame
-    /// placeholder.
+    /// Build an ImageModel from an OLE2FRAME's embedded presentation.
+    /// The blob's compound file is parsed for the native raster or the cached
+    /// metafile picture (rasterized by the `gdi` player); returns `None` when
+    /// the frame is degenerate or nothing in the blob decodes, so the caller
+    /// falls back to the frame placeholder.
     pub fn from_ole2frame(ole: &acadrust::entities::Ole2Frame) -> Option<Self> {
-        let (pixels, width, height) = decode_ole_bitmap(&ole.binary_data)?;
+        let (pixels, width, height) = super::ole_pres::decode(&ole.binary_data)?;
 
         // Frame rectangle in WCS. `upper_left`/`lower_right` name the diagonal;
         // normalise to left/right/top/bottom so the bitmap sits upright.
@@ -233,42 +234,6 @@ impl ImageModel {
             verts,
         })
     }
-}
-
-/// Extract and decode the presentation BMP embedded in an OLE2FRAME data blob.
-/// The blob carries the OLE object's cached bitmap (a `BITMAPFILEHEADER` "BM"
-/// followed by a DIB); scan for a self-consistent one and decode it. Returns
-/// `None` when no valid BMP is present (a metafile/other-format OLE).
-fn decode_ole_bitmap(data: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
-    let mut i = 0usize;
-    while i + 54 <= data.len() {
-        if &data[i..i + 2] != b"BM" {
-            i += 1;
-            continue;
-        }
-        let file_size = u32::from_le_bytes(data[i + 2..i + 6].try_into().unwrap()) as usize;
-        let dib_size = u32::from_le_bytes(data[i + 14..i + 18].try_into().unwrap());
-        // A plausible BITMAPFILEHEADER points at a known DIB-header size.
-        if !matches!(dib_size, 12 | 40 | 52 | 56 | 64 | 108 | 124) {
-            i += 1;
-            continue;
-        }
-        let end = if file_size >= 54 && i + file_size <= data.len() {
-            i + file_size
-        } else {
-            data.len()
-        };
-        if let Ok(img) = image::load_from_memory_with_format(&data[i..end], image::ImageFormat::Bmp)
-        {
-            let rgba = img.to_rgba8();
-            let (w, h) = rgba.dimensions();
-            if w > 0 && h > 0 {
-                return Some((rgba.into_raw(), w, h));
-            }
-        }
-        i += 1;
-    }
-    None
 }
 
 /// Decoded RGBA image shared between the raster pipeline and the
