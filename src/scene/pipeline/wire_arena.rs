@@ -90,13 +90,6 @@ fn handle_of(w: &WireModel) -> Option<Handle> {
     crate::scene::Scene::handle_from_wire_name(&w.name)
 }
 
-/// True if the set can use the arena: no per-wire scissor (paper viewports). Mesh
-/// fills no longer disqualify it — the render layer splits the set into a regular
-/// and a mesh-edge subset, one arena each.
-pub fn is_arena_eligible(wires: &[WireModel]) -> bool {
-    wires.iter().all(|w| w.vp_scissor.is_none())
-}
-
 /// True when `w`'s edge segments belong to a mesh/solid whose fill is drawn in a
 /// separate pass — such wires need the draw loop's mesh-edge treatment, so they
 /// go in their own arena. `mesh_names` are the entities that emit a fill.
@@ -439,7 +432,6 @@ impl WireArena {
         vec![WireGpu {
             instance_buffer: self.inst_buf.clone(),
             instance_count: self.inst_tail,
-            vp_scissor: None,
             is_3d_mesh_edge: self.mesh_edge,
             const_bind_group: Some(self.const_bind_group.clone()),
         }]

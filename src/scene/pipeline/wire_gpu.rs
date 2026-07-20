@@ -208,9 +208,6 @@ impl WireInstance {
 pub struct WireGpu {
     pub instance_buffer: wgpu::Buffer,
     pub instance_count: u32,
-    /// Paper-space bbox [x0, y0, x1, y1] for GPU scissor clipping.
-    /// Set only for viewport-projected wires; None for regular wires.
-    pub vp_scissor: Option<[f32; 4]>,
     /// `true` when the source `WireModel` also carries `fill_tris`
     /// (i.e. it is a 3D mesh face — PolyfaceMesh / PolygonMesh — whose
     /// outline lives in `points`). The wire pass skips these instances
@@ -521,7 +518,6 @@ impl WireGpu {
         device: &wgpu::Device,
         wires: &[WireModel],
         depth_map: &rustc_hash::FxHashMap<u64, f32>,
-        scissor: Option<[f32; 4]>,
         mesh_edge: bool,
         const_bgl: Option<&wgpu::BindGroupLayout>,
     ) -> Vec<Self> {
@@ -562,7 +558,6 @@ impl WireGpu {
                     Self {
                         instance_buffer: buf,
                         instance_count: chunk.len() as u32,
-                        vp_scissor: scissor,
                         is_3d_mesh_edge: mesh_edge,
                         const_bind_group: bg.clone(),
                     }
@@ -594,7 +589,6 @@ impl WireGpu {
                     Self {
                         instance_buffer: buf,
                         instance_count: chunk.len() as u32,
-                        vp_scissor: scissor,
                         is_3d_mesh_edge: mesh_edge,
                         const_bind_group: None,
                     }
@@ -652,7 +646,6 @@ impl WireGpu {
                     Self {
                         instance_buffer,
                         instance_count: chunk.len() as u32,
-                        vp_scissor: None,
                         is_3d_mesh_edge: false,
                         const_bind_group: bg.clone(),
                     }
@@ -678,7 +671,6 @@ impl WireGpu {
                     Self {
                         instance_buffer,
                         instance_count: chunk.len() as u32,
-                        vp_scissor: None,
                         is_3d_mesh_edge: false,
                         const_bind_group: None,
                     }

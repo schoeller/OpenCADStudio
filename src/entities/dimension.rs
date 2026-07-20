@@ -1372,7 +1372,6 @@ fn tessellate_dimension_inner(
                     key_vertices: vec![],
                     aabb: WireModel::UNBOUNDED_AABB,
                     plinegen: true,
-                    vp_scissor: None,
                     fill_tris: vec![],
                     fill_tris_low: Vec::new(),
                 });
@@ -1399,7 +1398,6 @@ fn tessellate_dimension_inner(
                     key_vertices: vec![],
                     aabb: WireModel::UNBOUNDED_AABB,
                     plinegen: true,
-                    vp_scissor: None,
                     fill_tris: vec![],
                     fill_tris_low: Vec::new(),
                 });
@@ -1426,7 +1424,6 @@ fn tessellate_dimension_inner(
                 key_vertices: vec![],
                 aabb: WireModel::UNBOUNDED_AABB,
                 plinegen: true,
-                vp_scissor: None,
                 fill_tris: vec![],
                 fill_tris_low: Vec::new(),
             });
@@ -1454,7 +1451,6 @@ fn tessellate_dimension_inner(
         key_vertices,
         aabb: WireModel::UNBOUNDED_AABB,
         plinegen: true,
-        vp_scissor: None,
         fill_tris: geom.arrow_fill,
         // fill_tris_low intentionally empty: this fill renders on the top-level
         // path, where consumers (face3d_gpu, xclip) treat a short low half as
@@ -1498,7 +1494,6 @@ fn tessellate_dimension_inner(
                     key_vertices: vec![],
                     aabb: WireModel::UNBOUNDED_AABB,
                     plinegen: true,
-                    vp_scissor: None,
                     fill_tris: rect,
                     // fill_tris_low intentionally empty: this fill renders on the
                     // top-level path, where consumers (face3d_gpu, xclip) treat a

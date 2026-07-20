@@ -670,7 +670,6 @@ pub(crate) fn tessellate_entity(
             key_vertices: vec![],
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
-            vp_scissor: None,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
         };
@@ -1055,7 +1054,6 @@ fn lod_stub_wire(
         key_vertices: vec![[cx as f64, cy as f64, cz as f64]],
         aabb,
         plinegen: true,
-        vp_scissor: None,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
     }
@@ -1140,7 +1138,6 @@ fn lod_stub_wire_3d(
         key_vertices: vec![],
         aabb,
         plinegen: true,
-        vp_scissor: None,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
     }

@@ -100,10 +100,6 @@ pub struct ImageModel {
     /// Low residual paired with `corners` (double-single) so the GPU keeps
     /// sub-unit precision at UTM-scale insertion points.
     pub corners_low: [[f32; 3]; 4],
-    /// Optional world-space XY rect [x0, y0, x1, y1] for paper-space
-    /// viewport clipping. Mirrors `WireModel.vp_scissor` /
-    /// `HatchModel.vp_scissor`.
-    pub vp_scissor: Option<[f32; 4]>,
     /// Normalized draw-order depth in (0,1); higher draws on top. Fed to the
     /// image pipeline as a small clip-z bias so the raster orders correctly
     /// against other entity types.
@@ -179,7 +175,6 @@ impl ImageModel {
             opacity,
             corners,
             corners_low,
-            vp_scissor: None,
             draw_depth: 0.0,
             verts,
         })
@@ -234,7 +229,6 @@ impl ImageModel {
             opacity: 1.0,
             corners,
             corners_low,
-            vp_scissor: None,
             draw_depth: 0.0,
             verts,
         })

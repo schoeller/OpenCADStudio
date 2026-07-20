@@ -868,7 +868,6 @@ impl Batches {
                     key_vertices: b.key_vertices,
                     aabb,
                     plinegen: b.plinegen,
-                    vp_scissor: None,
                     fill_tris: b.fill_tris,
                     fill_tris_low: b.fill_tris_low,
                 }

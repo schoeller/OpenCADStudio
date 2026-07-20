@@ -394,7 +394,6 @@ pub fn tessellate(
                     key_vertices: Vec::new(),
                     aabb: WireModel::UNBOUNDED_AABB,
                     plinegen: false,
-                    vp_scissor: None,
                     fill_tris: Vec::new(),
                     fill_tris_low: Vec::new(),
                 });
@@ -681,7 +680,6 @@ pub fn tessellate(
                                         key_vertices: vec![],
                                         aabb: WireModel::UNBOUNDED_AABB,
                                         plinegen: true,
-                                        vp_scissor: None,
                                         fill_tris: ft,
                                         fill_tris_low: ftl,
                                     });
@@ -719,7 +717,6 @@ pub fn tessellate(
                                         key_vertices: vec![],
                                         aabb: WireModel::UNBOUNDED_AABB,
                                         plinegen: true,
-                                        vp_scissor: None,
                                         fill_tris: vec![],
                                         fill_tris_low: Vec::new(),
                                     });
@@ -764,7 +761,6 @@ pub fn tessellate(
                             key_vertices: Vec::new(),
                             aabb: WireModel::UNBOUNDED_AABB,
                             plinegen: true,
-                            vp_scissor: None,
                             fill_tris: vec![],
                             fill_tris_low: Vec::new(),
                         });
@@ -790,7 +786,6 @@ pub fn tessellate(
                         key_vertices,
                         aabb: text_aabb,
                         plinegen: true,
-                        vp_scissor: None,
                         fill_tris: vec![],
                         fill_tris_low: Vec::new(),
                     });
@@ -846,7 +841,6 @@ pub fn tessellate(
                             key_vertices: keys,
                             aabb: WireModel::UNBOUNDED_AABB,
                             plinegen: true,
-                            vp_scissor: None,
                             fill_tris: vec![],
                             fill_tris_low: Vec::new(),
                         });
@@ -884,7 +878,6 @@ pub fn tessellate(
                             key_vertices: keys,
                             aabb: WireModel::UNBOUNDED_AABB,
                             plinegen: true,
-                            vp_scissor: None,
                             fill_tris: bin.fill_tris,
                             fill_tris_low: bin.fill_tris_low,
                         });
@@ -919,7 +912,6 @@ pub fn tessellate(
                         key_vertices: Vec::new(),
                         aabb: text_aabb,
                         plinegen: true,
-                        vp_scissor: None,
                         fill_tris: vec![],
                         fill_tris_low: Vec::new(),
                     });
@@ -947,7 +939,6 @@ pub fn tessellate(
                         key_vertices,
                         aabb: WireModel::UNBOUNDED_AABB,
                         plinegen: true,
-                        vp_scissor: None,
                         fill_tris: vec![],
                         fill_tris_low: Vec::new(),
                     });
@@ -1006,7 +997,6 @@ pub fn tessellate(
                             key_vertices,
                             aabb: WireModel::UNBOUNDED_AABB,
                             plinegen: true,
-                            vp_scissor: None,
                             fill_tris: vec![],
                             fill_tris_low: Vec::new(),
                         }];
@@ -1046,7 +1036,6 @@ pub fn tessellate(
                         key_vertices,
                         aabb: WireModel::UNBOUNDED_AABB,
                         plinegen: true,
-                        vp_scissor: None,
                         fill_tris: vec![],
                         fill_tris_low: Vec::new(),
                     }];
@@ -1086,7 +1075,6 @@ pub fn tessellate(
                         key_vertices,
                         aabb: WireModel::UNBOUNDED_AABB,
                         plinegen: true,
-                        vp_scissor: None,
                         fill_tris: vec![],
                         fill_tris_low: Vec::new(),
                     }];
@@ -1160,7 +1148,6 @@ pub fn tessellate(
                         key_vertices: keys,
                         aabb: WireModel::UNBOUNDED_AABB,
                         plinegen: true,
-                        vp_scissor: None,
                         fill_tris: vec![],
                         fill_tris_low: Vec::new(),
                     });
@@ -1196,7 +1183,6 @@ pub fn tessellate(
                         key_vertices: keys,
                         aabb: WireModel::UNBOUNDED_AABB,
                         plinegen: true,
-                        vp_scissor: None,
                         fill_tris,
                         fill_tris_low,
                         fill_is_3d,
@@ -1225,7 +1211,6 @@ pub fn tessellate(
                         key_vertices,
                         aabb: WireModel::UNBOUNDED_AABB,
                         plinegen: true,
-                        vp_scissor: None,
                         fill_tris: vec![],
                         fill_tris_low: Vec::new(),
                     });
@@ -1264,7 +1249,6 @@ pub fn tessellate(
                     aci: 0,
                     key_vertices,
                     plinegen: false,
-                    vp_scissor: None,
                     aabb: WireModel::UNBOUNDED_AABB,
                     fill_tris: vec![],
                     fill_tris_low: Vec::new(),
@@ -1334,7 +1318,6 @@ pub fn tessellate(
         key_vertices,
         aabb: WireModel::UNBOUNDED_AABB,
         plinegen: true,
-        vp_scissor: None,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
     }]

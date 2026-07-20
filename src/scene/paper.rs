@@ -290,7 +290,6 @@ impl Scene {
                 angle_offset: 0.0,
                 scale: 1.0,
                 world_origin: fill_origin,
-                vp_scissor: None,
                 draw_depth: 0.0,
             });
         }

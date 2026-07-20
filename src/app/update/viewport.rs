@@ -1258,7 +1258,6 @@ pub(super) fn on_tick(&mut self, t: Instant) -> Task<Message> {
                                     key_vertices: vec![],
                                     aabb: crate::scene::WireModel::UNBOUNDED_AABB,
                                     plinegen: true,
-                                    vp_scissor: None,
                                     fill_tris: vec![],
                                     fill_tris_low: Vec::new(),
                                 };
@@ -1297,7 +1296,6 @@ pub(super) fn on_tick(&mut self, t: Instant) -> Task<Message> {
                                 key_vertices: vec![],
                                 aabb: crate::scene::WireModel::UNBOUNDED_AABB,
                                 plinegen: true,
-                                vp_scissor: None,
                                 fill_tris: vec![],
                                 fill_tris_low: Vec::new(),
                             });

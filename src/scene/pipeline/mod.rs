@@ -169,8 +169,6 @@ pub struct Pipeline {
     /// The Model content id both arenas currently mirror (`u64::MAX` = none).
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) wire_arena_id: u64,
-    /// Pixel scissor rects [x, y, w, h] for viewport-clipped wires. Recomputed each frame.
-    wire_pixel_scissors: Vec<Option<[u32; 4]>>,
     /// This content viewport's non-rectangular clip boundary as a triangle-fan
     /// vertex buffer in the render target's normalized device coords (`None` =
     /// rectangular / unclipped, where the viewport's own render rectangle does
@@ -198,11 +196,7 @@ pub struct Pipeline {
     /// when the wipeout's projected AABB sits entirely outside the
     /// viewport rect. Recomputed by `compute_wipeout_lod`.
     wipeout_skip_flags: Vec<bool>,
-    /// Pixel scissor rects [x, y, w, h] for viewport-clipped wipeouts. Recomputed each frame.
-    wipeout_pixel_scissors: Vec<Option<[u32; 4]>>,
     gpu_images: Vec<ImageGpu>,
-    /// Pixel scissor rects [x, y, w, h] for viewport-clipped images. Recomputed each frame.
-    image_pixel_scissors: Vec<Option<[u32; 4]>>,
     gpu_meshes: Vec<MeshLodGpu>,
     /// Batched mesh geometry — every solid's LOD0 concatenated into a few large
     /// buffers so the whole set draws in a handful of calls instead of one per
@@ -1442,7 +1436,6 @@ impl Pipeline {
             wire_arena_mesh: None,
             #[cfg(not(target_arch = "wasm32"))]
             wire_arena_id: u64::MAX,
-            wire_pixel_scissors: vec![],
             clip_boundary: None,
             gpu_selected_wires: vec![],
             gpu_preview_wires: vec![],
@@ -1451,9 +1444,7 @@ impl Pipeline {
             gpu_hatches_web: vec![],
             gpu_wipeouts: vec![],
             wipeout_skip_flags: vec![],
-            wipeout_pixel_scissors: vec![],
             gpu_images: vec![],
-            image_pixel_scissors: vec![],
             gpu_meshes: vec![],
             gpu_mesh_batch: vec![],
             cached_mesh_batch_epoch: u64::MAX,
@@ -1516,16 +1507,12 @@ impl Pipeline {
         let mut batches: Vec<WireGpu> = Vec::new();
         let mut i = 0;
         while i < wires.len() {
-            let scissor = wires[i].vp_scissor;
             let mesh_edge = is_mesh_edge(&wires[i]);
             let mut j = i + 1;
-            while j < wires.len()
-                && wires[j].vp_scissor == scissor
-                && is_mesh_edge(&wires[j]) == mesh_edge
-            {
+            while j < wires.len() && is_mesh_edge(&wires[j]) == mesh_edge {
                 j += 1;
             }
-            batches.extend(WireGpu::from_run(device, &wires[i..j], depth_map, scissor, mesh_edge, self.wire_const_bgl.as_ref()));
+            batches.extend(WireGpu::from_run(device, &wires[i..j], depth_map, mesh_edge, self.wire_const_bgl.as_ref()));
             i = j;
         }
 
@@ -1587,7 +1574,7 @@ impl Pipeline {
             push(h.value(), WireModel::HOVER, wires, &mut out);
         }
         self.gpu_selected_wires =
-            WireGpu::from_run(device, &out, depth_map, None, false, self.wire_const_bgl.as_ref());
+            WireGpu::from_run(device, &out, depth_map, false, self.wire_const_bgl.as_ref());
     }
 
     /// Build the text-highlight overlay: the glyph quads of just the selected /
@@ -1645,7 +1632,7 @@ impl Pipeline {
         self.gpu_preview_wires = if wires.is_empty() {
             vec![]
         } else {
-            WireGpu::from_run(device, wires, depth_map, None, false, self.wire_const_bgl.as_ref())
+            WireGpu::from_run(device, wires, depth_map, false, self.wire_const_bgl.as_ref())
         };
     }
 
@@ -1848,16 +1835,6 @@ impl Pipeline {
         self.silhouette_vcount = verts.len() as u32;
     }
 
-    /// Recompute pixel scissor rects for viewport-clipped wires from the current view_proj.
-    /// Called every frame from prepare() because scissor pixels shift with pan/zoom.
-    pub fn compute_wire_scissors(&mut self, view_rot: glam::Mat4, eye: glam::DVec3, clip_w: u32, clip_h: u32) {
-        self.wire_pixel_scissors = self
-            .gpu_wires
-            .iter()
-            .map(|w| project_scissor(w.vp_scissor, view_rot, eye, clip_w, clip_h))
-            .collect();
-    }
-
     /// Upload this content viewport's non-rectangular clip boundary as a
     /// triangle-fan vertex buffer in render-target NDC. The boundary is already
     /// projected (paper shape → the same visible-sub-rect crop as the content),
@@ -1914,15 +1891,6 @@ impl Pipeline {
         batch.upload_visibility(queue);
     }
 
-    /// Recompute pixel scissor rects for viewport-clipped wipeouts.
-    pub fn compute_wipeout_scissors(&mut self, view_rot: glam::Mat4, eye: glam::DVec3, clip_w: u32, clip_h: u32) {
-        self.wipeout_pixel_scissors = self
-            .gpu_wipeouts
-            .iter()
-            .map(|h| project_scissor(h.vp_scissor, view_rot, eye, clip_w, clip_h))
-            .collect();
-    }
-
     /// Per-frame wipeout frustum-skip flag (Phase 2.3). Mirrors
     /// `compute_hatch_lod`'s frustum branch. No sub-pixel skip:
     /// wipeouts mask, so dropping a sub-pixel one wouldn't be wrong
@@ -1932,15 +1900,6 @@ impl Pipeline {
             .gpu_wipeouts
             .iter()
             .map(|h| aabb_offscreen(h.world_aabb, view_rot, eye, clip_w, clip_h))
-            .collect();
-    }
-
-    /// Recompute pixel scissor rects for viewport-clipped raster images.
-    pub fn compute_image_scissors(&mut self, view_rot: glam::Mat4, eye: glam::DVec3, clip_w: u32, clip_h: u32) {
-        self.image_pixel_scissors = self
-            .gpu_images
-            .iter()
-            .map(|i| project_scissor(i.vp_scissor, view_rot, eye, clip_w, clip_h))
             .collect();
     }
 
@@ -2324,25 +2283,10 @@ impl Pipeline {
             pass.set_pipeline(&self.image_pipeline);
             pass.set_bind_group(0, &self.uniform_bind_group, &[]);
             pass.set_stencil_reference(stencil_ref);
-            let mut scissor_active = false;
-            for (i, img) in self.gpu_images.iter().enumerate() {
-                match self.image_pixel_scissors.get(i) {
-                    Some(Some([x, y, w, h])) => {
-                        pass.set_scissor_rect(*x, *y, *w, *h);
-                        scissor_active = true;
-                    }
-                    _ if scissor_active => {
-                        pass.set_scissor_rect(0, 0, vp.width, vp.height);
-                        scissor_active = false;
-                    }
-                    _ => {}
-                }
+            for img in self.gpu_images.iter() {
                 pass.set_bind_group(1, &img.bind_group, &[]);
                 pass.set_vertex_buffer(0, img.vertex_buffer.slice(..));
                 pass.draw(0..img.vertex_count, 0..1);
-            }
-            if scissor_active {
-                pass.set_scissor_rect(0, 0, vp.width, vp.height);
             }
         }
 
@@ -2647,10 +2591,9 @@ impl Pipeline {
             // colour. `wire_black_pipeline` shares the wire layout, so the switch
             // needs no bind-group rebind.
             let want_solid_with_edges = !hidden_line && !mesh_wireframe && show_3d_edges;
-            let mut scissor_active = false;
             let mut black_active = false;
             pass.set_stencil_reference(stencil_ref);
-            for (i, wire) in self.gpu_wires.iter().enumerate() {
+            for wire in self.gpu_wires.iter() {
                 if wire.instance_count == 0 {
                     continue;
                 }
@@ -2673,25 +2616,11 @@ impl Pipeline {
                     });
                     black_active = use_black;
                 }
-                match self.wire_pixel_scissors.get(i) {
-                    Some(Some([x, y, w, h])) => {
-                        pass.set_scissor_rect(*x, *y, *w, *h);
-                        scissor_active = true;
-                    }
-                    _ if scissor_active => {
-                        pass.set_scissor_rect(0, 0, vp.width, vp.height);
-                        scissor_active = false;
-                    }
-                    _ => {}
-                }
                 if let Some(bg) = &wire.const_bind_group {
                     pass.set_bind_group(1, bg.as_ref(), &[]);
                 }
                 pass.set_vertex_buffer(0, wire.instance_buffer.slice(..));
                 pass.draw(0..6, 0..wire.instance_count);
-            }
-            if scissor_active {
-                pass.set_scissor_rect(0, 0, vp.width, vp.height);
             }
             // Live overlay wires (command preview / interim / grip drag) always
             // on top: the xray pipeline (depth_compare=Always, no depth write)
@@ -2798,28 +2727,13 @@ impl Pipeline {
             pass.set_pipeline(&self.wipeout_pipeline);
             pass.set_bind_group(0, &self.uniform_bind_group, &[]);
             pass.set_stencil_reference(stencil_ref);
-            let mut scissor_active = false;
             for (i, wipeout) in self.gpu_wipeouts.iter().enumerate() {
                 if self.wipeout_skip_flags.get(i).copied().unwrap_or(false) {
                     continue;
                 }
-                match self.wipeout_pixel_scissors.get(i) {
-                    Some(Some([x, y, w, h])) => {
-                        pass.set_scissor_rect(*x, *y, *w, *h);
-                        scissor_active = true;
-                    }
-                    _ if scissor_active => {
-                        pass.set_scissor_rect(0, 0, vp.width, vp.height);
-                        scissor_active = false;
-                    }
-                    _ => {}
-                }
                 pass.set_bind_group(1, &wipeout.bind_group, &[]);
                 pass.set_vertex_buffer(0, wipeout.vertex_buffer.slice(..));
                 pass.draw(0..6, 0..1);
-            }
-            if scissor_active {
-                pass.set_scissor_rect(0, 0, vp.width, vp.height);
             }
         }
 
@@ -3122,38 +3036,6 @@ fn aabb_below_pixel(
         if py > max_py { max_py = py; }
     }
     (max_px - min_px).max(max_py - min_py) < threshold_px
-}
-
-/// Project a world-space XY scissor rect through `view_proj` into the four
-/// pixel-space corners and return the smallest aligned-rect that bounds them,
-/// clamped to the clip viewport. Returns `None` when the rect is missing or
-/// the projection collapses (off-screen, behind camera).
-fn project_scissor(
-    rect: Option<[f32; 4]>,
-    view_rot: glam::Mat4,
-    eye: glam::DVec3,
-    clip_w: u32,
-    clip_h: u32,
-) -> Option<[u32; 4]> {
-    let [x0, y0, x1, y1] = rect?;
-    let w = clip_w as f32;
-    let h = clip_h as f32;
-    let corners = [
-        view_rot.project_point3((glam::DVec3::new(x0 as f64, y0 as f64, 0.0) - eye).as_vec3()),
-        view_rot.project_point3((glam::DVec3::new(x1 as f64, y0 as f64, 0.0) - eye).as_vec3()),
-        view_rot.project_point3((glam::DVec3::new(x0 as f64, y1 as f64, 0.0) - eye).as_vec3()),
-        view_rot.project_point3((glam::DVec3::new(x1 as f64, y1 as f64, 0.0) - eye).as_vec3()),
-    ];
-    let px: Vec<f32> = corners.iter().map(|c| (c.x + 1.0) * 0.5 * w).collect();
-    let py: Vec<f32> = corners.iter().map(|c| (1.0 - c.y) * 0.5 * h).collect();
-    let sx0 = px.iter().cloned().fold(f32::INFINITY, f32::min).max(0.0) as u32;
-    let sy0 = py.iter().cloned().fold(f32::INFINITY, f32::min).max(0.0) as u32;
-    let sx1 = (px.iter().cloned().fold(f32::NEG_INFINITY, f32::max) as u32).min(clip_w);
-    let sy1 = (py.iter().cloned().fold(f32::NEG_INFINITY, f32::max) as u32).min(clip_h);
-    if sx1 <= sx0 || sy1 <= sy0 {
-        return None;
-    }
-    Some([sx0, sy0, sx1 - sx0, sy1 - sy0])
 }
 
 fn create_depth_texture(device: &wgpu::Device, size: Size<u32>) -> wgpu::Texture {

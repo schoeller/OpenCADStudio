@@ -387,10 +387,7 @@ impl shader::Primitive for Primitive {
                 #[cfg(not(target_arch = "wasm32"))]
                 let mut _patched = false;
                 #[cfg(not(target_arch = "wasm32"))]
-                if crate::scene::wire_gpu_patch_enabled()
-                    && inner.wire_const_bgl.is_some()
-                    && crate::scene::pipeline::wire_arena::is_arena_eligible(&vp.wires)
-                {
+                if crate::scene::wire_gpu_patch_enabled() && inner.wire_const_bgl.is_some() {
                     use crate::scene::pipeline::wire_arena::{self, WireArena};
                     // Split the resident set into the regular 2D wires and the
                     // mesh/solid EDGE wires (which need the mesh-edge draw
@@ -576,9 +573,6 @@ impl shader::Primitive for Primitive {
                 inner.upload_silhouettes(device, &[], vp.view_dir);
             }
             inner.upload_clip_boundary(device, &vp.clip_boundary_ndc);
-            inner.compute_wire_scissors(view_rot, eye, clip_size.width, clip_size.height);
-            inner.compute_wipeout_scissors(view_rot, eye, clip_size.width, clip_size.height);
-            inner.compute_image_scissors(view_rot, eye, clip_size.width, clip_size.height);
             inner.compute_hatch_lod(queue, view_rot, eye, clip_size.width, clip_size.height);
             inner.compute_wipeout_lod(view_rot, eye, clip_size.width, clip_size.height);
             inner.compute_mesh_lod(view_rot, eye, clip_size.width, clip_size.height);

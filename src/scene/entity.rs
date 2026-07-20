@@ -727,7 +727,6 @@ impl Scene {
                     angle_offset: 0.0,
                     scale: 1.0,
                     world_origin: fill_origin,
-                    vp_scissor: None,
                     draw_depth: depth_map.get(&common.handle.value()).copied().unwrap_or(0.0),
                 });
             }
@@ -1002,7 +1001,6 @@ impl Scene {
                 angle_offset: 0.0,
                 scale: 1.0,
                 world_origin: origin,
-                vp_scissor: None,
                 draw_depth: 0.0,
             });
         }
@@ -1058,7 +1056,6 @@ impl Scene {
                     angle_offset: 0.0,
                     scale: 1.0,
                     world_origin: fill_origin,
-                    vp_scissor: None,
                     draw_depth: 0.0,
                 });
             }
@@ -1593,7 +1590,6 @@ impl Scene {
             angle_offset: if prebaked { 0.0 } else { dxf.pattern_angle as f32 },
             scale: if prebaked { 1.0 } else { dxf.pattern_scale as f32 },
             world_origin,
-            vp_scissor: None,
             draw_depth: 0.0,
         })
     }
@@ -1808,7 +1804,6 @@ impl Scene {
             angle_offset: 0.0,
             scale: 1.0,
             world_origin,
-            vp_scissor: None,
             draw_depth: 0.0,
         }
     }

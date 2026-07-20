@@ -773,7 +773,6 @@ pub fn tessellate_table(
                 key_vertices: vec![],
                 aabb: WireModel::UNBOUNDED_AABB,
                 plinegen: true,
-                vp_scissor: None,
                 fill_tris,
                 // fill_tris_low intentionally empty: this fill renders on the
                 // top-level path, where consumers (face3d_gpu, xclip) treat a

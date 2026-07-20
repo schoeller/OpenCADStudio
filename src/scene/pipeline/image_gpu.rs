@@ -66,8 +66,6 @@ pub struct ImageGpu {
     /// more when the raster is clipped to a triangulated polygon.
     pub vertex_count: u32,
     pub bind_group: wgpu::BindGroup,
-    /// Mirrors `ImageModel.vp_scissor` — see `HatchGpu.vp_scissor`.
-    pub vp_scissor: Option<[f32; 4]>,
     _texture: wgpu::Texture,
     _sampler: wgpu::Sampler,
     _params_buf: wgpu::Buffer,
@@ -186,7 +184,6 @@ impl ImageGpu {
             vertex_buffer,
             vertex_count,
             bind_group,
-            vp_scissor: model.vp_scissor,
             _texture: texture,
             _sampler,
             _params_buf,

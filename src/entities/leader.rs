@@ -610,7 +610,6 @@ impl LeaderTess for Leader {
                 key_vertices: vec![],
                 aabb: WireModel::UNBOUNDED_AABB,
                 plinegen: true,
-                vp_scissor: None,
                 fill_tris: vec![],
                 fill_tris_low: Vec::new(),
             };
@@ -717,7 +716,6 @@ impl LeaderTess for Leader {
             key_vertices,
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
-            vp_scissor: None,
             fill_tris,
             fill_tris_low: Vec::new(),
         }

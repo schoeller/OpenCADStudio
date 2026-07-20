@@ -242,7 +242,6 @@ impl HatchCommand {
             scale: 1.0,
             world_origin: origin,
             boundary_wcs: Some(std::sync::Arc::new(wcs)),
-            vp_scissor: None,
             draw_depth: 0.0,
         }
     }
@@ -403,7 +402,6 @@ impl GradientCommand {
             scale: 1.0,
             world_origin: origin,
             boundary_wcs: Some(std::sync::Arc::new(wcs)),
-            vp_scissor: None,
             draw_depth: 0.0,
         }
     }
@@ -577,7 +575,6 @@ impl CadCommand for BoundaryCommand {
                     scale: 1.0,
                     world_origin: origin,
                     boundary_wcs: Some(std::sync::Arc::new(wcs)),
-                    vp_scissor: None,
                     draw_depth: 0.0,
                 };
                 CmdResult::CommitHatch(model)

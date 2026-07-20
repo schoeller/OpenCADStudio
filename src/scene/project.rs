@@ -334,7 +334,6 @@ impl Scene {
                 // to keep dimensional consistency in the GPU shader.
                 out.pattern_length = wire.pattern_length * scale;
                 out.pattern = wire.pattern.map(|v| v * scale);
-                out.vp_scissor = Some([vp_x0, vp_y0, vp_x1, vp_y1]);
                 projected.push(out);
             }
 
@@ -348,17 +347,13 @@ impl Scene {
         result
     }
 
-    /// Clip regions for every on content viewport in `paper_block`: the paper
-    /// bounding rect (matching the wires' `vp_scissor`) plus the boundary
-    /// polygon whose interior the GPU keeps via the stencil buffer. A plain
-    /// rectangular viewport contributes its four corners; a viewport with a
-    /// non-rectangular clip (`clip_boundary_handle`) contributes that entity's
-    /// tessellated outline (circle / ellipse / spline / polyline), reusing the
-    /// entity's own `to_truck` tessellation.
-    /// A content viewport's non-rectangular clip boundary, projected into that
-    /// viewport's render-target normalized device coords. Returns an empty vec
-    /// for a rectangular viewport (no `clip_boundary_handle`) — those clip via
-    /// their own render rectangle and need no stencil mask.
+    /// A content viewport's clip boundary, projected into that viewport's
+    /// render-target normalized device coords. Every content viewport goes
+    /// through the same stencil path: a rectangular viewport contributes its
+    /// own four corners (a full-target mask, since the render rectangle already
+    /// clips the edges), a viewport with a `clip_boundary_handle` contributes
+    /// that entity's tessellated outline. Returns empty only when the viewport
+    /// is degenerate.
     ///
     /// `uo/vo/us/vs` are the visible-sub-rect crop the content camera applies
     /// (see `crop_view_proj`); the same crop is applied here so the boundary
@@ -376,9 +371,6 @@ impl Scene {
             return vec![];
         };
         let vp: &Viewport = vp;
-        if vp.clip_boundary_handle.is_null() {
-            return vec![];
-        }
         let pcx = vp.center.x as f32;
         let pcy = vp.center.y as f32;
         let z = vp.center.z as f32;
@@ -387,7 +379,20 @@ impl Scene {
         if hw.abs() < 1e-6 || hh.abs() < 1e-6 {
             return vec![];
         }
-        let poly = self.clip_boundary_polygon(vp.clip_boundary_handle, z);
+        let poly = if vp.clip_boundary_handle.is_null() {
+            // Rectangular viewport → its own four corners (paper coords). These
+            // map to full-rect NDC [-1, 1], a no-op mask over a render target
+            // that already clips to the rectangle, but it keeps rect and
+            // non-rect viewports on one uniform stencil path.
+            vec![
+                [pcx - hw, pcy - hh, z],
+                [pcx + hw, pcy - hh, z],
+                [pcx + hw, pcy + hh, z],
+                [pcx - hw, pcy + hh, z],
+            ]
+        } else {
+            self.clip_boundary_polygon(vp.clip_boundary_handle, z)
+        };
         if poly.len() < 3 {
             return vec![];
         }

@@ -58,11 +58,9 @@ struct HatchWebUniform {
 pub struct HatchWebGpu {
     pub vertex_buffer: wgpu::Buffer,
     pub bind_group: wgpu::BindGroup,
-    /// Reserved for viewport-clip scissor / per-frame AABB LOD (mirrors
-    /// `WipeoutGpu`); not yet wired into the web hatch draw loop — the native
-    /// batched path doesn't do per-hatch scissor/LOD either.
-    #[allow(dead_code)]
-    pub vp_scissor: Option<[f32; 4]>,
+    /// Reserved for per-frame AABB LOD (mirrors `WipeoutGpu`); not yet wired
+    /// into the web hatch draw loop — the native batched path doesn't do
+    /// per-hatch LOD either.
     #[allow(dead_code)]
     pub world_aabb: [f32; 4],
     _uniform_buf: wgpu::Buffer,
@@ -344,7 +342,6 @@ impl HatchWebGpu {
         Self {
             vertex_buffer,
             bind_group,
-            vp_scissor: model.vp_scissor,
             world_aabb,
             _uniform_buf,
             _data_tex: data_tex,

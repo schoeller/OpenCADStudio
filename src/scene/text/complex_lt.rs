@@ -325,7 +325,6 @@ pub fn apply_along(
             key_vertices: vec![],
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
-            vp_scissor: None,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
         })
@@ -365,7 +364,6 @@ pub fn apply_along(
             key_vertices: vec![],
             aabb: [nx as f32, ny as f32, xx as f32, xy as f32],
             plinegen: true,
-            vp_scissor: None,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
         });

@@ -886,9 +886,7 @@ pub struct Scene {
     /// Cached wipeout fill models, keyed by geometry_epoch. Same
     /// reasoning as `hatch_cache`.
     wipeout_cache: RefCell<Option<(u64, Arc<Vec<HatchModel>>)>>,
-    /// Cached image models, keyed by geometry_epoch. Images do their own
-    /// per-frame culling in the GPU pipeline (vp_scissor); no camera key
-    /// needed here.
+    /// Cached image models, keyed by geometry_epoch. No camera key needed here.
     image_cache: RefCell<Option<(u64, Arc<Vec<ImageModel>>)>>,
     /// Cached mesh models, keyed by geometry_epoch.
     mesh_cache: RefCell<Option<(u64, Arc<Vec<MeshLodSet>>)>>,
@@ -2025,7 +2023,6 @@ impl Scene {
             color: self.paper_bg_color,
             angle_offset: 0.0,
             scale: 1.0,
-            vp_scissor: None,
             // Draw-order bias is signed: entity fills/wires land in (-1, 1)
             // (0 = neutral). A value below -1 forces the sheet strictly behind
             // EVERY object, in every case, with a tiny z offset (BIAS = 0.001,

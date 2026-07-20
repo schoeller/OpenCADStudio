@@ -104,7 +104,6 @@ impl CadCommand for RayCommand {
             key_vertices: vec![],
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
-            vp_scissor: None,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
         })
@@ -203,7 +202,6 @@ impl CadCommand for XLineCommand {
             key_vertices: vec![],
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
-            vp_scissor: None,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
         })

@@ -119,10 +119,6 @@ pub struct FamilyBatchData {
 pub struct WipeoutGpu {
     pub vertex_buffer: wgpu::Buffer,
     pub bind_group: wgpu::BindGroup,
-    /// Mirrors `HatchModel.vp_scissor`. Forwarded to the pipeline so each
-    /// frame's `compute_hatch_scissors` can translate the world rect into
-    /// a pixel scissor.
-    pub vp_scissor: Option<[f32; 4]>,
     /// World-space XY bounding rect [min_x, min_y, max_x, max_y] of the
     /// boundary polygon. Used by the per-frame LOD pass to skip hatches
     /// whose entire footprint projects to less than ~2 px (Phase 3.3).
@@ -382,7 +378,6 @@ impl WipeoutGpu {
         Self {
             vertex_buffer,
             bind_group,
-            vp_scissor: model.vp_scissor,
             world_aabb,
             _uniform_buf,
             _boundary_buf,

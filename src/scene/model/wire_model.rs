@@ -86,9 +86,6 @@ pub struct WireModel {
     /// share one interior phase (perpendicular dashes line up) yet each still
     /// ends on a dash. `None` (the default) = per-wire A-type / from-start.
     pub dash_align_end: Option<f32>,
-    /// Paper-space bounding box [x0, y0, x1, y1] for GPU scissor clipping.
-    /// Set only for viewport-projected wires in paper-space layouts.
-    pub vp_scissor: Option<[f32; 4]>,
     /// Pre-triangulated solid fill: flat vertex list, 3 per triangle (world-offset applied).
     /// Non-empty only for PolyfaceMesh / PolygonMesh entities.
     pub fill_tris: Vec<[f32; 3]>,
@@ -196,7 +193,6 @@ impl WireModel {
             plinegen: true,
             dash_from_start: false,
             dash_align_end: None,
-            vp_scissor: None,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
         }
@@ -406,7 +402,6 @@ impl Default for WireModel {
             plinegen: true,
             dash_from_start: false,
             dash_align_end: None,
-            vp_scissor: None,
             fill_tris: Vec::new(),
             fill_tris_low: Vec::new(),
             fill_is_3d: false,
