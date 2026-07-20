@@ -6,7 +6,7 @@
 //! features (`panels`, `on_async_event`). The current host must still be able to
 //! load and dispatch it without recompilation.
 
-use ocs_plugin_api::host::{BuiltinPlugin, HostApi};
+use ocs_plugin_api::host::{BuiltinPlugin, CadModuleV2, HostApi};
 use ocs_plugin_api::manifest::{ApiVersion, PluginManifest};
 use ocs_plugin_api::ribbon::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
 
@@ -23,26 +23,27 @@ static MANIFEST: PluginManifest = PluginManifest {
 
 struct MyModule;
 
-impl CadModule for MyModule {
+impl CadModuleV2 for MyModule {
     fn id(&self) -> &'static str {
         "my_plugin"
     }
     fn title(&self) -> &'static str {
         "My Plugin"
     }
-    fn ribbon_groups(&self) -> &[RibbonGroup] {
+    fn ribbon_groups(&self) -> Vec<RibbonGroup> {
         static GROUPS: std::sync::OnceLock<Vec<RibbonGroup>> = std::sync::OnceLock::new();
         GROUPS.get_or_init(|| {
-        vec![RibbonGroup {
-            title: "Tools",
-            tools: vec![RibbonItem::LargeTool(ToolDef {
-                id: "MP_HELLO",
-                label: "Hello",
-                icon: IconKind::Glyph("*"),
-                event: ModuleEvent::Command("MP_HELLO".to_string()),
-            })],
-        }]
-    })
+            vec![RibbonGroup {
+                title: "Tools",
+                tools: vec![RibbonItem::LargeTool(ToolDef {
+                    id: "MP_HELLO",
+                    label: "Hello",
+                    icon: IconKind::Glyph("*"),
+                    event: ModuleEvent::Command("MP_HELLO".to_string()),
+                })],
+            }]
+        })
+        .clone()
     }
 }
 
@@ -53,7 +54,7 @@ impl BuiltinPlugin for MyPlugin {
         &MANIFEST
     }
     fn ribbon(&self) -> Box<dyn CadModule> {
-        Box::new(MyModule)
+        unsafe { std::mem::transmute(Box::new(MyModule) as Box<dyn CadModuleV2>) }
     }
     fn dispatch(&self, host: &mut dyn HostApi, cmd: &str) -> bool {
         match cmd {

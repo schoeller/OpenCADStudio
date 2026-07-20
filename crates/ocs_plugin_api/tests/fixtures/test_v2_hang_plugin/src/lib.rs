@@ -3,7 +3,7 @@
 //! Used to verify that the host times out and marks the process dead instead of
 //! blocking indefinitely.
 
-use ocs_plugin_api::host::{BuiltinPlugin, HostApi};
+use ocs_plugin_api::host::{BuiltinPlugin, CadModuleV2, HostApi};
 use ocs_plugin_api::manifest::{ApiVersion, PluginManifest};
 use ocs_plugin_api::ribbon::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
 
@@ -28,7 +28,7 @@ static MANIFEST: PluginManifest = PluginManifest {
 
 struct TestModule;
 
-impl CadModule for TestModule {
+impl CadModuleV2 for TestModule {
     fn id(&self) -> &'static str {
         MANIFEST.id
     }
@@ -37,8 +37,8 @@ impl CadModule for TestModule {
         MANIFEST.name
     }
 
-    fn ribbon_groups(&self) -> &[RibbonGroup] {
-        Box::leak(Box::new(vec![RibbonGroup {
+    fn ribbon_groups(&self) -> Vec<RibbonGroup> {
+        vec![RibbonGroup {
             title: "V2 Hang",
             tools: vec![RibbonItem::Tool(ToolDef {
                 id: "V2TEST_HANG",
@@ -46,7 +46,7 @@ impl CadModule for TestModule {
                 icon: IconKind::Glyph("H"),
                 event: ModuleEvent::Command("V2TEST_HANG".to_string()),
             })],
-        }])).as_slice()
+        }]
     }
 }
 
@@ -56,7 +56,7 @@ impl BuiltinPlugin for TestV2HangPlugin {
     }
 
     fn ribbon(&self) -> Box<dyn CadModule> {
-        Box::new(TestModule)
+        unsafe { std::mem::transmute(Box::new(TestModule) as Box<dyn CadModuleV2>) }
     }
 
     fn dispatch(&self, _host: &mut dyn HostApi, cmd: &str) -> bool {

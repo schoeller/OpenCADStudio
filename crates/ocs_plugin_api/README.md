@@ -25,6 +25,12 @@ cdylib reports `ocs_plugin_api_version() == 2` and exports `*mut Box<dyn
 BuiltinPlugin>`; the runner loads it through the adapter so the v3 `BuiltinPlugin`
 methods that a v2 cdylib does not implement are safely masked as no-ops.
 
+The original v2 `CadModule` returned `Vec<RibbonGroup>` from `ribbon_groups()`. The
+runner uses the `CadModuleV2` trait and `V2CadModuleAdapter` to call that legacy
+convention, then exposes the data as the current `CadModule` slice API. Existing
+v2 cdylibs that were built with the old `Vec` ABI can therefore be loaded without
+recompilation.
+
 ### V3 (`BuiltinPlugin`)
 
 The current API surface. It extends V2 with:
@@ -102,7 +108,9 @@ See `src/ipc/protocol.rs` for all variants.
 
 `V2ToV3Adapter` wraps a v2 cdylib's `Box<dyn BuiltinPlugin>` so it satisfies
 `BuiltinPlugin`. V2-only methods (`panels`, `on_async_event`) are no-ops, which
-masks the incomplete v2 vtable without recompiling the plugin.
+masks the incomplete v2 vtable without recompiling the plugin. `V2CadModuleAdapter`
+wraps the old `CadModuleV2` `Vec<RibbonGroup>` return convention so it satisfies
+the current `CadModule` slice contract.
 
 ## Version constants
 

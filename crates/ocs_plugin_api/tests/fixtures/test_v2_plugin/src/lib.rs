@@ -2,11 +2,11 @@
 //!
 //! This plugin deliberately reports API major version 2 via the
 //! `ocs_plugin_api_version` C symbol while implementing the current
-//! `BuiltinPlugin` trait (the first three methods are the API v2 surface). That
-//! lets Stage 1 tests verify that the host still loads v2 plugins without
-//! requiring them to be rebuilt for the V2-specific trait.
+//! `BuiltinPlugin` trait (the first three methods are the API v2 surface). It also
+//! emulates the original v2 `CadModule` ABI where `ribbon_groups` returned
+//! `Vec<RibbonGroup>` by value, so the runner's v2 compatibility path is tested.
 
-use ocs_plugin_api::host::{BuiltinPlugin, HostApi};
+use ocs_plugin_api::host::{BuiltinPlugin, CadModuleV2, HostApi};
 use ocs_plugin_api::manifest::{ApiVersion, PluginManifest};
 use ocs_plugin_api::ribbon::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
 
@@ -31,7 +31,7 @@ static MANIFEST: PluginManifest = PluginManifest {
 
 struct TestModule;
 
-impl CadModule for TestModule {
+impl CadModuleV2 for TestModule {
     fn id(&self) -> &'static str {
         MANIFEST.id
     }
@@ -40,8 +40,8 @@ impl CadModule for TestModule {
         MANIFEST.name
     }
 
-    fn ribbon_groups(&self) -> &[RibbonGroup] {
-        Box::leak(Box::new(vec![RibbonGroup {
+    fn ribbon_groups(&self) -> Vec<RibbonGroup> {
+        vec![RibbonGroup {
             title: "V2 Test",
             tools: vec![RibbonItem::Tool(ToolDef {
                 id: "V2TEST_HELLO",
@@ -49,7 +49,7 @@ impl CadModule for TestModule {
                 icon: IconKind::Glyph("H"),
                 event: ModuleEvent::Command("V2TEST_HELLO".to_string()),
             })],
-        }])).as_slice()
+        }]
     }
 }
 
@@ -59,7 +59,11 @@ impl BuiltinPlugin for TestV2Plugin {
     }
 
     fn ribbon(&self) -> Box<dyn CadModule> {
-        Box::new(TestModule)
+        // V2 cdylibs compiled against the original ABI returned `Box<dyn CadModule>`
+        // whose `ribbon_groups` used the `Vec<RibbonGroup>` return convention. This
+        // transmute reproduces that trait-object layout so the runner tests the
+        // same path used by real existing V2 plugins.
+        unsafe { std::mem::transmute(Box::new(TestModule) as Box<dyn CadModuleV2>) }
     }
 
     fn dispatch(&self, host: &mut dyn HostApi, cmd: &str) -> bool {

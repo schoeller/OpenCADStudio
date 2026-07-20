@@ -19,7 +19,7 @@ use acadrust::{CadDocument, EntityType, Handle};
 use crate::ipc::protocol::PluginAsync;
 use crate::manifest::PluginManifest;
 use crate::panel::{DockZone, PanelDef, PanelError, PanelEvent, PanelHandle};
-use crate::ribbon::CadModule;
+use crate::ribbon::{CadModule, RibbonGroup};
 
 /// An add-on package's entry point: its manifest, optional ribbon tab, and
 /// command dispatch. Built-in (in-tree) and dynamically-loaded (cdylib) plugins
@@ -48,8 +48,52 @@ pub trait BuiltinPlugin: Send + Sync {
 /// explicitly if they prefer a separate v2-only contract.
 pub trait BuiltinPluginV2: Send + Sync {
     fn manifest(&self) -> &'static PluginManifest;
-    fn ribbon(&self) -> Box<dyn CadModule>;
+    fn ribbon(&self) -> Box<dyn CadModuleV2>;
     fn dispatch(&self, host: &mut dyn HostApi, cmd: &str) -> bool;
+}
+
+/// Legacy API v2 `CadModule` surface. Before API v3, `CadModule::ribbon_groups`
+/// returned `Vec<RibbonGroup>` by value. V2 cdylibs compiled against that ABI
+/// return `Box<dyn CadModule>` whose vtable uses the old signature. The runner
+/// transmutes that trait object to this v2-compatible trait so it can call the
+/// plugin's real `ribbon_groups()` without crashing.
+pub trait CadModuleV2: Send + Sync {
+    fn id(&self) -> &'static str;
+    fn title(&self) -> &'static str;
+    fn ribbon_groups(&self) -> Vec<RibbonGroup>;
+}
+
+/// Wraps the `Vec<RibbonGroup>` produced by an old v2 `CadModule` so it
+/// satisfies the current `CadModule` contract (`ribbon_groups` returns a slice).
+/// The data is leaked so the returned slice is valid for the adapter's lifetime.
+pub struct V2CadModuleAdapter {
+    id: &'static str,
+    title: &'static str,
+    groups: &'static [RibbonGroup],
+}
+
+impl V2CadModuleAdapter {
+    pub fn from_v2(v2: Box<dyn CadModuleV2>) -> Box<dyn CadModule> {
+        // Safe because the concrete type behind the v2 trait object is also
+        // Send + Sync (CadModule requires it) and we leak the data to give the
+        // slice a static lifetime.
+        let id = v2.id();
+        let title = v2.title();
+        let groups: &'static [RibbonGroup] = Box::leak(v2.ribbon_groups().into_boxed_slice());
+        Box::new(Self { id, title, groups })
+    }
+}
+
+impl CadModule for V2CadModuleAdapter {
+    fn id(&self) -> &'static str {
+        self.id
+    }
+    fn title(&self) -> &'static str {
+        self.title
+    }
+    fn ribbon_groups(&self) -> &[RibbonGroup] {
+        self.groups
+    }
 }
 
 /// Adapter that wraps an API v2 plugin (exported as `Box<dyn BuiltinPlugin>`)
@@ -63,7 +107,12 @@ impl BuiltinPlugin for V2ToV3Adapter {
         self.0.manifest()
     }
     fn ribbon(&self) -> Box<dyn CadModule> {
-        self.0.ribbon()
+        // V2 cdylibs were compiled when `CadModule::ribbon_groups` returned
+        // `Vec<RibbonGroup>`. Treat the returned trait object as `dyn
+        // CadModuleV2` (same vtable layout) so the call uses the old ABI, then
+        // convert the result to the current `CadModule` contract.
+        let v2: Box<dyn CadModuleV2> = unsafe { std::mem::transmute(self.0.ribbon()) };
+        V2CadModuleAdapter::from_v2(v2)
     }
     fn dispatch(&self, host: &mut dyn HostApi, cmd: &str) -> bool {
         self.0.dispatch(host, cmd)
