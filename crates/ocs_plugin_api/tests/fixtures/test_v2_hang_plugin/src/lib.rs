@@ -3,7 +3,7 @@
 //! Used to verify that the host times out and marks the process dead instead of
 //! blocking indefinitely.
 
-use ocs_plugin_api::host::{BuiltinPlugin, HostApi};
+use ocs_plugin_api::host::{BuiltinPluginV2, HostApi};
 use ocs_plugin_api::manifest::{ApiVersion, PluginManifest};
 use ocs_plugin_api::ribbon::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
 
@@ -50,7 +50,7 @@ impl CadModule for TestModule {
     }
 }
 
-impl BuiltinPlugin for TestV2HangPlugin {
+impl BuiltinPluginV2 for TestV2HangPlugin {
     fn manifest(&self) -> &'static PluginManifest {
         &MANIFEST
     }
@@ -76,9 +76,9 @@ pub extern "C" fn ocs_plugin_api_version() -> u32 {
 }
 
 #[no_mangle]
-pub extern "C" fn ocs_plugin_register() -> *mut Box<dyn BuiltinPlugin> {
+pub extern "C" fn ocs_plugin_register() -> *mut Box<dyn BuiltinPluginV2> {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let plugin: Box<dyn BuiltinPlugin> = Box::new(TestV2HangPlugin::new());
+        let plugin: Box<dyn BuiltinPluginV2> = Box::new(TestV2HangPlugin::new());
         Box::into_raw(Box::new(plugin))
     })) {
         Ok(ptr) => ptr,

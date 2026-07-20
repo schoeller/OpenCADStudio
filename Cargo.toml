@@ -13,6 +13,7 @@ members = [
     "crates/ocs_pythonshell",
     "crates/ocs_python_lsp",
     "crates/plugin-template-api3",
+    "crates/plugin-template-api2",
     "crates/ocs_plugin_api/tests/fixtures/test_v2_plugin",
     "crates/ocs_plugin_api/tests/fixtures/test_old_v3_plugin",
     "crates/ocs_plugin_api/tests/fixtures/test_v3_async_plugin",

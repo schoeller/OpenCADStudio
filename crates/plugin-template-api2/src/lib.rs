@@ -5,7 +5,7 @@
 //! (`HostApi` methods up to `start_interactive`). The current host must still
 //! be able to load and dispatch it.
 
-use ocs_plugin_api::host::{BuiltinPlugin, HostApi};
+use ocs_plugin_api::host::{BuiltinPluginV2, HostApi};
 use ocs_plugin_api::manifest::{ApiVersion, PluginManifest};
 use ocs_plugin_api::ribbon::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
 
@@ -47,7 +47,7 @@ impl CadModule for MyModule {
 
 struct MyPlugin;
 
-impl BuiltinPlugin for MyPlugin {
+impl BuiltinPluginV2 for MyPlugin {
     fn manifest(&self) -> &'static PluginManifest {
         &MANIFEST
     }
@@ -73,7 +73,7 @@ pub extern "C" fn ocs_plugin_api_version() -> u32 {
 }
 
 #[no_mangle]
-pub extern "C" fn ocs_plugin_register() -> *mut Box<dyn BuiltinPlugin> {
-    let plugin: Box<dyn BuiltinPlugin> = Box::new(MyPlugin);
+pub extern "C" fn ocs_plugin_register() -> *mut Box<dyn BuiltinPluginV2> {
+    let plugin: Box<dyn BuiltinPluginV2> = Box::new(MyPlugin);
     Box::into_raw(Box::new(plugin))
 }
