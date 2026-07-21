@@ -119,6 +119,13 @@ pub fn format_angle(value_rad: f64) -> String {
     }
 }
 
+/// Two interior triangles covering a quad (flat list, 6 vertices) — the
+/// click-anywhere pick surface for frame-like entities (image, OLE frame,
+/// underlay, wipeout). Corners in ring order.
+pub fn quad_pick_tris(c: &[[f64; 3]; 4]) -> Vec<[f64; 3]> {
+    vec![c[0], c[1], c[2], c[0], c[2], c[3]]
+}
+
 pub fn square_grip(id: usize, world: glam::DVec3) -> GripDef {
     GripDef {
         id,

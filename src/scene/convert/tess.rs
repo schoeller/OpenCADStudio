@@ -624,9 +624,64 @@ pub(crate) fn tessellate_entity(
             line_weight_px,
         );
     }
-    // Drawing-view borders are non-plotting aids: nothing is drawn.
-    if let EntityType::ViewBorder(_) = e {
-        return vec![];
+    // Drawing-view borders are non-plotting aids: nothing is drawn normally,
+    // but the view must still be click-selectable anywhere inside its
+    // rectangle — emit an invisible pick-only wire carrying the border rect as
+    // its interior pick surface. When selected, the rect outline is drawn so
+    // the selection has visible feedback.
+    if let EntityType::ViewBorder(b) = e {
+        let (x0, y0) = (b.min[0], b.min[1]);
+        let (x1, y1) = (b.max[0], b.max[1]);
+        if !(x1 > x0 && y1 > y0) {
+            return vec![];
+        }
+        let (pick_tris, pick_tris_low) =
+            super::tessellate::points_to_ds(crate::entities::common::quad_pick_tris(&[
+                [x0, y0, 0.0],
+                [x1, y0, 0.0],
+                [x1, y1, 0.0],
+                [x0, y1, 0.0],
+            ]));
+        let points: Vec<[f32; 3]> = if sel {
+            vec![
+                [x0 as f32, y0 as f32, 0.0],
+                [x1 as f32, y0 as f32, 0.0],
+                [x1 as f32, y1 as f32, 0.0],
+                [x0 as f32, y1 as f32, 0.0],
+                [x0 as f32, y0 as f32, 0.0],
+            ]
+        } else {
+            Vec::new()
+        };
+        return vec![WireModel {
+            taper_widths: Vec::new(),
+            world_width: 0.0,
+            fill_is_3d: false,
+            pick_tris,
+            pick_tris_low,
+            dash_from_start: false,
+            dash_align_end: None,
+            text_verts: Vec::new(),
+            name: h.value().to_string(),
+            points,
+            points_low: Vec::new(),
+            color: WireModel::SELECTED,
+            selected: sel,
+            aci: 0,
+            pattern_length: 0.0,
+            pattern: [0.0; 8],
+            line_weight_px: 1.0,
+            snap_pts: vec![],
+            tangent_geoms: vec![],
+            key_vertices: vec![
+                [x0, y0, 0.0],
+                [x1, y1, 0.0],
+            ],
+            aabb: [x0 as f32, y0 as f32, x1 as f32, y1 as f32],
+            plinegen: true,
+            fill_tris: vec![],
+            fill_tris_low: Vec::new(),
+        }];
     }
 
     // ── Dimension baked-block fast path ─────────────────────────────────────

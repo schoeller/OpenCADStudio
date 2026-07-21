@@ -136,7 +136,9 @@ impl TruckConvertible for RasterImage {
             path.is_empty() || crate::scene::model::image_model::resolve_image(path).is_some();
         if resolvable {
             return Some(TruckEntity {
-                pick_tris: Vec::new(),
+                // Interior pick surface: the image selects on a click anywhere
+                // inside its frame, not just on the border.
+                pick_tris: crate::entities::common::quad_pick_tris(&corners),
                 object: TruckObject::Lines(pts),
                 snap_pts: vec![],
                 tangent_geoms: vec![],
@@ -223,7 +225,7 @@ impl TruckConvertible for RasterImage {
         }
 
         Some(TruckEntity {
-            pick_tris: Vec::new(),
+            pick_tris: crate::entities::common::quad_pick_tris(&corners),
             object: TruckObject::Text(groups),
             snap_pts: vec![],
             tangent_geoms: vec![],
@@ -457,7 +459,9 @@ impl TruckConvertible for Wipeout {
         };
 
         Some(TruckEntity {
-            pick_tris: Vec::new(),
+            // Interior pick surface — a wipeout reads as a solid patch, so a
+            // click anywhere on it should select it.
+            pick_tris: crate::entities::common::quad_pick_tris(&corners),
             object: TruckObject::Lines(pts),
             snap_pts: vec![],
             tangent_geoms: vec![],

@@ -43,7 +43,14 @@ fn to_truck(ole: &Ole2Frame) -> TruckEntity {
     ];
     let center = glam::DVec3::new(cx, cy, z);
     TruckEntity {
-        pick_tris: Vec::new(),
+        // Interior pick surface: the frame selects on a click anywhere
+        // inside, not just on its border.
+        pick_tris: crate::entities::common::quad_pick_tris(&[
+            [x0, y0, z],
+            [x1, y0, z],
+            [x1, y1, z],
+            [x0, y1, z],
+        ]),
         object: TruckObject::Lines(pts),
         snap_pts: vec![(center, SnapHint::Center)],
         tangent_geoms: vec![],
