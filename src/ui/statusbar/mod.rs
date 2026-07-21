@@ -742,10 +742,16 @@ fn space_tab<'a>(
         let ctx_msg = Message::LayoutContextMenu(label.clone());
 
         // Use mouse_area so we can capture right-click for the context menu.
-        mouse_area(display)
-            .on_press(switch_msg)
-            .on_right_press(ctx_msg)
-            .into()
+        // PosReport records the tab's screen bounds so the context menu can
+        // anchor next to the clicked tab instead of the screen's left edge
+        // (#428).
+        crate::ui::wrap_bar::PosReport::owned(
+            format!("SB_LAYOUT_TAB:{label}"),
+            mouse_area(display)
+                .on_press(switch_msg)
+                .on_right_press(ctx_msg),
+        )
+        .into()
     }
 }
 

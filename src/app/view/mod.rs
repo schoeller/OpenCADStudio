@@ -1516,7 +1516,7 @@ impl OpenCADStudio {
             .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into());
 
         let layout_ctx_layer: Element<'_, Message> = if let Some(name) = &self.layout_context_menu {
-            layout_context_menu_overlay(name)
+            layout_context_menu_overlay(name, win)
         } else {
             iced::widget::Space::new().width(0).height(0).into()
         };

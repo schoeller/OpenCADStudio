@@ -935,7 +935,7 @@ pub(super) fn viewport_context_menu_overlay(
 
 /// A small right-click context menu rendered above the status bar.
 /// The `name` is the layout tab that was right-clicked.
-pub(super) fn layout_context_menu_overlay(name: &str) -> Element<'_, Message> {
+pub(super) fn layout_context_menu_overlay(name: &str, win: (f32, f32)) -> Element<'_, Message> {
     const MENU_BG: Color = Color {
         r: 0.17,
         g: 0.17,
@@ -1009,16 +1009,12 @@ pub(super) fn layout_context_menu_overlay(name: &str) -> Element<'_, Message> {
     .on_press(Message::LayoutContextMenuClose)
     .on_right_press(Message::LayoutContextMenuClose);
 
-    // Position the menu above the status bar at the left.
-    let positioned = container(menu)
-        .align_bottom(Fill)
-        .align_left(Fill)
-        .padding(iced::Padding {
-            top: 0.0,
-            right: 0.0,
-            bottom: 30.0,
-            left: 8.0,
-        });
+    // Anchor the menu above the status bar next to the right-clicked tab —
+    // its bounds were recorded by the tab's PosReport wrapper (#428). A
+    // missing report (shouldn't happen) falls back to the left edge.
+    let pill = crate::ui::wrap_bar::dropdown_bounds(&format!("SB_LAYOUT_TAB:{name}"));
+    let positioned =
+        crate::ui::popup::position_statusbar_popup(menu.into(), pill, win, 160.0, false);
 
     stack![catcher, positioned].into()
 }

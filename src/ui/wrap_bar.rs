@@ -31,7 +31,7 @@ thread_local! {
     /// Screen bounds of every ribbon dropdown button, keyed by dropdown id, so
     /// an open dropdown's overlay can anchor directly below its widget at any
     /// size. Written by `PosReport` on draw, read by `dropdown_bounds`.
-    static DD_BOUNDS: RefCell<FxHashMap<&'static str, Rectangle>> =
+    static DD_BOUNDS: RefCell<FxHashMap<String, Rectangle>> =
         RefCell::new(FxHashMap::default());
 }
 
@@ -871,14 +871,22 @@ impl<'a> From<DensitySwap<'a>> for Element<'a, Message> {
 /// A transparent wrapper that records its child's screen bounds under `id` on
 /// every draw, so an open dropdown can anchor its overlay just below the widget.
 pub struct PosReport<'a> {
-    id: &'static str,
+    id: std::borrow::Cow<'static, str>,
     child: Element<'a, Message>,
 }
 
 impl<'a> PosReport<'a> {
     pub fn new(id: &'static str, child: impl Into<Element<'a, Message>>) -> Self {
         Self {
-            id,
+            id: std::borrow::Cow::Borrowed(id),
+            child: child.into(),
+        }
+    }
+
+    /// Report under a runtime-built id (e.g. one per layout tab).
+    pub fn owned(id: String, child: impl Into<Element<'a, Message>>) -> Self {
+        Self {
+            id: std::borrow::Cow::Owned(id),
             child: child.into(),
         }
     }
@@ -971,7 +979,7 @@ impl<'a> Widget<Message, Theme, Renderer> for PosReport<'a> {
         viewport: &Rectangle,
     ) {
         DD_BOUNDS.with(|m| {
-            m.borrow_mut().insert(self.id, layout.bounds());
+            m.borrow_mut().insert(self.id.to_string(), layout.bounds());
         });
         self.child.as_widget().draw(
             &tree.children[0],
