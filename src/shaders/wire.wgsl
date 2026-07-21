@@ -42,28 +42,25 @@ struct Uniforms {
 }
 @group(0) @binding(0) var<uniform> u: Uniforms;
 
+// Scalars are packed into vec4 attributes: WebGL2 / WebGPU cap vertex
+// attributes at 16, and the unpacked layout had grown to 17 — the wire
+// pipeline failed to build and the web viewport drew no lines at all (#414).
 struct InstanceIn {
     @location(0) pos_a:          vec3<f32>,
     @location(1) pos_b:          vec3<f32>,
     @location(2) color:          vec4<f32>,
-    @location(3) distance_a:     f32,
-    @location(4) distance_b:     f32,
-    @location(5) half_width:     f32,
-    @location(6) pattern_length: f32,
-    @location(7) pat0:           vec4<f32>,
-    @location(8) pat1:           vec4<f32>,
-    @location(9) draw_depth:     f32,
+    // distance_a, distance_b, half_width, pattern_length
+    @location(3) dists:          vec4<f32>,
+    @location(4) pat0:           vec4<f32>,
+    @location(5) pat1:           vec4<f32>,
+    // draw_depth, align_end ("A"-type end-dash length), align_total (total
+    // wire length), world_half_width (wide-polyline band; 0 = normal wire)
+    @location(6) misc:           vec4<f32>,
     // Double-single low residuals of the endpoints.
-    @location(10) pos_a_low:     vec3<f32>,
-    @location(11) pos_b_low:     vec3<f32>,
-    // "A"-type endpoint alignment: end-dash length + total wire length.
-    @location(12) align_end:     f32,
-    @location(13) align_total:   f32,
-    // World-space half-width for a wide-polyline band. 0 = normal wire.
-    @location(14) world_half_width: f32,
+    @location(7) pos_a_low:      vec3<f32>,
+    @location(8) pos_b_low:      vec3<f32>,
     // Per-endpoint world half-width for a tapered band (0 = use the constant).
-    @location(15) world_hw_a: f32,
-    @location(16) world_hw_b: f32,
+    @location(9) taper:          vec2<f32>,
 }
 
 // Draw-order depth bias: shifts clip-space z so 2D entities of different
@@ -153,8 +150,8 @@ fn resolve_hw(taper: f32, world_hw: f32, px_hw: f32) -> f32 {
     // A tapered band interpolates a per-endpoint world half-width across the
     // segment; a constant band uses `world_half_width`. Both clamp to a
     // half-pixel so a zoomed-out band stays a hairline instead of vanishing.
-    let hw_a = resolve_hw(in.world_hw_a, in.world_half_width, in.half_width);
-    let hw_b = resolve_hw(in.world_hw_b, in.world_half_width, in.half_width);
+    let hw_a = resolve_hw(in.taper.x, in.misc.w, in.dists.z);
+    let hw_b = resolve_hw(in.taper.y, in.misc.w, in.dists.z);
     let hw = mix(hw_a, hw_b, which_end);
 
     // Extend the quad longitudinally by the end half-width and let the
@@ -169,7 +166,7 @@ fn resolve_hw(taper: f32, world_hw: f32, px_hw: f32) -> f32 {
     // Smallest non-zero dash / gap element, in world units. Used by
     // the fragment stage to decide when the pattern's finest feature
     // would render below one pixel and should collapse to a solid line.
-    var min_elem: f32 = in.pattern_length;
+    var min_elem: f32 = in.dists.w;
     let elems = array<f32, 8>(
         in.pat0.x, in.pat0.y, in.pat0.z, in.pat0.w,
         in.pat1.x, in.pat1.y, in.pat1.z, in.pat1.w,
@@ -181,20 +178,20 @@ fn resolve_hw(taper: f32, world_hw: f32, px_hw: f32) -> f32 {
 
     var out: VertexOut;
     out.clip_pos       = final_clip;
-    out.clip_pos.z     = out.clip_pos.z - in.draw_depth * DRAW_ORDER_BIAS * out.clip_pos.w;
+    out.clip_pos.z     = out.clip_pos.z - in.misc.x * DRAW_ORDER_BIAS * out.clip_pos.w;
     out.color          = in.color;
     // Dash arc-length, extrapolated over the cap overhang so the pattern
     // stays continuous through a joint.
-    out.distance       = mix(in.distance_a, in.distance_b, which_end)
+    out.distance       = mix(in.dists.x, in.dists.y, which_end)
         + ext * hw * u.world_per_pixel;
     out.cap            = vec2<f32>(which_end * seg_len + ext * hw, hw * side);
     out.cap_ends       = vec3<f32>(seg_len, hw_a, hw_b);
-    out.pattern_length = in.pattern_length;
+    out.pattern_length = in.dists.w;
     out.pat0           = in.pat0;
     out.pat1           = in.pat1;
     out.min_elem       = min_elem;
-    out.align_end      = in.align_end;
-    out.align_total    = in.align_total;
+    out.align_end      = in.misc.y;
+    out.align_total    = in.misc.z;
     return out;
 }
 

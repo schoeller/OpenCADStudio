@@ -195,26 +195,25 @@ pub struct WireInstance {
 impl WireInstance {
     pub fn layout<'a>() -> wgpu::VertexBufferLayout<'a> {
         // Offsets come from the struct layout (must match the shader location
-        // indices in wire.wgsl). The low residuals are appended at locations
-        // 10/11 so the existing 0-9 stay stable.
+        // indices in wire.wgsl). Scalars ride in PACKED vec4/vec2 attributes —
+        // WebGL2 / WebGPU cap vertex attributes at 16 and the one-scalar-per-
+        // location layout had grown to 17, so the pipeline failed to build and
+        // the web viewport drew no lines at all (#414). The struct fields are
+        // laid out so each packed group is contiguous.
         const ATTRS: &[wgpu::VertexAttribute] = &[
             wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, pos_a) as u64,          shader_location: 0,  format: wgpu::VertexFormat::Float32x3 },
             wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, pos_b) as u64,          shader_location: 1,  format: wgpu::VertexFormat::Float32x3 },
             wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, color) as u64,          shader_location: 2,  format: wgpu::VertexFormat::Unorm8x4  },
-            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, distance_a) as u64,     shader_location: 3,  format: wgpu::VertexFormat::Float32   },
-            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, distance_b) as u64,     shader_location: 4,  format: wgpu::VertexFormat::Float32   },
-            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, half_width) as u64,     shader_location: 5,  format: wgpu::VertexFormat::Float32   },
-            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, pattern_length) as u64, shader_location: 6,  format: wgpu::VertexFormat::Float32   },
-            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, pat0) as u64,           shader_location: 7,  format: wgpu::VertexFormat::Float32x4 },
-            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, pat1) as u64,           shader_location: 8,  format: wgpu::VertexFormat::Float32x4 },
-            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, draw_depth) as u64,     shader_location: 9,  format: wgpu::VertexFormat::Float32   },
-            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, pos_a_low) as u64,      shader_location: 10, format: wgpu::VertexFormat::Float32x3 },
-            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, pos_b_low) as u64,      shader_location: 11, format: wgpu::VertexFormat::Float32x3 },
-            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, align_end) as u64,      shader_location: 12, format: wgpu::VertexFormat::Float32   },
-            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, align_total) as u64,    shader_location: 13, format: wgpu::VertexFormat::Float32   },
-            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, world_half_width) as u64, shader_location: 14, format: wgpu::VertexFormat::Float32 },
-            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, world_hw_a) as u64, shader_location: 15, format: wgpu::VertexFormat::Float32 },
-            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, world_hw_b) as u64, shader_location: 16, format: wgpu::VertexFormat::Float32 },
+            // dists = (distance_a, distance_b, half_width, pattern_length)
+            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, distance_a) as u64,     shader_location: 3,  format: wgpu::VertexFormat::Float32x4 },
+            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, pat0) as u64,           shader_location: 4,  format: wgpu::VertexFormat::Float32x4 },
+            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, pat1) as u64,           shader_location: 5,  format: wgpu::VertexFormat::Float32x4 },
+            // misc = (draw_depth, align_end, align_total, world_half_width)
+            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, draw_depth) as u64,     shader_location: 6,  format: wgpu::VertexFormat::Float32x4 },
+            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, pos_a_low) as u64,      shader_location: 7,  format: wgpu::VertexFormat::Float32x3 },
+            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, pos_b_low) as u64,      shader_location: 8,  format: wgpu::VertexFormat::Float32x3 },
+            // taper = (world_hw_a, world_hw_b)
+            wgpu::VertexAttribute { offset: std::mem::offset_of!(WireInstance, world_hw_a) as u64,     shader_location: 9,  format: wgpu::VertexFormat::Float32x2 },
         ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<WireInstance>() as u64,
