@@ -1237,6 +1237,7 @@ pub(super) fn on_tick(&mut self, t: Instant) -> Task<Message> {
                                 let guide = crate::scene::WireModel {
                                     taper_widths: Vec::new(),
                                     world_width: 0.0,
+                                    depth_override: None,
                                     fill_is_3d: false,
                                     pick_tris: Vec::new(),
                                     pick_tris_low: Vec::new(),
@@ -1277,6 +1278,7 @@ pub(super) fn on_tick(&mut self, t: Instant) -> Task<Message> {
                             previews.push(crate::scene::WireModel {
                                 taper_widths: Vec::new(),
                                 world_width: 0.0,
+                                depth_override: None,
                                 fill_is_3d: false,
                                 pick_tris: Vec::new(),
                                 pick_tris_low: Vec::new(),

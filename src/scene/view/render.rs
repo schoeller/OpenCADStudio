@@ -60,7 +60,7 @@ pub struct ViewportData {
     /// by the wire / face3d pipelines as a clip-z bias. WireModels carry no
     /// depth field (84 construction sites); the bias is looked up by handle
     /// at GPU-upload time from this map instead.
-    pub(in crate::scene) draw_depths: Arc<rustc_hash::FxHashMap<u64, f32>>,
+    pub(in crate::scene) draw_depths: Arc<rustc_hash::FxHashMap<u64, [f32; 2]>>,
     pub(in crate::scene) hatches: Arc<Vec<HatchModel>>,
     /// Wipeout fills — rendered in a separate pass AFTER wires.
     pub(in crate::scene) wipeout_hatches: Arc<Vec<HatchModel>>,

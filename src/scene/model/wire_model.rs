@@ -130,6 +130,14 @@ pub struct WireModel {
     /// exactly like `points` — no separate collector pass. The renderer
     /// gathers these across all wires into the text vertex buffer.
     pub text_verts: Vec<crate::scene::pipeline::text_gpu::TextVertex>,
+    /// Block-local composed draw-order offset in (-1, 1) for a wire that must
+    /// order against its *siblings inside the block* — currently wide-polyline
+    /// bands, whose solid area would otherwise cover later-drawn siblings.
+    /// `None` (all other wires) = the whole-insert depth resolved from `name`.
+    /// `Some(local)` composes at draw time: `insert_depth + local * insert_half`,
+    /// mirroring how exploded block fills seed their depth, so bands and fills
+    /// from the same block interleave by the block's internal draw order.
+    pub depth_override: Option<f32>,
     /// `true` when [`fill_tris`] is a real 3-D surface (PolyfaceMesh /
     /// PolygonMesh face) that must render with hidden-surface depth and only in
     /// shaded modes. `false` for a flat 2-D overlay fill (SOLID arrowhead,
@@ -186,6 +194,7 @@ impl WireModel {
         Self {
             taper_widths: Vec::new(),
             world_width: 0.0,
+            depth_override: None,
             fill_is_3d: false,
             pick_tris: Vec::new(),
             pick_tris_low: Vec::new(),
@@ -419,6 +428,7 @@ impl Default for WireModel {
             dash_align_end: None,
             fill_tris: Vec::new(),
             fill_tris_low: Vec::new(),
+            depth_override: None,
             fill_is_3d: false,
             pick_tris: Vec::new(),
             pick_tris_low: Vec::new(),

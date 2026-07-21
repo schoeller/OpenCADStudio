@@ -754,7 +754,7 @@ impl Scene {
                 if self.selected.contains(&handle) {
                     m.color = [0.15, 0.55, 1.00, m.color[3]];
                 }
-                let d = depth_map.get(&handle.value()).copied().unwrap_or(0.0);
+                let d = depth_map.get(&handle.value()).map_or(0.0, |d| d[0]);
                 m.draw_depth = d;
                 if let Some(b) = &mut backdrop {
                     b.draw_depth = d;
@@ -814,6 +814,21 @@ impl Scene {
                 .unwrap_or(false)
         };
         let mut models: Vec<HatchModel> = Vec::new();
+        // Draw-order composition (#408): every fill inherits its INSERT's
+        // draw-depth slot, offset by the child's rank INSIDE its block
+        // (draw_depth_map ranks per owning block), scaled to stay within the
+        // insert's half-gap in the host ordering. Without this every block /
+        // xref fill landed at depth 0 and the stack's LIFO pop reversed the
+        // block's internal stacking.
+        let depth_map = self.draw_depth_map();
+        let block_count = |name: &str| -> usize {
+            self.document
+                .block_records
+                .get(name)
+                .map(|br| br.entity_handles.len())
+                .unwrap_or(1)
+                .max(1)
+        };
         // Exploding an INSERT materializes (clones) every child of its block —
         // including 3D solids that each carry megabytes of SAB geometry — just
         // to scan the result for hatch fills. On xref-heavy drawings whose
@@ -874,17 +889,22 @@ impl Scene {
                 &self.document,
                 &ins.common.layer,
             );
+            let [base_depth, half_gap] = depth_map
+                .get(&ins.common.handle.value())
+                .copied()
+                .unwrap_or([0.0, 0.0]);
             let mut stack: Vec<(
                 EntityType,
                 usize,
                 [f32; 4],
                 crate::scene::view::render::InheritStyle,
+                (f32, f32),
             )> = ins
                 .explode_from_document(&self.document)
                 .into_iter()
-                .map(|e| (normalize(e), 0usize, ins_color, l0))
+                .map(|e| (normalize(e), 0usize, ins_color, l0, (base_depth, half_gap)))
                 .collect();
-            while let Some((sub, depth, sub_ins_color, sub_l0)) = stack.pop() {
+            while let Some((sub, depth, sub_ins_color, sub_l0, (d_base, d_half))) = stack.pop() {
                 match sub {
                     EntityType::Insert(nins) => {
                         if depth >= 32 {
@@ -916,8 +936,22 @@ impl Scene {
                                 &nins.common.layer,
                             )
                         };
+                        // Nested insert: its slot = parent slot + its rank in
+                        // the parent block, subdivided by its own block size.
+                        let nd_base = d_base
+                            + depth_map
+                                .get(&nins.common.handle.value())
+                                .map_or(0.0, |d| d[0])
+                                * d_half;
+                        let nd_half = d_half / (block_count(&nins.block_name) as f32 + 1.0);
                         for e in nins.explode_from_document(&self.document) {
-                            stack.push((normalize(e), depth + 1, child_ins_color, child_l0));
+                            stack.push((
+                                normalize(e),
+                                depth + 1,
+                                child_ins_color,
+                                child_l0,
+                                (nd_base, nd_half),
+                            ));
                         }
                     }
                     EntityType::Hatch(dxf) => {
@@ -942,6 +976,12 @@ impl Scene {
                         if let Some(mut model) =
                             Self::hatch_model_from_dxf(&dxf, color)
                         {
+                            // In-block rank → within the insert's depth slot.
+                            model.draw_depth = d_base
+                                + depth_map
+                                    .get(&dxf.common.handle.value())
+                                    .map_or(0.0, |d| d[0])
+                                    * d_half;
                             if let Some(poly) = &clip_poly {
                                 let clipped = pick::xclip::clip_hatch_boundary(
                                     &model.boundary,

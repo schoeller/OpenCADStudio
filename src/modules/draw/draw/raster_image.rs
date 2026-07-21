@@ -110,6 +110,7 @@ impl CadCommand for ImageCommand {
         Some(WireModel {
             taper_widths: Vec::new(),
             world_width: 0.0,
+            depth_override: None,
             fill_is_3d: false,
             pick_tris: Vec::new(),
             pick_tris_low: Vec::new(),

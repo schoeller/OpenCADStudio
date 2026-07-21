@@ -488,17 +488,23 @@ pub(crate) fn emit_wire_native(
 
 /// Looks up a wire's draw-order depth from the per-entity map using the
 /// handle encoded in its `name`. Falls back to 0.0 (transient / preview
-/// wires that carry no document handle).
+/// wires that carry no document handle). A wire carrying a block-local
+/// `depth_override` (a wide-polyline band inside a block) composes it into
+/// the insert's own sub-range so the band orders against its block siblings.
 pub(crate) fn wire_draw_depth(
     wire: &WireModel,
-    depth_map: &rustc_hash::FxHashMap<u64, f32>,
+    depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
 ) -> f32 {
-    wire
+    let base = wire
         .name
         .parse::<u64>()
         .ok()
-        .and_then(|h| depth_map.get(&h).copied())
-        .unwrap_or(0.0)
+        .and_then(|h| depth_map.get(&h).copied());
+    match (base, wire.depth_override) {
+        (Some([d, half]), Some(local)) => d + local * half,
+        (Some([d, _]), None) => d,
+        (None, _) => 0.0,
+    }
 }
 
 /// Build the shared per-wire `WireConst` storage buffer and its bind group
@@ -546,7 +552,7 @@ impl WireGpu {
     pub fn from_run(
         device: &wgpu::Device,
         wires: &[WireModel],
-        depth_map: &rustc_hash::FxHashMap<u64, f32>,
+        depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
         mesh_edge: bool,
         const_bgl: Option<&wgpu::BindGroupLayout>,
     ) -> Vec<Self> {
@@ -632,7 +638,7 @@ impl WireGpu {
     pub fn from_batch(
         device: &wgpu::Device,
         wires: &[WireModel],
-        depth_map: &rustc_hash::FxHashMap<u64, f32>,
+        depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
         const_bgl: Option<&wgpu::BindGroupLayout>,
     ) -> Vec<Self> {
         let total_segs: usize = wires.iter().map(|w| w.points.len().saturating_sub(1)).sum();

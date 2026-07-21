@@ -372,6 +372,7 @@ pub fn tessellate(
                 elem_wires.push(WireModel {
                     taper_widths: Vec::new(),
                     world_width: 0.0,
+                    depth_override: None,
                     fill_is_3d: false,
                     pick_tris: Vec::new(),
                     pick_tris_low: Vec::new(),
@@ -664,6 +665,7 @@ pub fn tessellate(
                                     wires.push(WireModel {
                                         taper_widths: Vec::new(),
                                         world_width: 0.0,
+                                        depth_override: None,
                                         fill_is_3d: false,
                                         pick_tris: Vec::new(),
                                         pick_tris_low: Vec::new(),
@@ -703,6 +705,7 @@ pub fn tessellate(
                                     wires.push(WireModel {
                                         taper_widths: Vec::new(),
                                         world_width: 0.0,
+                                        depth_override: None,
                                         fill_is_3d: false,
                                         pick_tris: Vec::new(),
                                         pick_tris_low: Vec::new(),
@@ -749,6 +752,7 @@ pub fn tessellate(
                         wires.push(WireModel {
                             taper_widths: Vec::new(),
                             world_width: 0.0,
+                            depth_override: None,
                             fill_is_3d: false,
                             pick_tris: Vec::new(),
                             pick_tris_low: Vec::new(),
@@ -776,6 +780,7 @@ pub fn tessellate(
                     wires.push(WireModel {
                         taper_widths: Vec::new(),
                         world_width: 0.0,
+                        depth_override: None,
                         fill_is_3d: false,
                         pick_tris: Vec::new(),
                         pick_tris_low: Vec::new(),
@@ -833,6 +838,7 @@ pub fn tessellate(
                         out.push(WireModel {
                             taper_widths: Vec::new(),
                             world_width: 0.0,
+                            depth_override: None,
                             fill_is_3d: false,
                             pick_tris: Vec::new(),
                             pick_tris_low: Vec::new(),
@@ -872,6 +878,7 @@ pub fn tessellate(
                         out.push(WireModel {
                             taper_widths: Vec::new(),
                             world_width: 0.0,
+                            depth_override: None,
                             fill_is_3d: false,
                             pick_tris: Vec::new(),
                             pick_tris_low: Vec::new(),
@@ -908,6 +915,7 @@ pub fn tessellate(
                     out.push(WireModel {
                         taper_widths: Vec::new(),
                         world_width: 0.0,
+                        depth_override: None,
                         fill_is_3d: false,
                         pick_tris: Vec::new(),
                         pick_tris_low: Vec::new(),
@@ -937,6 +945,7 @@ pub fn tessellate(
                     out.push(WireModel {
                         taper_widths: Vec::new(),
                         world_width: 0.0,
+                        depth_override: None,
                         fill_is_3d: false,
                         pick_tris: Vec::new(),
                         pick_tris_low: Vec::new(),
@@ -988,6 +997,7 @@ pub fn tessellate(
                         return vec![WireModel {
                             taper_widths: Vec::new(),
                             world_width: 0.0,
+                            depth_override: None,
                             fill_is_3d: false,
                             pick_tris: Vec::new(),
                             pick_tris_low: Vec::new(),
@@ -1038,6 +1048,7 @@ pub fn tessellate(
                     return vec![WireModel {
                         taper_widths: Vec::new(),
                         world_width: 0.0,
+                        depth_override: None,
                         fill_is_3d: false,
                         pick_tris: Vec::new(),
                         pick_tris_low: Vec::new(),
@@ -1081,6 +1092,7 @@ pub fn tessellate(
                     return vec![WireModel {
                         taper_widths: Vec::new(),
                         world_width: polyline_band_width(entity),
+                        depth_override: None,
                         fill_is_3d: false,
                         pick_tris,
                         pick_tris_low,
@@ -1173,6 +1185,7 @@ pub fn tessellate(
                     out.push(WireModel {
                         taper_widths: Vec::new(),
                         world_width: 0.0,
+                        depth_override: None,
                         fill_is_3d: false,
                         pick_tris,
                         pick_tris_low,
@@ -1233,6 +1246,7 @@ pub fn tessellate(
                         fill_tris,
                         fill_tris_low,
                         fill_is_3d,
+                        depth_override: None,
                     });
                 }
 
@@ -1240,6 +1254,7 @@ pub fn tessellate(
                     out.push(WireModel {
                         taper_widths: Vec::new(),
                         world_width: 0.0,
+                        depth_override: None,
                         fill_is_3d: false,
                         pick_tris: Vec::new(),
                         pick_tris_low: Vec::new(),
@@ -1282,6 +1297,7 @@ pub fn tessellate(
                 return vec![WireModel {
                     taper_widths: Vec::new(),
                     world_width: polyline_band_width(entity),
+                    depth_override: None,
                     fill_is_3d: false,
                     pick_tris,
                     pick_tris_low,
@@ -1325,6 +1341,7 @@ pub fn tessellate(
                 return vec![WireModel {
                     taper_widths: widths,
                     world_width,
+                    depth_override: None,
                     fill_is_3d: false,
                     pick_tris,
                     pick_tris_low,
@@ -1424,6 +1441,7 @@ pub fn tessellate(
     vec![WireModel {
         taper_widths: Vec::new(),
         world_width: 0.0,
+        depth_override: None,
         fill_is_3d: false,
         pick_tris,
         pick_tris_low,

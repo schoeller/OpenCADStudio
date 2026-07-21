@@ -656,6 +656,7 @@ pub(crate) fn tessellate_entity(
         return vec![WireModel {
             taper_widths: Vec::new(),
             world_width: 0.0,
+            depth_override: None,
             fill_is_3d: false,
             pick_tris,
             pick_tris_low,
@@ -995,6 +996,7 @@ pub(crate) fn tessellate_entity(
         let marker = WireModel {
             taper_widths: Vec::new(),
             world_width: 0.0,
+            depth_override: None,
             fill_is_3d: false,
             pick_tris: Vec::new(),
             pick_tris_low: Vec::new(),
@@ -1376,6 +1378,7 @@ fn lod_stub_wire(
     WireModel {
         taper_widths: Vec::new(),
         world_width: 0.0,
+        depth_override: None,
         fill_is_3d: false,
         pick_tris: Vec::new(),
         pick_tris_low: Vec::new(),
@@ -1464,6 +1467,7 @@ fn lod_stub_wire_3d(
     WireModel {
         taper_widths: Vec::new(),
         world_width: 0.0,
+        depth_override: None,
         fill_is_3d: false,
         pick_tris: Vec::new(),
         pick_tris_low: Vec::new(),

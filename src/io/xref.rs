@@ -5,7 +5,7 @@ use acadrust::entities::{Block, BlockEnd};
 use acadrust::tables::TableEntry;
 use acadrust::types::{Handle, Vector3};
 use acadrust::{CadDocument, EntityType};
-use rustc_hash::FxHashMap as HashMap;
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::path::{Path, PathBuf};
 
 /// Status of an external reference block.
@@ -234,14 +234,40 @@ fn merge_xref_into_block(
 
     // ── Entities ────────────────────────────────────────────────────────
     let xref_ms_handle = xref_doc.header.model_space_block_handle;
-    let entities: Vec<EntityType> = xref_doc
-        .entities()
-        .filter(|e| !matches!(e, EntityType::Block(_) | EntityType::BlockEnd(_)))
-        .cloned()
+    // Merge in each block's DISPLAY order: a block record's entity_handles
+    // chain is the draw order inside that block, while the flat entity list
+    // is stream order — merging in stream order scrambled the xref's own
+    // stacking (fills over outlines etc.), since the host ranks draw order
+    // by the freshly-allocated handles. Entities missing from every chain
+    // keep their stream order at the end.
+    let ordered: Vec<Handle> = {
+        let mut ordered: Vec<Handle> = Vec::new();
+        let mut seen: HashSet<Handle> = HashSet::default();
+        for br in xref_doc.block_records.iter() {
+            for &h in &br.entity_handles {
+                if seen.insert(h) {
+                    ordered.push(h);
+                }
+            }
+        }
+        for e in xref_doc.entities() {
+            let h = e.common().handle;
+            if seen.insert(h) {
+                ordered.push(h);
+            }
+        }
+        ordered
+    };
+    let entities: Vec<(Handle, EntityType)> = ordered
+        .into_iter()
+        .filter_map(|h| xref_doc.get_entity(h).map(|e| (h, e.clone())))
+        .filter(|(_, e)| !matches!(e, EntityType::Block(_) | EntityType::BlockEnd(_)))
         .collect();
 
+    // old xref-doc entity handle → merged host handle, for the sortents copy.
+    let mut entity_handle_map: HashMap<Handle, Handle> = HashMap::default();
     let mut dropped = 0usize;
-    for mut entity in entities {
+    for (old_h, mut entity) in entities {
         // Drop parser-garbage entities (bad normals / vertex counts / inf
         // coords) before they enter the host doc — they trigger huge
         // allocations and unbounded recursion in the wire pipeline.
@@ -285,7 +311,48 @@ fn merge_xref_into_block(
         entity.common_mut().owner_handle = new_owner;
         // Clear the foreign handle so acadrust assigns a new one.
         set_handle(&mut entity, Handle::NULL);
-        let _ = doc.add_entity(entity);
+        if let Ok(new_h) = doc.add_entity(entity) {
+            entity_handle_map.insert(old_h, new_h);
+        }
+    }
+
+    // ── Draw-order overrides ────────────────────────────────────────────
+    // Re-point the xref's SortEntitiesTables at the merged blocks with the
+    // merged entity handles, so an explicit DRAWORDER inside the xref
+    // survives the merge.
+    {
+        use acadrust::objects::{ObjectType, SortEntitiesTable};
+        for obj in xref_doc.objects.values() {
+            let ObjectType::SortEntitiesTable(t) = obj else {
+                continue;
+            };
+            if t.is_empty() {
+                continue;
+            }
+            let new_block = if t.block_owner_handle == xref_ms_handle {
+                br_handle
+            } else if let Some(&h) = br_handle_map.get(&t.block_owner_handle) {
+                h
+            } else {
+                continue;
+            };
+            let mut nt = SortEntitiesTable::new();
+            nt.handle = doc.allocate_handle();
+            nt.block_owner_handle = new_block;
+            for e in t.entries() {
+                let Some(&ne) = entity_handle_map.get(&e.entity_handle) else {
+                    continue;
+                };
+                let ns = entity_handle_map
+                    .get(&e.sort_handle)
+                    .copied()
+                    .unwrap_or(e.sort_handle);
+                nt.add_entry(ne, ns);
+            }
+            if !nt.is_empty() {
+                doc.objects.insert(nt.handle, ObjectType::SortEntitiesTable(nt));
+            }
+        }
     }
     dropped
 }

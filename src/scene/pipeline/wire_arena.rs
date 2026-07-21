@@ -105,7 +105,7 @@ pub fn is_mesh_edge(w: &WireModel, mesh_names: &rustc_hash::FxHashSet<u64>) -> b
 ///     Surface) are excluded from `draw_depth_map`, so their fallback edge wires
 ///     get draw_depth 0.0. Two coincident opaque such wires share a z-bias and
 ///     resolve by submission order, which a tail relocation would flip.
-fn append_unsafe(wires: &[&WireModel], depth_map: &FxHashMap<u64, f32>) -> bool {
+fn append_unsafe(wires: &[&WireModel], depth_map: &FxHashMap<u64, [f32; 2]>) -> bool {
     wires.iter().any(|w| {
         w.color[3] < 0.999
             || handle_of(w).map_or(true, |h| !depth_map.contains_key(&h.value()))
@@ -202,7 +202,7 @@ impl WireArena {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         wires: &[&WireModel],
-        depth_map: &FxHashMap<u64, f32>,
+        depth_map: &FxHashMap<u64, [f32; 2]>,
         const_bgl: &wgpu::BindGroupLayout,
         mesh_edge: bool,
     ) -> Option<Self> {
@@ -288,7 +288,7 @@ impl WireArena {
         queue: &wgpu::Queue,
         changes: &[(Handle, ChangeKind)],
         wires: &[&WireModel],
-        depth_map: &FxHashMap<u64, f32>,
+        depth_map: &FxHashMap<u64, [f32; 2]>,
     ) -> bool {
         let Some(ranges) = handle_ranges(wires) else {
             return false;
@@ -405,13 +405,27 @@ impl WireArena {
             // entity's z-bias. Refresh each live slab's draw_depth from the new
             // depth map and re-upload the whole (small) const buffer; the instance
             // buffer is untouched.
+            // A slab whose consts carry DIFFERENT depths holds block-band wires
+            // with composed per-child offsets (`depth_override`); a flat refresh
+            // to the entity's base depth would erase them. Fall back to a full
+            // rebuild, which recomputes each wire's composed depth.
+            if !self.mesh_edge {
+                for slab in self.slabs.values() {
+                    let first = self.consts_cpu[slab.const_off as usize].draw_depth;
+                    for k in 1..slab.const_len {
+                        if self.consts_cpu[(slab.const_off + k) as usize].draw_depth != first {
+                            return false;
+                        }
+                    }
+                }
+            }
             for (h, slab) in &self.slabs {
                 // Mesh-edge wires keep depth 0 (no draw-order bias); regular wires
                 // take the re-normalised map value.
                 let dd = if self.mesh_edge {
                     0.0
                 } else {
-                    depth_map.get(&h.value()).copied().unwrap_or(0.0)
+                    depth_map.get(&h.value()).map_or(0.0, |d| d[0])
                 };
                 for k in 0..slab.const_len {
                     self.consts_cpu[(slab.const_off + k) as usize].draw_depth = dd;

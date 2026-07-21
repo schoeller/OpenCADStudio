@@ -85,6 +85,11 @@ pub struct LocalWire {
     /// expand-time: transform corners by the Insert transform → world AABB
     /// → test against the camera's world-space view rect.
     pub aabb_local: [f32; 4],
+    /// This child's signed draw-order rank in (-1,1) within its owning block
+    /// (from the scene draw-depth map, so SortEntitiesTable overrides apply).
+    /// Composed at expand time into a `depth_override` for wide-polyline
+    /// bands so a band orders against its block siblings.
+    pub local_rank: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -119,6 +124,9 @@ pub struct NestedRef {
     /// expansion it is mapped to world by the accumulated transform and the
     /// nested wires are clipped to it.
     pub clip_poly: Option<Vec<[f64; 2]>>,
+    /// The nested INSERT's own signed draw-order rank in (-1,1) within the
+    /// parent block — narrows the depth sub-range its children may occupy.
+    pub local_rank: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -135,6 +143,11 @@ pub struct BlockDefn {
     /// the wire renderer is 2D-dominant. Expressed in this defn's *offset*
     /// Absolute world-space XY (the double-single render path keeps it precise).
     pub aabb_local: [f32; 4],
+    /// Raw entity count of the source block record (`entity_handles.len()`).
+    /// Divisor for nested depth composition: a nested insert's children get a
+    /// sub-range of `parent_scale / (child_count + 1)` — the same formula the
+    /// exploded-fill path uses, so bands and fills stay on one depth scale.
+    pub child_count: usize,
 }
 
 #[derive(Default, Debug)]
@@ -156,7 +169,15 @@ impl BlockCache {
     /// included too. The Model_Space / Paper_Space block_records are skipped
     /// because their entities are emitted as top-level wires, not via the
     /// cache.
-    pub fn build(doc: &CadDocument, anno_scale: f32, bg_color: [f32; 4]) -> Self {
+    pub fn build(
+        doc: &CadDocument,
+        anno_scale: f32,
+        bg_color: [f32; 4],
+        // Scene draw-depth map ([depth, half] per handle) — source of each
+        // block child's in-block rank, so band depth composition agrees with
+        // the SortEntitiesTable-aware ranking the fill explosion uses.
+        depth_map: &HashMap<u64, [f32; 2]>,
+    ) -> Self {
         use crate::par::prelude::*;
         let mut cache = Self::new();
         let referenced = collect_referenced_blocks(doc);
@@ -168,7 +189,12 @@ impl BlockCache {
         // post-pass (it resolves nested references and is comparatively cheap).
         cache.defns = referenced
             .par_iter()
-            .map(|name| (name.clone(), Arc::new(build_defn(doc, name, anno_scale, bg_color))))
+            .map(|name| {
+                (
+                    name.clone(),
+                    Arc::new(build_defn(doc, name, anno_scale, bg_color, depth_map)),
+                )
+            })
             .collect();
         cache.compute_block_aabbs(&referenced);
         cache
@@ -285,6 +311,7 @@ fn build_defn(
     block_name: &str,
     anno_scale: f32,
     bg_color: [f32; 4],
+    depth_map: &HashMap<u64, [f32; 2]>,
 ) -> BlockDefn {
     let br = match doc.block_records.get(block_name) {
         Some(br) => br,
@@ -326,14 +353,16 @@ fn build_defn(
                 continue
             }
             EntityType::Insert(nested_ins) => {
-                subs.push(LocalSub::Nested(build_nested_ref(nested_ins, doc, bg_color)));
+                subs.push(LocalSub::Nested(build_nested_ref(
+                    nested_ins, doc, bg_color, depth_map,
+                )));
             }
             _ => {
                 // A wide polyline inside a block carries its `world_width` on
                 // the LocalWire; `emit_wire` scales it by the insert transform
                 // so the shader band matches the scaled geometry (same band the
                 // top-level path draws — depth-tested + linetype-dashed).
-                for lw in tessellate_sub_local(doc, entity, anno_scale, bg_color) {
+                for lw in tessellate_sub_local(doc, entity, anno_scale, bg_color, depth_map) {
                     subs.push(LocalSub::Wire(lw));
                 }
             }
@@ -342,6 +371,7 @@ fn build_defn(
     BlockDefn {
         subs,
         aabb_local: [0.0; 4],
+        child_count: br.entity_handles.len(),
     }
 }
 
@@ -349,6 +379,7 @@ fn build_nested_ref(
     nested_ins: &acadrust::entities::Insert,
     doc: &CadDocument,
     bg_color: [f32; 4],
+    depth_map: &HashMap<u64, [f32; 2]>,
 ) -> NestedRef {
     // Store the RAW colour — `adapt_to_bg` runs at emit time
     // (`Batches::finalize`) so the same cached defn can serve renders
@@ -389,6 +420,9 @@ fn build_nested_ref(
         l0,
         instance_offsets: array_offsets(nested_ins),
         clip_poly,
+        local_rank: depth_map
+            .get(&nested_ins.common.handle.value())
+            .map_or(0.0, |d| d[0]),
     }
 }
 
@@ -397,6 +431,7 @@ fn tessellate_sub_local(
     sub: &EntityType,
     anno_scale: f32,
     bg_color: [f32; 4],
+    depth_map: &HashMap<u64, [f32; 2]>,
 ) -> Vec<LocalWire> {
     let h = sub.common().handle;
 
@@ -505,6 +540,7 @@ fn tessellate_sub_local(
             lt_l0,
             lw_l0,
             aabb_local,
+            local_rank: depth_map.get(&h.value()).map_or(0.0, |d| d[0]),
         });
     }
     result
@@ -693,7 +729,7 @@ pub fn expand_insert(
             is_xref,
             bg_color,
         };
-        expand_defn(defn, &base_xform, &ctx, &mut batches, &mut visited, 0);
+        expand_defn(defn, &base_xform, &ctx, &mut batches, &mut visited, 0, (0.0, 1.0));
     }
     Some(batches.finalize(&name, selected, bg_color))
 }
@@ -758,6 +794,10 @@ struct StyleKey {
     /// discriminator, so greek fills must stay in their own batches even
     /// when their color/style would otherwise collide with regular wires.
     is_fill_only: bool,
+    /// Bit-cast composed block-local depth for band wires (`0` = no override).
+    /// Keeps bands of different in-block draw ranks in separate batches so
+    /// each finalized WireModel carries one correct `depth_override`.
+    depth_bits: u32,
 }
 
 #[derive(Default, Debug)]
@@ -769,6 +809,9 @@ struct BatchEntry {
     world_width: f32,
     aci: u8,
     plinegen: bool,
+    /// Composed block-local draw-order offset for a band batch (see
+    /// `WireModel::depth_override`). `None` for every other batch.
+    local_depth: Option<f32>,
     points: Vec<[f32; 3]>,
     points_low: Vec<[f32; 3]>,
     snap_pts: Vec<(glam::DVec3, SnapHint)>,
@@ -866,6 +909,7 @@ impl Batches {
                 WireModel {
                     taper_widths: Vec::new(),
                     world_width: b.world_width,
+                    depth_override: b.local_depth,
                     fill_is_3d: false,
                     pick_tris: b.pick_tris,
                     pick_tris_low: b.pick_tris_low,
@@ -911,6 +955,7 @@ fn style_key(
     aci: u8,
     plinegen: bool,
     is_fill_only: bool,
+    local_depth: Option<f32>,
 ) -> StyleKey {
     StyleKey {
         color: [
@@ -935,6 +980,7 @@ fn style_key(
         aci,
         plinegen,
         is_fill_only,
+        depth_bits: local_depth.map_or(0, f32::to_bits),
     }
 }
 
@@ -945,6 +991,10 @@ fn expand_defn(
     out: &mut Batches,
     visited: &mut Vec<String>,
     depth: usize,
+    // Block-local depth sub-range `(base, scale)` accumulated through nested
+    // inserts: a child at rank r lands at `base + r * scale`, all within
+    // (-1,1) of the top-level insert. Seeded `(0.0, 1.0)` by `expand_insert`.
+    d_range: (f32, f32),
 ) {
     if depth > MAX_NESTING_DEPTH {
         eprintln!("block_cache: nested-block depth > {MAX_NESTING_DEPTH}, truncating");
@@ -977,7 +1027,7 @@ fn expand_defn(
                         continue;
                     }
                 }
-                emit_wire(lw, accum_xform, ctx, out);
+                emit_wire(lw, accum_xform, ctx, out, d_range);
             }
             LocalSub::Nested(nref) => {
                 if visited.iter().any(|n| n == &nref.block_name) {
@@ -1055,6 +1105,12 @@ fn expand_defn(
                     bg_color: ctx.bg_color,
                 };
                 visited.push(nref.block_name.clone());
+                // Children of this nested insert stack inside the slot its own
+                // rank owns — same composition the exploded-fill path applies.
+                let nested_range = (
+                    d_range.0 + nref.local_rank * d_range.1,
+                    d_range.1 / (nested_defn.child_count.max(1) as f32 + 1.0),
+                );
                 if let Some(cp) = &nref.clip_poly {
                     // XCLIP'd nested insert: expand into an isolated batch set,
                     // finalize to whole wires, clip them to the boundary mapped
@@ -1065,7 +1121,15 @@ fn expand_defn(
                     // instance would differ).
                     let composed = nref.xform.then(accum_xform);
                     let mut sub = Batches::default();
-                    expand_defn(nested_defn, &composed, &inner_ctx, &mut sub, visited, depth + 1);
+                    expand_defn(
+                        nested_defn,
+                        &composed,
+                        &inner_ctx,
+                        &mut sub,
+                        visited,
+                        depth + 1,
+                        nested_range,
+                    );
                     let mut wires = sub.finalize("", ctx.selected, ctx.bg_color);
                     let world_poly: Vec<[f64; 2]> = cp
                         .iter()
@@ -1093,6 +1157,7 @@ fn expand_defn(
                             out,
                             visited,
                             depth + 1,
+                            nested_range,
                         );
                     }
                 }
@@ -1129,6 +1194,7 @@ fn emit_wire(
     accum_xform: &Transform,
     ctx: &ExpandCtx,
     out: &mut Batches,
+    d_range: (f32, f32),
 ) {
     if lw.points.is_empty()
         && lw.fill_tris.is_empty()
@@ -1173,6 +1239,13 @@ fn emit_wire(
         0.0
     };
 
+    // Only band wires take a per-child composed depth: their solid area is
+    // what covers siblings, and their width already splits them into their own
+    // batches — thin wires keep the shared whole-insert depth so same-style
+    // batches stay merged.
+    let local_depth = (lw.world_width > 0.0)
+        .then(|| d_range.0 + lw.local_rank * d_range.1);
+
     let key = style_key(
         final_color,
         final_pat_len,
@@ -1182,6 +1255,7 @@ fn emit_wire(
         lw.aci,
         lw.plinegen,
         lw.is_fill_only,
+        local_depth,
     );
 
     // If the open batch for this style would exceed wgpu's per-buffer limit
@@ -1205,6 +1279,7 @@ fn emit_wire(
             lw.is_fill_only,
         )
     });
+    entry.local_depth = local_depth;
 
     // NaN separator between previously-appended geometry and this wire so the
     // GPU shader treats them as disconnected polylines within one buffer.

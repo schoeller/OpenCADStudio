@@ -1477,7 +1477,7 @@ impl Pipeline {
         &self,
         device: &wgpu::Device,
         wires: &[WireModel],
-        depth_map: &rustc_hash::FxHashMap<u64, f32>,
+        depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
     ) -> (
         std::sync::Arc<Vec<WireGpu>>,
         std::sync::Arc<rustc_hash::FxHashMap<u64, Vec<u32>>>,
@@ -1543,7 +1543,7 @@ impl Pipeline {
         wires: &[WireModel],
         selected: &rustc_hash::FxHashSet<acadrust::Handle>,
         hover: Option<acadrust::Handle>,
-        depth_map: &rustc_hash::FxHashMap<u64, f32>,
+        depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
     ) {
         let hover = hover.filter(|h| !selected.contains(h));
         if selected.is_empty() && hover.is_none() {
@@ -1627,7 +1627,7 @@ impl Pipeline {
         &mut self,
         device: &wgpu::Device,
         wires: &[WireModel],
-        depth_map: &rustc_hash::FxHashMap<u64, f32>,
+        depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
     ) {
         self.gpu_preview_wires = if wires.is_empty() {
             vec![]
@@ -1912,7 +1912,7 @@ impl Pipeline {
         face3d_wires: &[WireModel],
         all_wires: &[WireModel],
         wireframe_only: bool,
-        depth_map: &rustc_hash::FxHashMap<u64, f32>,
+        depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
     ) {
         // Edge buffer is always built from `face3d_wires`, so 3DFACE
         // outlines stay on the screen regardless of mode.

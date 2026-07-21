@@ -307,6 +307,7 @@ pub fn apply_along(
         .map(|pts| WireModel {
             taper_widths: Vec::new(),
             world_width: 0.0,
+            depth_override: None,
             fill_is_3d: false,
             pick_tris: Vec::new(),
             pick_tris_low: Vec::new(),
@@ -348,6 +349,7 @@ pub fn apply_along(
         out.push(WireModel {
             taper_widths: Vec::new(),
             world_width: 0.0,
+            depth_override: None,
             fill_is_3d: false,
             pick_tris: Vec::new(),
             pick_tris_low: Vec::new(),

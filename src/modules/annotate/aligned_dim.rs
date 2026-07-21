@@ -188,6 +188,7 @@ impl CadCommand for AlignedDimensionCommand {
         Some(WireModel {
             taper_widths: Vec::new(),
             world_width: 0.0,
+            depth_override: None,
             fill_is_3d: false,
             pick_tris: Vec::new(),
             pick_tris_low: Vec::new(),
@@ -241,6 +242,7 @@ fn preview_aligned(p1: DVec3, p2: DVec3, dim_pt: DVec3) -> WireModel {
     WireModel {
         taper_widths: Vec::new(),
         world_width: 0.0,
+        depth_override: None,
         fill_is_3d: false,
         pick_tris: Vec::new(),
         pick_tris_low: Vec::new(),

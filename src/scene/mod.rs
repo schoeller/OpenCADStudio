@@ -873,8 +873,13 @@ pub struct Scene {
     /// effective sort key (SortEntitiesTable override or own handle), then
     /// fed to the 2D pipelines as a small clip-z bias so entities of
     /// *different* types order correctly against each other. 3D meshes are
-    /// excluded (they keep real geometric depth).
-    draw_depth_cache: RefCell<Option<(u64, Arc<HashMap<u64, f32>>)>>,
+    /// excluded (they keep real geometric depth). Each value is
+    /// `[depth, half]`: `depth` = the entity's signed rank in (-1,1), `half` =
+    /// half the gap to the neighbouring ranks (`1/(block_count+1)`) — the
+    /// sub-range a block INSERT's children may occupy without crossing the
+    /// insert's siblings. Fill explosion and band wires compose child depths
+    /// as `depth + child_rank * half`.
+    draw_depth_cache: RefCell<Option<(u64, Arc<HashMap<u64, [f32; 2]>>)>>,
     /// Cached hatch fill models, keyed by geometry_epoch. View culling
     /// is handled at draw time via `hatch_skip_flags` in the pipeline,
     /// not at build time — that lets the GPU buffer stay stable across
@@ -1295,7 +1300,8 @@ impl Scene {
         // its internal geometry / text / attributes must NOT be scaled
         // individually (that would double-scale — AutoCAD even forbids
         // annotative attributes inside annotative blocks for this reason).
-        let built = cache::block_cache::BlockCache::build(&self.document, 1.0, bg);
+        let built =
+            cache::block_cache::BlockCache::build(&self.document, 1.0, bg, &self.draw_depth_map());
         let arc = Arc::new(built);
         *self.block_defn_cache.borrow_mut() = Some((self.block_epoch, Arc::clone(&arc)));
         arc
@@ -3314,7 +3320,7 @@ impl Scene {
     /// its owning block by effective sort key (SortEntitiesTable override or
     /// own handle). The result feeds the 2D pipelines as a clip-z bias so
     /// entities of different types order correctly against each other.
-    pub(super) fn draw_depth_map(&self) -> Arc<HashMap<u64, f32>> {
+    pub(super) fn draw_depth_map(&self) -> Arc<HashMap<u64, [f32; 2]>> {
         {
             // Draw order depends on each block's entity COUNT (the rank
             // denominator) and the entities' handles / SortEntitiesTable — none of
@@ -3384,17 +3390,20 @@ impl Scene {
                 .unwrap_or(hv);
             by_block.entry(block).or_default().push((hv, eff));
         }
-        let mut depth_map: HashMap<u64, f32> = HashMap::default();
+        let mut depth_map: HashMap<u64, [f32; 2]> = HashMap::default();
         for (_block, mut v) in by_block {
             v.sort_by_key(|(_, eff)| *eff);
             let denom = (v.len() as f32) + 1.0;
+            // Adjacent ranks are 2/denom apart; a child sub-range of
+            // ±half = ±1/denom around the parent depth never crosses them.
+            let half = 1.0 / denom;
             for (rank, (hv, _)) in v.into_iter().enumerate() {
                 // Signed (-1,1): back ranks → negative, front → positive,
                 // mid → ~0. The shader applies `z -= draw_depth * BIAS`, so a
                 // default/unranked 0.0 means "no bias" (neutral) — which keeps
                 // 3D mesh faces and transient wires at their real depth.
                 let norm = (rank as f32 + 1.0) / denom; // (0,1)
-                depth_map.insert(hv, (norm - 0.5) * 2.0);
+                depth_map.insert(hv, [(norm - 0.5) * 2.0, half]);
             }
         }
         let arc = Arc::new(depth_map);
@@ -3527,7 +3536,7 @@ impl Scene {
                     }
                 }
                 let mut m = model.clone();
-                m.draw_depth = depth_map.get(&handle.value()).copied().unwrap_or(0.0);
+                m.draw_depth = depth_map.get(&handle.value()).map_or(0.0, |d| d[0]);
                 Some(m)
             })
             .collect()
@@ -3551,7 +3560,7 @@ impl Scene {
                         return None;
                     }
                     let mut m = model.clone();
-                    m.draw_depth = depth_map.get(&handle.value()).copied().unwrap_or(0.0);
+                    m.draw_depth = depth_map.get(&handle.value()).map_or(0.0, |d| d[0]);
                     Some(m)
                 })
                 .collect(),

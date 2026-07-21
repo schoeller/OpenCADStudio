@@ -114,15 +114,10 @@ impl Face3DGpu {
         face3d_wires: &[WireModel],
         all_wires: &[WireModel],
         keep_3d_mesh_fills: bool,
-        depth_map: &rustc_hash::FxHashMap<u64, f32>,
+        depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
     ) -> Self {
-        let depth_of = |w: &WireModel| -> f32 {
-            w.name
-                .parse::<u64>()
-                .ok()
-                .and_then(|h| depth_map.get(&h).copied())
-                .unwrap_or(0.0)
-        };
+        let depth_of =
+            |w: &WireModel| -> f32 { super::wire_gpu::wire_draw_depth(w, depth_map) };
         let mut verts_3d: Vec<Face3DVertex> = Vec::with_capacity(face3d_wires.len() * 6);
         let mut verts_2d: Vec<Face3DVertex> = Vec::new();
 
