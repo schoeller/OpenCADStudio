@@ -1221,6 +1221,62 @@ fn trim_line(orig: &LineEnt, ts: &[f64], t_click: f64) -> Vec<EntityType> {
         .collect()
 }
 
+/// Extend a clicked Arc end along its circle to the nearest boundary
+/// crossing (#409). `t_click` ∈ [0,1] within the current span picks the end:
+/// ≥ 0.5 extends the end angle CCW, < 0.5 extends the start angle CW.
+fn extend_arc(orig: &ArcEnt, t_click: f64, geos: &[Geo]) -> Option<EntityType> {
+    let cx = orig.center.x;
+    let cy = orig.center.y;
+    let r = orig.radius;
+    if r < 1e-9 {
+        return None;
+    }
+    let a0 = orig.start_angle;
+    let a1 = orig.end_angle;
+    let span = {
+        let s = norm(a1) - norm(a0);
+        if s <= 0.0 {
+            s + TAU
+        } else {
+            s
+        }
+    };
+    if span >= TAU - 1e-9 {
+        return None; // already a full circle
+    }
+    // Boundary crossings around the FULL circle, then re-expressed relative
+    // to the arc's own span: t ∈ [0,1] lies on the arc, t > 1 walks CCW past
+    // the end and wraps around toward the start.
+    let ts: Vec<f64> = arc_seg_ts(cx, cy, r, a0, a0 + TAU, orig.common.handle, geos)
+        .into_iter()
+        .map(|t| t * TAU / span)
+        .collect();
+    let extend_end = t_click >= 0.5;
+    let best = if extend_end {
+        // First crossing CCW past the end.
+        ts.iter()
+            .copied()
+            .filter(|&t| t > 1.0 + 1e-6)
+            .min_by(|x, y| x.partial_cmp(y).unwrap())
+    } else {
+        // First crossing CW before the start — in wrapped span-relative
+        // coordinates that is the LARGEST t outside the arc.
+        ts.iter()
+            .copied()
+            .filter(|&t| t > 1.0 + 1e-6)
+            .max_by(|x, y| x.partial_cmp(y).unwrap())
+    }?;
+    let ang = norm(a0) + span * best;
+    let mut a = orig.clone();
+    a.common.handle = Handle::NULL;
+    if extend_end {
+        a.end_angle = ang;
+    } else {
+        a.start_angle = ang;
+    }
+    Some(EntityType::Arc(a))
+}
+
 /// Trim an Arc entity. Returns the surviving arc segments.
 fn trim_arc(orig: &ArcEnt, ts: &[f64], t_click: f64) -> Vec<EntityType> {
     let a0 = orig.start_angle;
@@ -2579,6 +2635,11 @@ impl CadCommand for ExtendCommand {
                 };
                 extend_line(l, t_click, &self.geos)
             }
+            Some(EntityType::Arc(a)) => {
+                let ang = (pt.y as f64 - a.center.y).atan2(pt.x as f64 - a.center.x);
+                let t_click = arc_t(ang, a.start_angle, a.end_angle);
+                extend_arc(a, t_click, &self.geos)
+            }
             Some(EntityType::Ellipse(e)) => {
                 let t0 = e.start_parameter;
                 let mut t1 = e.end_parameter;
@@ -2633,6 +2694,7 @@ impl CadCommand for ExtendCommand {
                 // Update the snapshot entry: replace geometry + assign real handle.
                 match &mut new_entity {
                     EntityType::Line(l) => l.common.handle = new_handle,
+                    EntityType::Arc(a) => a.common.handle = new_handle,
                     EntityType::Ellipse(e) => e.common.handle = new_handle,
                     EntityType::Spline(s) => s.common.handle = new_handle,
                     EntityType::LwPolyline(p) => p.common.handle = new_handle,
@@ -2674,6 +2736,18 @@ impl CadCommand for ExtendCommand {
                     0.5
                 };
                 if let Some(ext) = extend_line(l, t_click, &self.geos) {
+                    return vec![WireModel::solid(
+                        "extend_prev".into(),
+                        entity_pts(&ext),
+                        WireModel::CYAN,
+                        false,
+                    )];
+                }
+            }
+            Some(EntityType::Arc(a)) => {
+                let ang = (pt.y as f64 - a.center.y).atan2(pt.x as f64 - a.center.x);
+                let t_click = arc_t(ang, a.start_angle, a.end_angle);
+                if let Some(ext) = extend_arc(a, t_click, &self.geos) {
                     return vec![WireModel::solid(
                         "extend_prev".into(),
                         entity_pts(&ext),
