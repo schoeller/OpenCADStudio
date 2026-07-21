@@ -182,7 +182,7 @@ pub(crate) fn send_control_message(msg: &str) -> PyResult<()> {
         let _ = tx.send(result);
     });
 
-    match rx.recv_timeout(std::time::Duration::from_secs(30)) {
+    match rx.recv_timeout(std::time::Duration::from_secs(120)) {
         Ok(Ok(line)) => {
             if line.trim() == "OK" {
                 Ok(())

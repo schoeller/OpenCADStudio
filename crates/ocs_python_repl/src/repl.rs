@@ -207,7 +207,7 @@ fn forward_control(stream: Stream, sender: Arc<dyn PluginAsyncSender>, full_path
                     "ERR\n"
                 } else {
                     let start = std::time::Instant::now();
-                    let timeout = Duration::from_secs(30);
+                    let timeout = Duration::from_secs(120);
                     let mut current_version = start_version;
                     while current_version == start_version && start.elapsed() < timeout {
                         if let Ok(r) = DocumentFullSnapshotReader::open(full_path) {

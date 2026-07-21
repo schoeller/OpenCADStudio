@@ -13,6 +13,22 @@ fn entity_kind_name(entity: impl std::fmt::Debug) -> String {
     s.split('(').next().unwrap_or("Entity").to_string()
 }
 
+/// Queue a remove operation for the given handle. Shared by `Entity.delete` and
+/// all concrete entity subclasses.
+fn queue_remove_handle(handle: u64) -> PyResult<()> {
+    let mut queue = crate::document::open_queue()?;
+    if queue
+        .push(&EntityOp::Remove(Handle::new(handle)))
+        .map_err(crate::document::queue_err)?
+    {
+        Ok(())
+    } else {
+        Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "mutation queue full; call commit() more often",
+        ))
+    }
+}
+
 #[pyclass(name = "Entity")]
 #[derive(Clone)]
 pub struct PyEntity {
@@ -39,17 +55,7 @@ impl PyEntity {
     }
 
     fn delete(&self) -> PyResult<()> {
-        let mut queue = crate::document::open_queue()?;
-        if queue
-            .push(&EntityOp::Remove(Handle::new(self.handle)))
-            .map_err(crate::document::queue_err)?
-        {
-            Ok(())
-        } else {
-            Err(pyo3::exceptions::PyRuntimeError::new_err(
-                "mutation queue full; call commit() more often",
-            ))
-        }
+        queue_remove_handle(self.handle)
     }
 }
 
