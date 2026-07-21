@@ -3708,17 +3708,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ocs_pythonshell"
-version = "0.1.0"
-dependencies = [
- "acadrust",
- "base64 0.22.1",
- "ocs_plugin_api",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
