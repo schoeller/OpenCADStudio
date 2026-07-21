@@ -970,7 +970,9 @@ fn async_reader(
                 eprintln!("[plugin] unexpected PluginToHost::Response on async socket: {resp:?}");
             }
             Err(e) => {
-                if !shutting_down.load(Ordering::SeqCst) {
+                if !shutting_down.load(Ordering::SeqCst)
+                    && !is_expected_socket_close(&e)
+                {
                     eprintln!("[plugin] async reader recv error: {e}");
                 }
                 alive.store(false, Ordering::SeqCst);
@@ -979,6 +981,24 @@ fn async_reader(
         }
     }
     vlog!("[plugin] async reader thread exiting");
+}
+
+/// True when the transport error is the normal consequence of the peer closing
+/// its socket end (EOF, broken pipe, reset). These are expected during both
+/// graceful shutdown and hard-kill, so the async reader suppresses the noise.
+fn is_expected_socket_close(err: &crate::ipc::transport::TransportError) -> bool {
+    use std::io::ErrorKind;
+    matches!(
+        err,
+        crate::ipc::transport::TransportError::Io(e)
+            if matches!(
+                e.kind(),
+                ErrorKind::UnexpectedEof
+                    | ErrorKind::ConnectionReset
+                    | ErrorKind::ConnectionAborted
+                    | ErrorKind::BrokenPipe
+            )
+    )
 }
 
 /// True for errors that mean the runner process has gone away or the IPC
