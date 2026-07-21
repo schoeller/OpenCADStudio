@@ -494,23 +494,63 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
         translation: Vector,
     ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
         let levels = self.levels_snapshot(self.panels.len());
-        let open_id = self.open.clone()?;
-        let p = self.panels.iter().position(|pan| pan.id == open_id)?;
-        // Only a button-form panel (collapsed or tight) shows a flyout.
-        let lvl = levels.get(p).copied().unwrap_or(FULL);
-        if lvl != COLLAPSED && lvl != TIGHT {
-            return None;
+
+        // An open flyout owns the overlay slot.
+        if let Some(open_id) = self.open.clone() {
+            if let Some(p) = self.panels.iter().position(|pan| pan.id == open_id) {
+                // Only a button-form panel (collapsed or tight) shows a flyout.
+                let lvl = levels.get(p).copied().unwrap_or(FULL);
+                if (lvl == COLLAPSED || lvl == TIGHT) && layout.children().nth(p).is_some() {
+                    let child_layout = layout.children().nth(p).unwrap();
+                    let b = child_layout.bounds();
+                    let anchor =
+                        Point::new(b.x + translation.x, b.y + b.height + translation.y);
+                    return Some(overlay::Element::new(Box::new(FlyoutOverlay {
+                        flyout: &mut self.panels[p].flyout,
+                        tree: &mut tree.children[SLOTS * p + 4],
+                        anchor,
+                    })));
+                }
+            }
         }
 
-        let child_layout = layout.children().nth(p)?;
-        let b = child_layout.bounds();
-        let anchor = Point::new(b.x + translation.x, b.y + b.height + translation.y);
-
-        Some(overlay::Element::new(Box::new(FlyoutOverlay {
-            flyout: &mut self.panels[p].flyout,
-            tree: &mut tree.children[SLOTS * p + 4],
-            anchor,
-        })))
+        // No flyout: forward the SHOWN children's overlays. Every ribbon
+        // tooltip is an iced overlay produced inside these children, so
+        // returning None here left all of them permanently dead (#411 — a
+        // regression from the day this widget replaced the plain row).
+        // Split borrows so each shown child and its tree slot are disjoint.
+        let mut overlays = Vec::new();
+        let mut tree_rest = tree.children.as_mut_slice();
+        for ((i, panel), child_layout) in
+            self.panels.iter_mut().enumerate().zip(layout.children())
+        {
+            if tree_rest.len() < SLOTS {
+                break;
+            }
+            let (chunk, rest) = tree_rest.split_at_mut(SLOTS);
+            tree_rest = rest;
+            let level = levels.get(i).copied().unwrap_or(FULL);
+            let child = match level {
+                FULL => &mut panel.full,
+                COMPACT => &mut panel.compact,
+                COLLAPSED => &mut panel.button,
+                _ => &mut panel.tight,
+            };
+            if let Some(o) = child.as_widget_mut().overlay(
+                &mut chunk[level as usize],
+                child_layout,
+                _renderer,
+                _viewport,
+                translation,
+            ) {
+                overlays.push(o);
+            }
+        }
+        if overlays.is_empty() {
+            None
+        } else {
+            Some(overlay::Group::with_children(overlays).overlay())
+        }
     }
 }
 
