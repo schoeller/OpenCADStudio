@@ -460,7 +460,7 @@ impl OpenCADStudio {
 
             Message::XAttachPick => Task::perform(
                 async {
-                    let handle = rfd::AsyncFileDialog::new()
+                    let handle = crate::sys::file_dialog()
                         .set_title("Select External Reference File")
                         .add_filter("CAD Files", &["dwg", "dxf", "bak", "DWG", "DXF", "BAK"])
                         .add_filter("DWG Files", &["dwg", "DWG"])
@@ -498,7 +498,7 @@ impl OpenCADStudio {
                 let name = block_name.clone();
                 Task::perform(
                     async move {
-                        let path = rfd::AsyncFileDialog::new()
+                        let path = crate::sys::file_dialog()
                             .set_title("Save Block As")
                             .set_file_name("block.dwg")
                             .add_filter("DWG Files", &["dwg"])
@@ -521,7 +521,7 @@ impl OpenCADStudio {
                 let csv_clone = csv.clone();
                 Task::perform(
                     async move {
-                        let path = rfd::AsyncFileDialog::new()
+                        let path = crate::sys::file_dialog()
                             .set_title("Save Data Extraction")
                             .set_file_name("extraction.csv")
                             .add_filter("CSV", &["csv"])
@@ -564,7 +564,7 @@ impl OpenCADStudio {
                 }
                 Task::perform(
                     async {
-                        rfd::AsyncFileDialog::new()
+                        crate::sys::file_dialog()
                             .set_title("Export STL")
                             .set_file_name("export.stl")
                             .add_filter("STL Files", &["stl"])
@@ -591,7 +591,7 @@ impl OpenCADStudio {
                 }
                 Task::perform(
                     async {
-                        rfd::AsyncFileDialog::new()
+                        crate::sys::file_dialog()
                             .set_title("Export STEP AP203")
                             .set_file_name("export.step")
                             .add_filter("STEP Files", &["step", "stp"])
@@ -611,7 +611,7 @@ impl OpenCADStudio {
             // ── OBJ import ────────────────────────────────────────────────
             Message::ObjImport => Task::perform(
                 async {
-                    rfd::AsyncFileDialog::new()
+                    crate::sys::file_dialog()
                         .set_title("Import OBJ Mesh")
                         .add_filter("Wavefront OBJ", &["obj", "OBJ"])
                         .add_filter("All Files", &["*"])

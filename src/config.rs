@@ -28,3 +28,45 @@ pub fn config_dir() -> Option<PathBuf> {
     p.push("OpenCADStudio");
     Some(p)
 }
+
+// ── Last file-dialog directory ───────────────────────────────────────────────
+
+use std::path::Path;
+use std::sync::{Mutex, OnceLock};
+
+fn last_dir_store() -> &'static Mutex<Option<PathBuf>> {
+    static STORE: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
+    STORE.get_or_init(|| {
+        // Seed from the persisted value; discard it if the folder is gone.
+        let loaded = config_dir()
+            .map(|d| d.join("last_dir.txt"))
+            .and_then(|f| std::fs::read_to_string(f).ok())
+            .map(|s| PathBuf::from(s.trim()))
+            .filter(|p| p.is_dir());
+        Mutex::new(loaded)
+    })
+}
+
+/// The directory the last file dialog picked or saved into, if it still
+/// exists — used to seed the next dialog so pickers reopen where the user
+/// left off. Persisted across runs.
+pub fn last_dialog_dir() -> Option<PathBuf> {
+    last_dir_store().lock().ok()?.clone().filter(|p| p.is_dir())
+}
+
+/// Record the directory of a path a file dialog just returned.
+pub fn remember_dialog_dir(file_path: &Path) {
+    let Some(dir) = file_path.parent().filter(|d| d.is_dir()) else {
+        return;
+    };
+    if let Ok(mut store) = last_dir_store().lock() {
+        if store.as_deref() == Some(dir) {
+            return; // unchanged — skip the disk write
+        }
+        *store = Some(dir.to_path_buf());
+    }
+    if let Some(cfg) = config_dir() {
+        let _ = std::fs::create_dir_all(&cfg);
+        let _ = std::fs::write(cfg.join("last_dir.txt"), dir.display().to_string());
+    }
+}

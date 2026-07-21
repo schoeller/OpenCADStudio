@@ -845,7 +845,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                     let close = self.close_save_dialog_window();
                     let pick = Task::perform(
                         async move {
-                            let mut dlg = rfd::AsyncFileDialog::new()
+                            let mut dlg = crate::sys::file_dialog()
                                 .set_title("Save Drawing As")
                                 .set_file_name(default_name)
                                 .add_filter(filter_label, &[filter_ext]);
@@ -2204,7 +2204,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                     .unwrap_or("export.ctb".into());
                 Task::perform(
                     async move {
-                        rfd::AsyncFileDialog::new()
+                        crate::sys::file_dialog()
                             .set_title("Save Plot Style Table")
                             .set_file_name(&default_name)
                             .add_filter("Plot Style Files", &["ctb", "stb", "CTB", "STB"])

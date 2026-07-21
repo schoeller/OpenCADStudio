@@ -39,12 +39,33 @@ pub async fn read_clipboard_text() -> Option<String> {
 /// (a follow-up).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn handle_path(h: &rfd::FileHandle) -> std::path::PathBuf {
-    h.path().to_path_buf()
+    let p = h.path().to_path_buf();
+    // Every dialog result funnels through here — remember its folder so the
+    // next dialog opens where the user left off.
+    crate::config::remember_dialog_dir(&p);
+    p
 }
 
 #[cfg(target_arch = "wasm32")]
 pub fn handle_path(h: &rfd::FileHandle) -> std::path::PathBuf {
     std::path::PathBuf::from(h.file_name())
+}
+
+/// New async file dialog seeded with the last directory a dialog was used in.
+/// All pickers should start from this instead of `rfd::AsyncFileDialog::new()`.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn file_dialog() -> rfd::AsyncFileDialog {
+    let dlg = rfd::AsyncFileDialog::new();
+    match crate::config::last_dialog_dir() {
+        Some(dir) => dlg.set_directory(dir),
+        None => dlg,
+    }
+}
+
+/// Web: no filesystem paths, nothing to remember.
+#[cfg(target_arch = "wasm32")]
+pub fn file_dialog() -> rfd::AsyncFileDialog {
+    rfd::AsyncFileDialog::new()
 }
 
 /// Trigger a browser download of `bytes` as `name`. Builds a Blob, points a

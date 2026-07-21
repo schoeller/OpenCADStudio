@@ -100,7 +100,7 @@ pub fn export_pdf(
 /// Show a PDF save-file dialog and return the chosen path (or None if cancelled).
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn pick_pdf_path_owned(stem: String) -> Option<std::path::PathBuf> {
-    rfd::AsyncFileDialog::new()
+    crate::sys::file_dialog()
         .set_title("Export as PDF")
         .set_file_name(&format!("{stem}.pdf"))
         .add_filter("PDF Files", &["pdf"])

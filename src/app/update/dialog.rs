@@ -153,7 +153,7 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                             async move {
                                 let exts: Vec<&str> =
                                     extensions.iter().map(|s| s.as_str()).collect();
-                                let path = rfd::AsyncFileDialog::new()
+                                let path = crate::sys::file_dialog()
                                     .set_title(title)
                                     .add_filter(filter_name, &exts)
                                     .add_filter("All Files", &["*"])
