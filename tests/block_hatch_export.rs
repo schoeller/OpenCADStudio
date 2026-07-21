@@ -247,7 +247,6 @@ fn app_created_hatch_roundtrips_catalog_spacing() {
         color: [0.75, 0.75, 0.75, 0.85],
         angle_offset: 0.0,
         scale: 1.0,
-        vp_scissor: None,
         draw_depth: 0.0,
     };
     scene.add_hatch(model);
@@ -297,7 +296,6 @@ fn nested_hatch_serializes_only_outer_as_external() {
         color: [0.45, 0.45, 0.45, 0.60],
         angle_offset: 0.0,
         scale: 1.0,
-        vp_scissor: None,
         draw_depth: 0.0,
     };
 
