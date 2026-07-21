@@ -1,0 +1,21 @@
+[package]
+name = "ocs_acadifc"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "ocs_acadifc"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module"] }
+pyo3-build-config = "0.22"
+acadrust = "0.4"
+memmap2 = "0.9"
+bincode = "1"
+serde = { version = "1", features = ["derive"] }
+interprocess = "2"
+ocs_plugin_api = { path = "../../ocs_plugin_api", features = ["host"] }
+
+[build-dependencies]
+pyo3-build-config = "0.22"

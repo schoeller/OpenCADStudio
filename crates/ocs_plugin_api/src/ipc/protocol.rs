@@ -16,6 +16,7 @@ use crate::host::CommandStep;
 use crate::manifest::ApiVersion;
 use crate::panel::{DockZone, PanelDef, PanelError, PanelEvent, PanelHandle, Widget};
 use crate::ribbon::owned::{OwnedPluginManifest, OwnedRibbonGroup};
+use crate::shm::EntityOp;
 
 pub use acadrust::xdata::ExtendedDataRecord;
 pub use acadrust::{CadDocument, EntityType, Handle};
@@ -78,6 +79,9 @@ pub enum PluginAsync {
     PanelClosed {
         panel_id: String,
     },
+    /// Signal the host to drain the shared mutation queue and apply the
+    /// batched entity operations. Used by the Python REPL plugin.
+    DocumentRefreshRequested,
 }
 
 /// Requests the host sends to the plugin runner.
@@ -149,6 +153,12 @@ pub enum PluginRequest {
     /// Ask the host to create/refresh a shared-memory document view and return
     /// the file path + current version.
     OpenDocumentView,
+    /// Ask the host to create/refresh a shared-memory full document snapshot
+    /// and return the file path + current version.
+    OpenDocumentFullSnapshot,
+    /// Ask the host to create a shared-memory mutation queue and return the
+    /// file path.
+    OpenMutationQueue,
     /// Open a plugin-declared panel.
     OpenPanel {
         def: PanelDef,
@@ -201,6 +211,11 @@ pub enum PluginRequest {
     RemoveEntities {
         handles: Vec<Handle>,
     },
+    /// Apply a batch of entity operations. Used as an IPC fallback when the
+    /// shared-memory queue is not available (e.g. in-process plugins).
+    EntityBatch {
+        ops: Vec<EntityOp>,
+    },
 }
 
 /// Responses the host sends back for `PluginRequest`.
@@ -219,10 +234,24 @@ pub enum PluginResponse {
         path: String,
         version: u64,
     },
+    /// Path and version of the full document snapshot.
+    DocumentFullSnapshot {
+        path: String,
+        version: u64,
+    },
+    /// Path of the mutation queue.
+    MutationQueue {
+        path: String,
+    },
     /// Result of opening a panel.
     PanelHandleResult(Result<PanelHandle, PanelError>),
     /// Result of a panel operation that returns nothing.
     PanelResult(Result<(), PanelError>),
+    /// Result of applying a batch of entity operations (API v3 fallback).
+    BatchResult {
+        applied: usize,
+        failed: usize,
+    },
 }
 
 /// Messages sent from the host to the plugin runner.

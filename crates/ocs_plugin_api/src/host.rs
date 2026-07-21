@@ -20,6 +20,7 @@ use crate::ipc::protocol::PluginAsync;
 use crate::manifest::PluginManifest;
 use crate::panel::{DockZone, PanelDef, PanelError, PanelEvent, PanelHandle};
 use crate::ribbon::{CadModule, RibbonGroup};
+use crate::shm::{DocumentFullSnapshotInfo, DocumentMutationQueueInfo, EntityOp};
 
 /// An add-on package's entry point: its manifest, optional ribbon tab, and
 /// command dispatch. Built-in (in-tree) and dynamically-loaded (cdylib) plugins
@@ -375,6 +376,50 @@ pub trait HostApi {
     fn current_process(&self) -> Option<std::sync::Arc<crate::process::PluginProcess>> {
         None
     }
+
+    // ── Full document snapshot and mutation queue (API v3; appended at the end
+    // to keep vtable indices stable for older plugins) ─────────────────────
+
+    /// Open (or refresh) the host-side full document snapshot and return the
+    /// path + version the Python side needs to read it.
+    fn document_full_snapshot(&mut self) -> Option<DocumentFullSnapshotInfo> {
+        None
+    }
+
+    /// Open the host-side mutation queue and return the path the Python side
+    /// needs to write entity operations.
+    fn document_mutation_queue(&mut self) -> Option<DocumentMutationQueueInfo> {
+        None
+    }
+
+    /// Return a thread-safe sender for [`PluginAsync`] events. Plugins that run
+    /// background threads (e.g. the Python REPL) use this to forward events
+    /// without holding a `&mut dyn HostApi`. Out-of-process hosts implement
+    /// this; in-process hosts can return `None`.
+    fn async_sender(&self) -> Option<std::sync::Arc<dyn PluginAsyncSender>> {
+        None
+    }
+
+    /// Drain the shared mutation queue and apply the batched entity operations.
+    /// Called when the host receives `PluginAsync::DocumentRefreshRequested`.
+    /// Returns the number of operations applied and failed.
+    fn document_refresh_requested(&mut self) -> (usize, usize) {
+        (0, 0)
+    }
+
+    /// Apply a batch of entity operations as a single undoable action. Used as
+    /// an IPC fallback for plugins that cannot use the shared-memory queue.
+    /// Returns the number of operations applied and failed.
+    fn apply_entity_batch(&mut self, _ops: Vec<EntityOp>) -> (usize, usize) {
+        (0, 0)
+    }
+}
+
+/// Thread-safe sender for [`PluginAsync`] events. Returned by
+/// [`HostApi::async_sender`] so plugins can forward events from background
+/// threads that do not hold a `&mut dyn HostApi`.
+pub trait PluginAsyncSender: Send + Sync {
+    fn send(&self, event: PluginAsync) -> Result<(), String>;
 }
 
 /// Simplified, read-only entity kind exposed by [`DocumentReader`].

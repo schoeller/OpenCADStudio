@@ -1,0 +1,13 @@
+[plugin]
+id = "ocs.python.repl"
+name = "Python REPL"
+version = "0.1.0"
+description = "Python scripting and debugging for OpenCAD Studio."
+author = "Open CAD Studio contributors"
+license = "GPL-3.0-only"
+
+[opencad]
+api_version = 3
+ribbon_order = 300
+command_prefixes = ["PYTHONEDIT"]
+xdata_apps = ["OCS_PYTHON"]

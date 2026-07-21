@@ -373,6 +373,7 @@ mod loader {
                         let _ = panels.close(handle);
                     }
                 }
+                ocs_plugin_api::ipc::protocol::PluginAsync::DocumentRefreshRequested => {}
             }
             panel_log("handle_async done");
         }

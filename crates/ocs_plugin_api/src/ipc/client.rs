@@ -5,6 +5,7 @@ use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use acadrust::xdata::ExtendedDataRecord;
@@ -43,13 +44,21 @@ enum ClientStream {
 ///
 /// The runner keeps two independent clients: one for the sync socket and one
 /// for the async socket. `PluginHostApi` routes requests accordingly.
-#[derive(Clone)]
 pub struct IpcClient {
     stream: ClientStream,
     /// When `true`, synchronous host requests are sent fire-and-forget instead
     /// of blocking for a response. Used by the runner while executing
     /// `on_async_event` so the handler never blocks waiting for the host.
-    async_mode: Cell<bool>,
+    async_mode: AtomicBool,
+}
+
+impl Clone for IpcClient {
+    fn clone(&self) -> Self {
+        Self {
+            stream: self.stream.clone(),
+            async_mode: AtomicBool::new(self.async_mode.load(Ordering::Relaxed)),
+        }
+    }
 }
 
 impl IpcClient {
@@ -64,7 +73,7 @@ impl IpcClient {
     pub(crate) fn from_stream(stream: Stream) -> Self {
         Self {
             stream: ClientStream::Full(Arc::new(Mutex::new(stream))),
-            async_mode: Cell::new(false),
+            async_mode: AtomicBool::new(false),
         }
     }
 
@@ -84,7 +93,7 @@ impl IpcClient {
                         send: Arc::new(Mutex::new(send)),
                         recv: Arc::new(Mutex::new(recv)),
                     },
-                    async_mode: Cell::new(self.async_mode.get()),
+                    async_mode: AtomicBool::new(self.async_mode.load(Ordering::Relaxed)),
                 }
             }
             ClientStream::Split { .. } => {
@@ -96,7 +105,7 @@ impl IpcClient {
     /// Set whether this client runs in async event mode. In async mode,
     /// requests are sent fire-and-forget and a default response is returned.
     pub(crate) fn set_async_mode(&self, enabled: bool) {
-        self.async_mode.set(enabled);
+        self.async_mode.store(enabled, Ordering::Relaxed);
     }
 
     fn with_writer<F, T>(&self, f: F) -> Result<T, crate::ipc::transport::TransportError>
@@ -223,6 +232,12 @@ pub struct PluginHostApi {
     /// Shared-memory document view information, lazily fetched on first
     /// `document_reader()` access.
     doc_view: RefCell<Option<DocumentViewInfo>>,
+    /// Shared-memory full document snapshot information, lazily fetched on first
+    /// `document_full_snapshot()` access.
+    doc_full: RefCell<Option<crate::shm::DocumentFullSnapshotInfo>>,
+    /// Shared-memory mutation queue information, lazily fetched on first
+    /// `document_mutation_queue()` access.
+    doc_queue: RefCell<Option<crate::shm::DocumentMutationQueueInfo>>,
 }
 
 impl PluginHostApi {
@@ -241,6 +256,8 @@ impl PluginHostApi {
             next_command_id: Cell::new(1),
             record_cache: RefCell::new(HashMap::new()),
             doc_view: RefCell::new(None),
+            doc_full: RefCell::new(None),
+            doc_queue: RefCell::new(None),
         }
     }
 
@@ -253,7 +270,7 @@ impl PluginHostApi {
     }
 
     fn active_client(&self) -> &IpcClient {
-        if self.async_client.async_mode.get() {
+        if self.async_client.async_mode.load(Ordering::Relaxed) {
             &self.async_client
         } else {
             &self.sync_client
@@ -740,6 +757,62 @@ impl HostApi for PluginHostApi {
                 false
             }
         }
+    }
+
+    fn document_full_snapshot(&mut self) -> Option<crate::shm::DocumentFullSnapshotInfo> {
+        {
+            let mut view = self.doc_full.borrow_mut();
+            if view.is_none() {
+                match self
+                    .active_client()
+                    .request_response(PluginRequest::OpenDocumentFullSnapshot)
+                {
+                    Ok(PluginResponse::DocumentFullSnapshot { path, version }) => {
+                        *view = Some(crate::shm::DocumentFullSnapshotInfo { path, version });
+                    }
+                    Ok(other) => {
+                        eprintln!("[plugin] unexpected OpenDocumentFullSnapshot response: {other:?}");
+                    }
+                    Err(e) => {
+                        eprintln!("[plugin] OpenDocumentFullSnapshot request failed: {e}");
+                    }
+                }
+            }
+        }
+        self.doc_full.borrow().clone()
+    }
+
+    fn document_mutation_queue(&mut self) -> Option<crate::shm::DocumentMutationQueueInfo> {
+        {
+            let mut queue = self.doc_queue.borrow_mut();
+            if queue.is_none() {
+                match self
+                    .active_client()
+                    .request_response(PluginRequest::OpenMutationQueue)
+                {
+                    Ok(PluginResponse::MutationQueue { path }) => {
+                        *queue = Some(crate::shm::DocumentMutationQueueInfo { path });
+                    }
+                    Ok(other) => {
+                        eprintln!("[plugin] unexpected OpenMutationQueue response: {other:?}");
+                    }
+                    Err(e) => {
+                        eprintln!("[plugin] OpenMutationQueue request failed: {e}");
+                    }
+                }
+            }
+        }
+        self.doc_queue.borrow().clone()
+    }
+
+    fn async_sender(&self) -> Option<std::sync::Arc<dyn crate::host::PluginAsyncSender>> {
+        struct Sender(IpcClient);
+        impl crate::host::PluginAsyncSender for Sender {
+            fn send(&self, event: PluginAsync) -> Result<(), String> {
+                self.0.send_async(event).map_err(|e| e.to_string())
+            }
+        }
+        Some(std::sync::Arc::new(Sender(self.async_client.clone())))
     }
 }
 

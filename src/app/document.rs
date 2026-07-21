@@ -10,7 +10,7 @@ use crate::ui::{LayerPanel, PropertiesPanel};
 use acadrust::tables::Ucs;
 use acadrust::{CadDocument, EntityType, Handle};
 use iced;
-use ocs_plugin_api::shm::DocumentSnapshotStore;
+use ocs_plugin_api::shm::{DocumentShmResources, DocumentSnapshotStore};
 use std::any::Any;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -158,6 +158,12 @@ pub(super) struct DocumentTab {
     /// Shared-memory snapshot store for out-of-process plugins. Kept on the tab
     /// so the backing file survives individual HostSession instances.
     pub(super) doc_store: Option<DocumentSnapshotStore>,
+    /// Shared-memory resources (full snapshot + mutation queue) for the Python
+    /// REPL and similar batch-style out-of-process plugins.
+    pub(super) doc_shm: Option<DocumentShmResources>,
+    /// Last `geometry_epoch` value for which the full snapshot was published.
+    /// Used to publish the Python REPL snapshot on manual document edits.
+    pub(super) last_published_geometry_epoch: u64,
     pub(super) current_path: Option<PathBuf>,
     pub(super) dirty: bool,
     pub(super) tab_title: String,
@@ -233,6 +239,23 @@ pub(super) struct DocumentTab {
 }
 
 impl DocumentTab {
+    /// Publish the full serde/bincode snapshot if the document's geometry epoch
+    /// has changed since the last publish. This keeps the Python REPL file in
+    /// sync with manual edits made through the host UI.
+    pub(super) fn publish_full_snapshot(&mut self) {
+        let epoch = self.scene.geometry_epoch;
+        if epoch == self.last_published_geometry_epoch {
+            return;
+        }
+        let mut shm_opt = self.doc_shm.take();
+        let doc = &self.scene.document;
+        if let Some(ref mut shm) = shm_opt {
+            shm.publish_full_snapshot(doc);
+        }
+        self.doc_shm = shm_opt;
+        self.last_published_geometry_epoch = epoch;
+    }
+
     /// The active WCS↔UCS converter for this tab — identity when no UCS is set.
     /// Every consumer that needs UCS-relative coordinates goes through this.
     pub(super) fn ucs_xform(&self) -> super::helpers::UcsXform {
@@ -414,6 +437,8 @@ impl DocumentTab {
         Self {
             scene,
             doc_store: None,
+            doc_shm: None,
+            last_published_geometry_epoch: 0,
             current_path: None,
             dirty: false,
             tab_title: format!("Drawing{}", n),

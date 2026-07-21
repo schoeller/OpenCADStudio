@@ -1,0 +1,7 @@
+{
+  "include": ["."],
+  "typeCheckingMode": "basic",
+  "useLibraryCodeForTypes": true,
+  "extraPaths": ["."],
+  "reportMissingModuleSource": "none"
+}

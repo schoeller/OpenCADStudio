@@ -219,6 +219,9 @@ fn format_async(msgs: &[AsyncInbound]) -> String {
             AsyncInbound::Event(PluginAsync::PanelClosed { panel_id }) => {
                 writeln!(s, "{i}: PanelClosed({panel_id})").unwrap();
             }
+            AsyncInbound::Event(PluginAsync::DocumentRefreshRequested) => {
+                writeln!(s, "{i}: DocumentRefreshRequested").unwrap();
+            }
             AsyncInbound::Request(req) => {
                 writeln!(s, "{i}: Request({req:?})").unwrap();
             }

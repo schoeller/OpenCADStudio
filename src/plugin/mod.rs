@@ -101,6 +101,10 @@ pub(crate) fn on_document_changed(app: &mut crate::app::OpenCADStudio, tab: usiz
         crate::plugin::external::with_manager(|mgr| {
             mgr.broadcast_document_event(tab, crate::plugin::panels::DocumentEvent::Changed { version });
         });
+
+        // Publish the full serde/bincode snapshot for the Python REPL and other
+        // file-based consumers whenever the document geometry actually changed.
+        app.publish_full_snapshot(tab);
     }
 }
 

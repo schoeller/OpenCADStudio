@@ -181,6 +181,11 @@ impl PluginManager {
             let mut on_start = |_command_id: u64| {};
             for msg in plugin.process.drain_async() {
                 match msg {
+                    AsyncInbound::Event(
+                        crate::ipc::protocol::PluginAsync::DocumentRefreshRequested,
+                    ) => {
+                        host.document_refresh_requested();
+                    }
                     AsyncInbound::Event(event) => events.push(event),
                     AsyncInbound::Request(req) => {
                         let resp = handle_plugin_request(host, req, &mut on_start);

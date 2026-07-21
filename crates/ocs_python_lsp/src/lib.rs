@@ -347,7 +347,10 @@ fn apply_request(host: &mut dyn HostApi, req: PluginRequest) -> PluginResponse {
         | UndockPanel { .. }
         | PostPanelEvent { .. }
         | RequestPointPick { .. }
-        | SetActiveTab(_) => PluginResponse::Error("unexpected request in LSP queue".to_string()),
+        | SetActiveTab(_)
+        | OpenDocumentFullSnapshot
+        | OpenMutationQueue
+        | EntityBatch { .. } => PluginResponse::Error("unexpected request in LSP queue".to_string()),
     }
 }
 

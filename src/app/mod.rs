@@ -2513,6 +2513,14 @@ impl OpenCADStudio {
         self.tabs.get(tab).map(|t| t.scene.geometry_epoch).unwrap_or(0)
     }
 
+    /// Publish the full serde/bincode snapshot for `tab` if the document's
+    /// geometry epoch has changed since the last publish.
+    pub(crate) fn publish_full_snapshot(&mut self, tab: usize) {
+        if let Some(t) = self.tabs.get_mut(tab) {
+            t.publish_full_snapshot();
+        }
+    }
+
     /// Index of the currently active document tab.
     pub(crate) fn active_tab(&self) -> usize {
         self.active_tab

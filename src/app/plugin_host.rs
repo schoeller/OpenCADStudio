@@ -6,6 +6,10 @@ use acadrust::tables::AppId;
 use acadrust::xdata::ExtendedDataRecord;
 use acadrust::{CadDocument, EntityType, Handle};
 use ocs_plugin_api::host::HostApi;
+use ocs_plugin_api::shm::{
+    apply_entity_batch, DocumentFullSnapshotInfo, DocumentMutationQueueInfo, DocumentShmResources,
+    EntityBatchEditor, EntityOp,
+};
 
 use super::OpenCADStudio;
 
@@ -53,20 +57,24 @@ impl<'a> HostSession<'a> {
     }
 
     fn publish_document_view(&mut self) {
-        let tab = &mut self.app.tabs[self.tab];
-        // Take the store out so we can borrow the document immutably at the
-        // same time, then put it back after publishing.
-        let mut store_opt = tab.doc_store.take();
-        let doc = &tab.scene.document;
-        if let Some(ref mut store) = store_opt {
-            if let Err(e) = store.publish(doc) {
-                eprintln!(
-                    "[host] failed to publish document view for tab {}: {e}",
-                    self.tab
-                );
+        {
+            let tab = &mut self.app.tabs[self.tab];
+            // Take the store out so we can borrow the document immutably at the
+            // same time, then put it back after publishing.
+            let mut store_opt = tab.doc_store.take();
+            let doc = &tab.scene.document;
+            if let Some(ref mut store) = store_opt {
+                if let Err(e) = store.publish(doc) {
+                    eprintln!(
+                        "[host] failed to publish document view for tab {}: {e}",
+                        self.tab
+                    );
+                }
             }
+            tab.doc_store = store_opt;
         }
-        tab.doc_store = store_opt;
+        // Also publish the full serde/bincode snapshot used by the Python REPL.
+        self.publish_full_snapshot();
     }
 
     pub fn add_entity(&mut self, entity: EntityType) -> Handle {
@@ -102,6 +110,73 @@ impl<'a> HostSession<'a> {
             self.publish_document_view();
         }
         entity
+    }
+
+    // ── Entity batch editor (Python REPL shared-memory path) ────────────────
+    fn doc_shm(&mut self) -> (&mut DocumentShmResources, &CadDocument) {
+        let tab = &mut self.app.tabs[self.tab];
+        if tab.doc_shm.is_none() {
+            tab.doc_shm = Some(DocumentShmResources::new(self.tab));
+        }
+        let doc = &tab.scene.document;
+        let shm = tab.doc_shm.as_mut().unwrap();
+        (shm, doc)
+    }
+
+    pub fn document_full_snapshot(&mut self) -> Option<DocumentFullSnapshotInfo> {
+        let (shm, doc) = self.doc_shm();
+        shm.ensure_full_snapshot(doc)
+    }
+
+    pub fn document_mutation_queue(&mut self) -> Option<DocumentMutationQueueInfo> {
+        let (shm, _doc) = self.doc_shm();
+        shm.ensure_mutation_queue()
+    }
+
+    fn publish_full_snapshot(&mut self) {
+        self.app.tabs[self.tab].publish_full_snapshot();
+    }
+
+    pub fn apply_entity_batch(&mut self, ops: Vec<EntityOp>) -> (usize, usize) {
+        // Ensure layers referenced by the batch exist once, then bypass the
+        // per-entity scene publishing in the trait methods for performance.
+        let mut layers = std::collections::HashSet::new();
+        for op in &ops {
+            let layer = match op {
+                EntityOp::Add(e) | EntityOp::Update(e) => e.common().layer.clone(),
+                EntityOp::Remove(_) => continue,
+            };
+            if !layer.trim().is_empty() {
+                layers.insert(layer);
+            }
+        }
+        for layer in layers {
+            self.app.tabs[self.tab].scene.ensure_layer(&layer);
+        }
+        let result = apply_entity_batch(self, ops);
+        self.set_dirty();
+        self.bump_geometry();
+        self.publish_full_snapshot();
+        result
+    }
+
+    pub fn document_refresh_requested(&mut self) -> (usize, usize) {
+        let mut errors = Vec::new();
+        let ops = {
+            let tab = &mut self.app.tabs[self.tab];
+            match tab.doc_shm.as_mut() {
+                Some(shm) => shm.drain_mutation_queue(|e: &str| errors.push(e.to_string())),
+                None => Vec::new(),
+            }
+        };
+        for e in errors {
+            self.push_error(&e);
+        }
+        if ops.is_empty() {
+            return (0, 0);
+        }
+        self.push_undo("Python edit");
+        self.apply_entity_batch(ops)
     }
     // ── XDATA convenience ──────────────────────────────────────────────────
     // Plugins persist domain data as XDATA on plain entities so it round-trips
@@ -223,6 +298,32 @@ impl<'a> HostSession<'a> {
 
     pub fn push_error(&mut self, msg: &str) {
         self.app.command_line.push_error(msg);
+    }
+}
+
+impl EntityBatchEditor for HostSession<'_> {
+    fn add_entity(&mut self, entity: EntityType) -> Handle {
+        self.app.tabs[self.tab]
+            .scene
+            .document
+            .add_entity(entity)
+            .unwrap_or(Handle::NULL)
+    }
+
+    fn update_entity(&mut self, entity: EntityType) -> bool {
+        let handle = entity.common().handle;
+        let Some(slot) = self.app.tabs[self.tab].scene.document.get_entity_mut(handle) else {
+            return false;
+        };
+        *slot = entity;
+        true
+    }
+
+    fn remove_entity(&mut self, handle: Handle) -> Option<EntityType> {
+        if self.document().get_entity(handle).is_none() {
+            return None;
+        }
+        self.document_mut().remove_entity(handle)
     }
 }
 
@@ -377,6 +478,19 @@ impl HostApi for HostSession<'_> {
     }
     fn current_process(&self) -> Option<std::sync::Arc<ocs_plugin_api::process::PluginProcess>> {
         self.current_process.clone()
+    }
+    fn document_full_snapshot(&mut self) -> Option<ocs_plugin_api::shm::DocumentFullSnapshotInfo> {
+        self.document_full_snapshot()
+    }
+    fn document_mutation_queue(&mut self) -> Option<ocs_plugin_api::shm::DocumentMutationQueueInfo> {
+        self.document_mutation_queue()
+    }
+    fn document_refresh_requested(&mut self) -> (usize, usize) {
+        self.document_refresh_requested()
+    }
+    fn apply_entity_batch(&mut self, ops: Vec<EntityOp>) -> (usize, usize) {
+        self.push_undo("Python edit");
+        self.apply_entity_batch(ops)
     }
 }
 

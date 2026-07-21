@@ -63,6 +63,17 @@ pub fn handle_plugin_request(
             },
             None => PluginResponse::Error("shared document view unavailable".to_string()),
         },
+        OpenDocumentFullSnapshot => match host.document_full_snapshot() {
+            Some(info) => PluginResponse::DocumentFullSnapshot {
+                path: info.path,
+                version: info.version,
+            },
+            None => PluginResponse::Error("full document snapshot unavailable".to_string()),
+        },
+        OpenMutationQueue => match host.document_mutation_queue() {
+            Some(info) => PluginResponse::MutationQueue { path: info.path },
+            None => PluginResponse::Error("mutation queue unavailable".to_string()),
+        },
         OpenPanel { def } => PluginResponse::PanelHandleResult(host.open_panel(&def)),
         ClosePanel { handle } => PluginResponse::PanelResult(host.close_panel(handle)),
         MovePanel { handle, x, y } => PluginResponse::PanelResult(host.move_panel(handle, x, y)),
@@ -101,6 +112,10 @@ pub fn handle_plugin_request(
                 }
             }
             PluginResponse::Count(removed)
+        }
+        EntityBatch { ops } => {
+            let (applied, failed) = host.apply_entity_batch(ops);
+            PluginResponse::BatchResult { applied, failed }
         }
     }
 }
