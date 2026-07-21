@@ -1,0 +1,7 @@
+/ocs_python_repl.dll
+*.pyd
+*.so
+*.dylib
+_ocs_bootstrap.py
+_ocs_config.json
+_ocs_python.log
