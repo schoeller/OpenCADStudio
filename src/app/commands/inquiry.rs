@@ -583,6 +583,13 @@ impl OpenCADStudio {
                     temp_handles: vec![],
                     forward,
                     inverse,
+                    // Everything allocated from here on is part of the session.
+                    handle_watermark: self
+                        .tabs[i]
+                        .scene
+                        .document
+                        .next_handle()
+                        .max(self.tabs[i].scene.document.header.handle_seed),
                 };
 
                 self.push_undo_snapshot(i, "REFEDIT");
@@ -649,15 +656,35 @@ impl OpenCADStudio {
 
                 self.push_undo_snapshot(i, "REFCLOSE");
 
+                // The working set: the temp copies PLUS everything the user
+                // created in this space during the session (drawn / pasted /
+                // offset entities carry handles at or above the watermark) —
+                // those must fold into the block too, not stay behind in
+                // model space (#423).
+                let working: Vec<acadrust::Handle> = {
+                    let space = self.tabs[i].scene.current_layout_block_handle_pub();
+                    let drawn = self.tabs[i].scene.document.entities().filter(|e| {
+                        let c = e.common();
+                        c.owner_handle == space
+                            && c.handle.value() >= session.handle_watermark
+                            && !session.temp_handles.contains(&c.handle)
+                    });
+                    session
+                        .temp_handles
+                        .iter()
+                        .copied()
+                        .chain(drawn.map(|e| e.common().handle))
+                        .collect()
+                };
+
                 // Collect the edited temp entities.
-                let new_entities: Vec<acadrust::EntityType> = session
-                    .temp_handles
+                let new_entities: Vec<acadrust::EntityType> = working
                     .iter()
                     .filter_map(|h| self.tabs[i].scene.document.get_entity(*h).cloned())
                     .collect();
 
                 // Remove temp entities from model space.
-                self.tabs[i].scene.erase_entities(&session.temp_handles);
+                self.tabs[i].scene.erase_entities(&working);
 
                 // Apply inverse INSERT transform → block-local coordinates.
                 let new_entities: Vec<_> = new_entities
@@ -720,8 +747,24 @@ impl OpenCADStudio {
                         return Some(Task::none());
                     }
                 };
-                // Remove temp entities without modifying the block.
-                self.tabs[i].scene.erase_entities(&session.temp_handles);
+                // Remove the working set without modifying the block — the
+                // temp copies plus anything created during the session (#423).
+                let working: Vec<acadrust::Handle> = {
+                    let space = self.tabs[i].scene.current_layout_block_handle_pub();
+                    let drawn = self.tabs[i].scene.document.entities().filter(|e| {
+                        let c = e.common();
+                        c.owner_handle == space
+                            && c.handle.value() >= session.handle_watermark
+                            && !session.temp_handles.contains(&c.handle)
+                    });
+                    session
+                        .temp_handles
+                        .iter()
+                        .copied()
+                        .chain(drawn.map(|e| e.common().handle))
+                        .collect()
+                };
+                self.tabs[i].scene.erase_entities(&working);
                 self.tabs[i].scene.deselect_all();
                 // End the edit fade — restore the drawing to full brightness.
                 self.tabs[i].scene.set_refedit_keep(None);

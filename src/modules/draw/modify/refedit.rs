@@ -55,6 +55,12 @@ pub struct RefEditSession {
     pub forward: acadrust::types::Transform,
     /// World → block-local, applied on SAVE to bring edits back.
     pub inverse: acadrust::types::Transform,
+    /// Handle watermark captured before the temp copies were created: every
+    /// entity allocated at or above it during the session (drawn, pasted,
+    /// offset, …) belongs to the working set, so Save folds it into the block
+    /// and Discard removes it (#423). Catches every creation path without
+    /// per-command hooks.
+    pub handle_watermark: u64,
 }
 
 // ── REFEDIT pick command ───────────────────────────────────────────────────
