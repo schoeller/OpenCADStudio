@@ -222,16 +222,34 @@ fn check_family(
 @fragment fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     if !in_polygon(v.xz) { discard; }
 
-    if h.mode == 1u {
+    let base_mode = h.mode & 0xFFu;
+    let gk = (h.mode >> 8u) & 15u;
+    let ginv = ((h.mode >> 8u) & 16u) != 0u;
+    if base_mode == 1u {
         return h.color;
-    } else if h.mode == 2u {
+    } else if base_mode == 2u {
         let proj = v.xz.x * h.grad_cos + v.xz.y * h.grad_sin;
-        let t    = clamp((proj - h.grad_min) / h.grad_range, 0.0, 1.0);
+        var t    = clamp((proj - h.grad_min) / h.grad_range, 0.0, 1.0);
+        // Shape profile: cylinder mirrors around the middle, curved eases in.
+        if gk == 1u {
+            t = 1.0 - abs(2.0 * t - 1.0);
+        } else if gk == 4u {
+            t = t * t;
+        }
+        if ginv {
+            t = 1.0 - t;
+        }
         return mix(h.color, h.color2, t);
-    } else if h.mode == 3u {
+    } else if base_mode == 3u {
         // Radial gradient: centre is (grad_cos, grad_sin), radius is grad_range.
         let d = length(v.xz - vec2<f32>(h.grad_cos, h.grad_sin));
-        let t = clamp(d / h.grad_range, 0.0, 1.0);
+        var t = clamp(d / h.grad_range, 0.0, 1.0);
+        if gk == 3u {
+            t = sqrt(t);
+        }
+        if ginv {
+            t = 1.0 - t;
+        }
         return mix(h.color, h.color2, t);
     }
 

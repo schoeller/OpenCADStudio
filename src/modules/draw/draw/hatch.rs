@@ -375,6 +375,10 @@ pub struct GradientCommand {
     mode: Mode,
     manual_pts: Vec<DVec3>,
     missed: bool,
+    /// Gradient shape, switchable via the prompt options (#415).
+    kind: crate::scene::model::hatch_model::GradientKind,
+    /// Swap the two colour stops.
+    invert: bool,
 }
 
 impl GradientCommand {
@@ -384,6 +388,8 @@ impl GradientCommand {
             mode: Mode::PickInside,
             manual_pts: vec![],
             missed: false,
+            kind: crate::scene::model::hatch_model::GradientKind::Linear,
+            invert: false,
         }
     }
 
@@ -394,9 +400,10 @@ impl GradientCommand {
             pattern: HatchPattern::Gradient {
                 angle_deg: 0.0,
                 color2: [0.18, 0.18, 0.18, 0.0],
-                radial: false,
+                kind: self.kind,
+                invert: self.invert,
             },
-            name: "LINEAR".into(),
+            name: self.kind.dxf_name(self.invert).into(),
             color: [0.30, 0.60, 0.95, 0.80],
             angle_offset: 0.0,
             scale: 1.0,
@@ -420,7 +427,11 @@ impl CadCommand for GradientCommand {
                 } else {
                     ""
                 };
-                format!("GRADIENT  Pick internal point:{miss}")
+                format!(
+                    "GRADIENT ({}{})  Pick internal point:{miss}",
+                    self.kind.label(),
+                    if self.invert { ", inverted" } else { "" }
+                )
             }
             Mode::Manual => {
                 if self.manual_pts.is_empty() {
@@ -435,7 +446,19 @@ impl CadCommand for GradientCommand {
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
         match &self.mode {
-            Mode::PickInside => vec![CmdOption::new("Draw manually", "S")],
+            Mode::PickInside => {
+                let mut opts = vec![CmdOption::new("Draw manually", "S")];
+                for k in crate::scene::model::hatch_model::GradientKind::ALL {
+                    if k != self.kind {
+                        opts.push(CmdOption::new(k.label(), k.label()));
+                    }
+                }
+                opts.push(CmdOption::new(
+                    if self.invert { "Invert: on" } else { "Invert: off" },
+                    "I",
+                ));
+                opts
+            }
             Mode::Manual => {
                 // Enter accepts the boundary once at least 3 points are picked.
                 if self.manual_pts.len() >= 3 {
@@ -493,9 +516,23 @@ impl CadCommand for GradientCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        if text.trim().eq_ignore_ascii_case("s") {
+        let t = text.trim();
+        if t.eq_ignore_ascii_case("s") {
             self.mode = Mode::Manual;
             self.missed = false;
+            return Some(CmdResult::NeedPoint);
+        }
+        // Gradient type keywords / buttons + the invert toggle (#415).
+        if t.eq_ignore_ascii_case("i") || t.eq_ignore_ascii_case("invert") {
+            self.invert = !self.invert;
+            return Some(CmdResult::NeedPoint);
+        }
+        if let Some(k) = crate::scene::model::hatch_model::GradientKind::ALL
+            .iter()
+            .copied()
+            .find(|k| k.label().eq_ignore_ascii_case(t))
+        {
+            self.kind = k;
             return Some(CmdResult::NeedPoint);
         }
         None

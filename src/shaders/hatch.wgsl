@@ -59,7 +59,7 @@ struct HatchInstance {
     family_count:    u32,
     draw_depth:      f32,          // signed (-1,1) draw-order bias; 0 = neutral
     poly_test:       u32,         // 1 = run in_polygon (fallback), 0 = skip
-    _pad1:           u32,
+    grad_kind:       u32,         // shape (0=linear,1=cyl,2=sph,3=hemi,4=curved), bit4=invert
     _pad2:           u32,
 }
 
@@ -272,12 +272,29 @@ fn check_family(
         return inst.color;
     } else if inst.mode == 2u {
         let proj = v.xz.x * inst.grad_cos + v.xz.y * inst.grad_sin;
-        let t = clamp((proj - inst.grad_min) / inst.grad_range, 0.0, 1.0);
+        var t = clamp((proj - inst.grad_min) / inst.grad_range, 0.0, 1.0);
+        // Shape profile: cylinder mirrors around the middle, curved eases in.
+        let k = inst.grad_kind & 15u;
+        if k == 1u {
+            t = 1.0 - abs(2.0 * t - 1.0);
+        } else if k == 4u {
+            t = t * t;
+        }
+        if (inst.grad_kind & 16u) != 0u {
+            t = 1.0 - t;
+        }
         return mix(inst.color, inst.color2, t);
     } else if inst.mode == 3u {
         // Radial gradient: centre is (grad_cos, grad_sin), radius is grad_range.
         let d = length(v.xz - vec2<f32>(inst.grad_cos, inst.grad_sin));
-        let t = clamp(d / inst.grad_range, 0.0, 1.0);
+        var t = clamp(d / inst.grad_range, 0.0, 1.0);
+        // Hemispherical shades faster near the centre (dome profile).
+        if (inst.grad_kind & 15u) == 3u {
+            t = sqrt(t);
+        }
+        if (inst.grad_kind & 16u) != 0u {
+            t = 1.0 - t;
+        }
         return mix(inst.color, inst.color2, t);
     }
 

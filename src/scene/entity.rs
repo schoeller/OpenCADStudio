@@ -1418,14 +1418,13 @@ impl Scene {
             gradient_color1 = stop(0);
             let color2 = stop(1).unwrap_or(color);
             let angle_deg = dxf.pattern_angle.to_degrees() as f32;
-            // Spherical / hemispherical / curved names are radial fills; linear
-            // and cylinder names run along the angle.
-            let n = dxf.gradient_color.name.to_ascii_uppercase();
-            let radial = n.contains("SPHERICAL") || n.contains("CURVED");
+            let (kind, invert) =
+                model::hatch_model::GradientKind::from_name(&dxf.gradient_color.name);
             model::hatch_model::HatchPattern::Gradient {
                 angle_deg,
                 color2,
-                radial,
+                kind,
+                invert,
             }
         } else if dxf.is_solid {
             model::hatch_model::HatchPattern::Solid
@@ -1885,6 +1884,50 @@ impl Scene {
         } else {
             1.0
         };
+        // A gradient fill must be encoded on the DXF entity itself: the render
+        // model is rebuilt from the entity below (`add_entity` →
+        // `hatch_model_from_dxf`), so a gradient kept only on the command's
+        // model silently degraded to a plain pattern hatch.
+        if let crate::scene::model::hatch_model::HatchPattern::Gradient {
+            angle_deg,
+            color2,
+            kind,
+            invert,
+        } = &model.pattern
+        {
+            let to_color = |c: [f32; 4]| acadrust::types::Color::Rgb {
+                r: (c[0] * 255.0).round().clamp(0.0, 255.0) as u8,
+                g: (c[1] * 255.0).round().clamp(0.0, 255.0) as u8,
+                b: (c[2] * 255.0).round().clamp(0.0, 255.0) as u8,
+            };
+            dxf.is_solid = true;
+            dxf.gradient_color.enabled = true;
+            dxf.gradient_color.name = kind.dxf_name(*invert).to_string();
+            // The render model reads the gradient angle from pattern_angle
+            // (radians); the gradient record keeps its own copy for the file.
+            dxf.pattern_angle = (*angle_deg as f64).to_radians();
+            dxf.gradient_color.angle = (*angle_deg as f64).to_radians();
+            dxf.gradient_color.is_single_color = false;
+            // Linear has no INV name in the standard set: persist an inverted
+            // linear by swapping the colour stops instead.
+            let (c0, c1) =
+                if *invert && matches!(kind, crate::scene::model::hatch_model::GradientKind::Linear)
+                {
+                    (*color2, model.color)
+                } else {
+                    (model.color, *color2)
+                };
+            dxf.gradient_color.colors = vec![
+                acadrust::entities::hatch::GradientColorEntry {
+                    value: 0.0,
+                    color: to_color(c0),
+                },
+                acadrust::entities::hatch::GradientColorEntry {
+                    value: 1.0,
+                    color: to_color(c1),
+                },
+            ];
+        }
 
         // `add_entity` already builds the render model from the DXF entity via
         // `hatch_model_from_dxf` and inserts it with a correct `world_origin`

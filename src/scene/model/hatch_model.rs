@@ -29,6 +29,93 @@ pub struct PatFamily {
     pub dashes: Vec<f32>,
 }
 
+/// The standard gradient fill shapes. Spherical / Hemispherical run from the
+/// boundary centre outward; the others run along `angle_deg`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GradientKind {
+    Linear,
+    Cylinder,
+    Spherical,
+    Hemispherical,
+    Curved,
+}
+
+impl GradientKind {
+    pub const ALL: [GradientKind; 5] = [
+        GradientKind::Linear,
+        GradientKind::Cylinder,
+        GradientKind::Spherical,
+        GradientKind::Hemispherical,
+        GradientKind::Curved,
+    ];
+
+    /// Radial fills shade from the boundary centre outward.
+    pub fn radial(self) -> bool {
+        matches!(self, GradientKind::Spherical | GradientKind::Hemispherical)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            GradientKind::Linear => "Linear",
+            GradientKind::Cylinder => "Cylinder",
+            GradientKind::Spherical => "Spherical",
+            GradientKind::Hemispherical => "Hemispherical",
+            GradientKind::Curved => "Curved",
+        }
+    }
+
+    pub fn from_label(label: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|k| k.label() == label)
+    }
+
+    /// Parse the DXF gradient name (`LINEAR`, `INVCYLINDER`, …) into the kind
+    /// plus its inverted flag. Unknown names read as Linear.
+    pub fn from_name(name: &str) -> (Self, bool) {
+        let n = name.trim().to_ascii_uppercase();
+        let invert = n.starts_with("INV");
+        let base = n.trim_start_matches("INV");
+        let kind = if base.contains("CYL") {
+            GradientKind::Cylinder
+        } else if base.contains("HEMI") {
+            GradientKind::Hemispherical
+        } else if base.contains("SPHER") {
+            GradientKind::Spherical
+        } else if base.contains("CURV") {
+            GradientKind::Curved
+        } else {
+            GradientKind::Linear
+        };
+        (kind, invert)
+    }
+
+    /// The DXF gradient name. Linear has no INV variant in the standard set —
+    /// an inverted linear is persisted by swapping the colour stops instead.
+    pub fn dxf_name(self, invert: bool) -> &'static str {
+        match (self, invert) {
+            (GradientKind::Linear, _) => "LINEAR",
+            (GradientKind::Cylinder, false) => "CYLINDER",
+            (GradientKind::Cylinder, true) => "INVCYLINDER",
+            (GradientKind::Spherical, false) => "SPHERICAL",
+            (GradientKind::Spherical, true) => "INVSPHERICAL",
+            (GradientKind::Hemispherical, false) => "HEMISPHERICAL",
+            (GradientKind::Hemispherical, true) => "INVHEMISPHERICAL",
+            (GradientKind::Curved, false) => "CURVED",
+            (GradientKind::Curved, true) => "INVCURVED",
+        }
+    }
+
+    /// Shape selector for the GPU shader (`grad_kind` low bits).
+    pub fn shader_kind(self) -> u32 {
+        match self {
+            GradientKind::Linear => 0,
+            GradientKind::Cylinder => 1,
+            GradientKind::Spherical => 2,
+            GradientKind::Hemispherical => 3,
+            GradientKind::Curved => 4,
+        }
+    }
+}
+
 /// Hatch fill pattern.
 #[derive(Clone, Debug)]
 pub enum HatchPattern {
@@ -36,13 +123,13 @@ pub enum HatchPattern {
     Solid,
     /// One or more line families (PAT format).
     Pattern(Vec<PatFamily>),
-    /// Two-stop gradient from `color` to `color2`. Linear along `angle_deg`
-    /// unless `radial`, in which case it runs from the boundary centre outward
-    /// (spherical / hemispherical / curved fills).
+    /// Two-stop gradient from `color` to `color2`, shaped by `kind`; `invert`
+    /// swaps the two stops.
     Gradient {
         angle_deg: f32,
         color2: [f32; 4],
-        radial: bool,
+        kind: GradientKind,
+        invert: bool,
     },
 }
 

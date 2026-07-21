@@ -213,7 +213,33 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
                             options: vec!["Two color".into(), "One color".into()],
                         },
                     },
-                    ro("Gradient name", "gradient_name", g.name.clone()),
+                    {
+                        let (kind, invert) =
+                            crate::scene::model::hatch_model::GradientKind::from_name(&g.name);
+                        let _ = invert;
+                        Property {
+                            label: "Gradient type".into(),
+                            field: "gradient_type",
+                            value: PropValue::Choice {
+                                selected: kind.label().to_string(),
+                                options: crate::scene::model::hatch_model::GradientKind::ALL
+                                    .iter()
+                                    .map(|k| k.label().to_string())
+                                    .collect(),
+                            },
+                        }
+                    },
+                    Property {
+                        label: "Invert".into(),
+                        field: "gradient_invert",
+                        value: PropValue::BoolToggle {
+                            field: "gradient_invert",
+                            value: crate::scene::model::hatch_model::GradientKind::from_name(
+                                &g.name,
+                            )
+                            .1,
+                        },
+                    },
                     Property {
                         label: "Color 1".into(),
                         field: "gradient_color_1",
@@ -425,6 +451,30 @@ fn apply_geom_prop(h: &mut Hatch, field: &str, value: &str) {
         }
         "fill_type" => {
             h.gradient_color.is_single_color = value == "One color";
+            return;
+        }
+        // Gradient shape selection + stop inversion (#415). Both re-derive the
+        // standard DXF gradient name; Linear has no INV name, so inverting a
+        // linear swaps the colour stops instead.
+        "gradient_type" => {
+            use crate::scene::model::hatch_model::GradientKind;
+            let (_, invert) = GradientKind::from_name(&h.gradient_color.name);
+            if let Some(kind) = GradientKind::from_label(value) {
+                h.gradient_color.name = kind.dxf_name(invert).to_string();
+            }
+            return;
+        }
+        "gradient_invert" => {
+            use crate::scene::model::hatch_model::GradientKind;
+            let (kind, invert) = GradientKind::from_name(&h.gradient_color.name);
+            let invert = !invert;
+            if matches!(kind, GradientKind::Linear) {
+                if h.gradient_color.colors.len() >= 2 {
+                    h.gradient_color.colors.swap(0, 1);
+                }
+            } else {
+                h.gradient_color.name = kind.dxf_name(invert).to_string();
+            }
             return;
         }
         _ => {}

@@ -105,16 +105,19 @@ impl HatchWebGpu {
         bgl1: &wgpu::BindGroupLayout,
     ) -> Self {
         // ── Decode pattern mode (mirrors WipeoutGpu::new) ─────────────────
+        // The gradient shape (kind + invert bit) rides in the mode's high
+        // bits — the 96-byte uniform has no spare slot.
         let (mode, color2, grad_cos, grad_sin) = match &model.pattern {
             HatchPattern::Solid => (1u32, [0.0f32; 4], 0.0f32, 0.0f32),
             HatchPattern::Pattern(_) => (0u32, [0.0f32; 4], 0.0f32, 0.0f32),
-            HatchPattern::Gradient { angle_deg, color2, radial } => {
-                if *radial {
+            HatchPattern::Gradient { angle_deg, color2, kind, invert } => {
+                let gk = (kind.shader_kind() | if *invert { 16 } else { 0 }) << 8;
+                if kind.radial() {
                     // Radial: centre is the local origin; grad_cos/sin unused.
-                    (3u32, *color2, 0.0, 0.0)
+                    (3u32 | gk, *color2, 0.0, 0.0)
                 } else {
                     let r = angle_deg.to_radians();
-                    (2u32, *color2, r.cos(), r.sin())
+                    (2u32 | gk, *color2, r.cos(), r.sin())
                 }
             }
         };

@@ -85,7 +85,8 @@ pub struct HatchInstance {
     /// an instance whose boundary failed to tessellate); 0 = the rasterized
     /// triangles already bound the fill, skip the test.
     pub poly_test: u32,             // 116
-    pub _pad1: u32,                 // 120
+    /// Gradient shape (`GradientKind::shader_kind`), bit 4 = inverted stops.
+    pub grad_kind: u32,             // 120
     pub _pad2: u32,                 // 124
 }
 
@@ -223,10 +224,12 @@ impl HatchGpu {
             let family_offset = families.len() as u32;
             let mut family_count = 0u32;
 
+            let mut grad_kind = 0u32;
             let (mode, color2, grad_cos, grad_sin, grad_min, grad_range) = match &h.pattern {
                 HatchPattern::Solid => (1u32, [0.0; 4], 0.0, 0.0, 0.0, 1.0),
-                HatchPattern::Gradient { angle_deg, color2, radial } => {
-                    if *radial {
+                HatchPattern::Gradient { angle_deg, color2, kind, invert } => {
+                    grad_kind = kind.shader_kind() | if *invert { 16 } else { 0 };
+                    if kind.radial() {
                         // Radial fill: the boundary is stored relative to its
                         // centre (`world_origin`), so the centre is the local
                         // origin; radius = the farthest boundary vertex. mode 3.
@@ -319,7 +322,7 @@ impl HatchGpu {
                     family_count,
                     draw_depth: h.draw_depth,
                     poly_test: 1,
-                    _pad1: 0,
+                    grad_kind,
                     _pad2: 0,
                 });
                 continue;
@@ -367,7 +370,7 @@ impl HatchGpu {
                 // boundary complexity, so a hatch-dense drawing can't overflow
                 // the device buffer limit. Each instance draws its AABB quad.
                 poly_test: 1,
-                _pad1: 0,
+                grad_kind,
                 _pad2: 0,
             });
         }
