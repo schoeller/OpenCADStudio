@@ -274,14 +274,20 @@ impl OpenCADStudio {
         let live_a = dy.atan2(dx); // radians, in the UCS plane
         // A typed angle is shown unsigned (0..180); give it the sign of the
         // cursor's current side so an entry made below the X axis sweeps
-        // downward to match the arc instead of mirroring up. Untyped → live.
+        // downward to match the arc instead of mirroring up. An EXPLICIT
+        // `-`/`+` prefix keeps its literal sign though — "-30" must mean
+        // −30° (= 330°) regardless of where the cursor sits (#417).
+        // Untyped → live.
         let angle_rad = |idx: usize| -> f64 {
-            match fields[idx]
+            let raw = fields[idx]
                 .buffer
                 .as_ref()
-                .map(|s| s.trim().replace(',', "."))
-                .and_then(|s| crate::app::expr_eval::eval_number(&s))
-            {
+                .map(|s| s.trim().replace(',', "."));
+            let explicit_sign = raw
+                .as_deref()
+                .is_some_and(|s| s.starts_with('-') || s.starts_with('+'));
+            match raw.and_then(|s| crate::app::expr_eval::eval_number(&s)) {
+                Some(v) if explicit_sign => v.to_radians(),
                 Some(mag) => mag.abs().to_radians().copysign(dy),
                 None => live_a,
             }
