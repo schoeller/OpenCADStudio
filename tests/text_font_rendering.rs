@@ -5,6 +5,7 @@ use acadrust::{CadDocument, EntityType, Handle};
 use OpenCADStudio::scene::cache::block_cache::{expand_insert, BlockCache};
 use OpenCADStudio::scene::view::render::InheritStyle;
 use OpenCADStudio::scene::WireModel;
+use rustc_hash::FxHashMap;
 
 fn drawable_point_count(wires: &[WireModel]) -> usize {
     // SDF text carries glyph quads on `text_verts` (no stroke points/fills), so
@@ -49,7 +50,8 @@ fn expand_block_mtext(
 
     let ins = Insert::new("LABEL_BLOCK", insert_at);
     doc.add_entity(EntityType::Insert(ins.clone())).unwrap();
-    let cache = BlockCache::build(&doc, 1.0, [0.0, 0.0, 0.0, 1.0]);
+    let depth_map = FxHashMap::default();
+    let cache = BlockCache::build(&doc, 1.0, [0.0, 0.0, 0.0, 1.0], &depth_map);
     expand_insert(
         &cache,
         &ins,
