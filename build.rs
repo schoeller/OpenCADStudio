@@ -17,6 +17,16 @@ fn main() {
     // own icon (Explorer, taskbar, Start-menu tile, file associations). The
     // .ico is produced from assets/logo.svg by the release workflow before the
     // build; when it is absent (local/dev builds) this is skipped. See #107.
+    //
+    // The Start page (`src/app/view/mod.rs`) builds a very large widget tree in
+    // one function; in unoptimized debug builds the compiler keeps many large
+    // `Element` values on the stack and the default 1 MiB Windows stack is not
+    // enough. Bump the executable stack reservation to 8 MiB on Windows so local
+    // debug runs start reliably. (#312)
+    #[cfg(windows)]
+    {
+        println!("cargo:rustc-link-arg=/STACK:8388608");
+    }
     #[cfg(windows)]
     {
         println!("cargo:rerun-if-changed=packaging/windows/AppIcon.ico");
