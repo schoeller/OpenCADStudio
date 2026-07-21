@@ -5,7 +5,7 @@ def roundtrip_1000_points():
     pts = [(random.uniform(0, 1000), random.uniform(0, 1000), 0.0) for _ in range(1000)]
 
     t0 = time.perf_counter()
-    ocs.doc.add_many(ocs.Point(x, y, z, layer="PTS") for x, y, z in pts)
+    ocs.doc.add_points(pts, layer="PTS")
     ocs.doc.commit()
     t1 = time.perf_counter()
     add_time = t1 - t0

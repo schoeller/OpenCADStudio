@@ -7,6 +7,42 @@ use ocs_plugin_api::shm::EntityOp;
 
 use crate::geometry::PyVector3;
 
+/// Build a batch of `EntityOp::Add(Line)` operations from raw endpoint pairs.
+pub(crate) fn line_ops(
+    lines: Vec<((f64, f64, f64), (f64, f64, f64))>,
+    layer: String,
+) -> Vec<EntityOp> {
+    use acadrust::entities::Line;
+    use acadrust::types::Vector3;
+    lines
+        .into_iter()
+        .map(|((x1, y1, z1), (x2, y2, z2))| {
+            let mut l = Line::from_points(
+                Vector3::new(x1, y1, z1),
+                Vector3::new(x2, y2, z2),
+            );
+            l.common.layer = layer.clone();
+            EntityOp::Add(EntityType::Line(l))
+        })
+        .collect()
+}
+
+/// Build a batch of `EntityOp::Add(Point)` operations from raw coordinates.
+/// Used by the fast vectorized `Document.add_points` path to avoid creating
+/// one Python `Point` object per entity.
+pub(crate) fn point_ops(points: Vec<(f64, f64, f64)>, layer: String) -> Vec<EntityOp> {
+    use acadrust::entities::Point;
+    use acadrust::types::Vector3;
+    points
+        .into_iter()
+        .map(|(x, y, z)| {
+            let mut p = Point::at(Vector3::new(x, y, z));
+            p.common.layer = layer.clone();
+            EntityOp::Add(EntityType::Point(p))
+        })
+        .collect()
+}
+
 /// Return a short type name for an enum variant (e.g. "Point", "Hatch").
 fn entity_kind_name(entity: impl std::fmt::Debug) -> String {
     let s = format!("{:?}", entity);

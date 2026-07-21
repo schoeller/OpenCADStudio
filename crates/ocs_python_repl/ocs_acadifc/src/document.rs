@@ -182,6 +182,42 @@ impl PyDocument {
         Ok(())
     }
 
+    /// Fast vectorized path for adding a large number of points. Avoids the
+    /// per-entity Python object creation overhead of `add_many` for homogeneous
+    /// point batches.
+    fn add_points(&self, points: Vec<(f64, f64, f64)>, layer: Option<String>) -> PyResult<()> {
+        let ops = crate::entities::point_ops(points, layer.unwrap_or_else(|| "0".to_string()));
+        let expected = ops.len();
+        let mut queue = open_queue()?;
+        let queued = queue.push_many(ops.into_iter()).map_err(queue_err)?;
+        if queued < expected {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "mutation queue overflow: queued {queued} of {expected} point operations; call commit() more often"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Fast vectorized path for adding a large number of lines. Avoids the
+    /// per-entity Python object creation overhead of `add_many` for homogeneous
+    /// line batches.
+    fn add_lines(
+        &self,
+        lines: Vec<((f64, f64, f64), (f64, f64, f64))>,
+        layer: Option<String>,
+    ) -> PyResult<()> {
+        let ops = crate::entities::line_ops(lines, layer.unwrap_or_else(|| "0".to_string()));
+        let expected = ops.len();
+        let mut queue = open_queue()?;
+        let queued = queue.push_many(ops.into_iter()).map_err(queue_err)?;
+        if queued < expected {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "mutation queue overflow: queued {queued} of {expected} line operations; call commit() more often"
+            )));
+        }
+        Ok(())
+    }
+
     fn remove_all(&self) -> PyResult<()> {
         self.ensure_current_no_py()?;
         let doc = self.cached_doc.borrow();

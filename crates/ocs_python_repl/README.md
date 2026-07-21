@@ -52,7 +52,7 @@ The Python REPL plugin lets users write, run, and debug Python scripts that read
 ### Why this design
 
 - **Decoupling**: Python is not linked into the host process, so a buggy script cannot crash the editor.
-- **Performance**: bulk `add_many`/`remove_all` cross the Python/Rust boundary once, and the 1000-point roundtrip completes in about **0.03 s** (Python side) / **0.10 s** (host side).
+- **Performance**: bulk `add_many`/`remove_all` cross the Python/Rust boundary once, and the 1000-point roundtrip completes in about **0.03 s** (Python side) / **0.10 s** (host side). For very large point batches, use `ocs.doc.add_points` to avoid per-entity Python object creation.
 - **Windows compatibility**: the full snapshot uses open/write/close file I/O instead of cross-process memory mapping, avoiding the hangs seen with `mmap` on Windows.
 
 ### Crate layout
