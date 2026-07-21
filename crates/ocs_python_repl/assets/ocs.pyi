@@ -284,3 +284,11 @@ def make_spline(
     is_closed: bool = False,
     layer: Optional[str] = None,
 ) -> Spline: ...
+
+class Debug:
+    @staticmethod
+    def start(port: int = 5678) -> None: ...
+    @staticmethod
+    def wait_for_client() -> None: ...
+
+debug: Debug

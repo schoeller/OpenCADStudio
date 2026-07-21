@@ -9,6 +9,7 @@ use interprocess::local_socket::{GenericNamespaced, Stream, ToNsName};
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
+mod debug;
 mod document;
 mod entities;
 mod geometry;
@@ -240,6 +241,7 @@ fn ocs_acadifc(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyVector3>()?;
     m.add_class::<PyColor>()?;
     m.add_class::<PyMutationQueue>()?;
+    debug::init_module(py, m)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     try_auto_init(py, m)?;
     Ok(())

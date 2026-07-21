@@ -48,6 +48,10 @@ pub fn create() -> io::Result<PathBuf> {
         zed_dir.join("settings.json"),
         include_str!("../assets/.zed/settings.json"),
     )?;
+    std::fs::write(
+        zed_dir.join("debug.json"),
+        include_str!("../assets/.zed/debug.json"),
+    )?;
 
     Ok(dir)
 }
@@ -70,6 +74,7 @@ mod tests {
         assert!(dir.join("pyrightconfig.json").exists());
         assert!(dir.join(".vscode").join("launch.json").exists());
         assert!(dir.join(".zed").join("settings.json").exists());
+        assert!(dir.join(".zed").join("debug.json").exists());
         // ocs.py must NOT be present; the runtime module comes from the
         // ocs_acadifc extension loaded by the REPL bootstrap.
         assert!(!dir.join("ocs.py").exists());
