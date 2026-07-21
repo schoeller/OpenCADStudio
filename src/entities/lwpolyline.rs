@@ -504,6 +504,18 @@ fn apply_geom_prop(pline: &mut LwPolyline, field: &str, value: &str) {
             } else {
                 value == "true"
             };
+            // Closing a polyline whose last vertex already sits on the first
+            // would stack two control points there (a polyline drawn back to
+            // its start point and then closed) — drop the duplicate so the
+            // closing segment replaces it (#421).
+            if pline.is_closed && pline.vertices.len() > 2 {
+                let (first, last) = (&pline.vertices[0], pline.vertices.last().unwrap());
+                let d2 = (first.location.x - last.location.x).powi(2)
+                    + (first.location.y - last.location.y).powi(2);
+                if d2 < 1e-12 {
+                    pline.vertices.pop();
+                }
+            }
             return;
         }
         "plinegen" => {

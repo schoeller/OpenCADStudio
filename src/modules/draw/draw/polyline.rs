@@ -270,6 +270,20 @@ impl CadCommand for PlineCommand {
             self.bulges[last_idx] = bulge;
         }
 
+        // A point landing back on the FIRST vertex (endpoint snap) closes the
+        // polyline instead of stacking a duplicate vertex there — the segment
+        // bulge just computed above already describes the closing segment
+        // (#421). Line mode needs two real segments first so a doubled-back
+        // line isn't "closed"; an arc segment closes from two vertices.
+        if let Some(first) = self.vertices.first() {
+            let enough = self.vertices.len() >= 3
+                || (self.vertices.len() == 2 && matches!(self.mode, SegMode::Arc));
+            let d2 = (pt.x - first.x).powi(2) + (pt.y - first.y).powi(2);
+            if enough && d2 < 1e-12 {
+                return self.sync_live(true, true);
+            }
+        }
+
         self.vertices.push(pt);
         self.bulges.push(0.0);
         // Publish to the document as soon as the polyline has a segment so it
