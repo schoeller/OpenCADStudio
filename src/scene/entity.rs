@@ -10,6 +10,70 @@ use super::*;
 /// the exact stored step. `x0/y0` are filled in by the caller (from the stored
 /// `base_point`, relative to `world_origin`) once the boundary anchor is known;
 /// they set the pattern origin, observable for dashed / offset patterns.
+/// Order a hatch boundary path's sampled edges into one tip-to-tail loop.
+///
+/// Real files do not store boundary edges as a sequential walk: associative
+/// hatches list them in boundary-source-entity order, with arbitrary
+/// direction — the next edge in the list may attach to either end of the
+/// chain built so far, or belong to the far side of the loop entirely.
+/// Concatenating them verbatim draws a self-crossing "bowtie" outline and
+/// flips the even-odd fill over the wrong region.
+///
+/// Greedy nearest-endpoint assembly: keep the chain open at both ends and, at
+/// each step, attach the unused edge whose endpoint lies closest to either
+/// end (reversing / prepending as needed). Distance comparison, no tolerance:
+/// a correctly-ordered file matches at distance 0 and reproduces exactly.
+fn chain_path_edges(mut polys: Vec<Vec<[f64; 2]>>) -> Vec<[f64; 2]> {
+    let d2 = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2);
+    polys.retain(|p| !p.is_empty());
+    if polys.is_empty() {
+        return Vec::new();
+    }
+    let mut chain: std::collections::VecDeque<[f64; 2]> = polys.swap_remove(0).into();
+    while !polys.is_empty() {
+        let head = *chain.front().unwrap();
+        let tail = *chain.back().unwrap();
+        // (distance, index, reverse-points, attach-at-front)
+        let mut best = (f64::MAX, 0usize, false, false);
+        for (i, p) in polys.iter().enumerate() {
+            let s = p[0];
+            let e = *p.last().unwrap();
+            for c in [
+                (d2(tail, s), i, false, false),
+                (d2(tail, e), i, true, false),
+                (d2(head, e), i, false, true),
+                (d2(head, s), i, true, true),
+            ] {
+                if c.0 < best.0 {
+                    best = c;
+                }
+            }
+        }
+        let (_, idx, rev, at_front) = best;
+        let mut p = polys.swap_remove(idx);
+        if rev {
+            p.reverse();
+        }
+        if at_front {
+            if d2(p[p.len() - 1], head) < 1e-18 {
+                p.pop();
+            }
+            for q in p.into_iter().rev() {
+                chain.push_front(q);
+            }
+        } else {
+            let mut it = p.into_iter();
+            if let Some(first) = it.next() {
+                if d2(first, tail) >= 1e-18 {
+                    chain.push_back(first);
+                }
+            }
+            chain.extend(it);
+        }
+    }
+    chain.into()
+}
+
 fn family_from_stored_line(
     ln: &acadrust::entities::hatch::HatchPatternLine,
 ) -> crate::scene::model::hatch_model::PatFamily {
@@ -1062,6 +1126,7 @@ impl Scene {
             }
             let path_start = boundary.len();
 
+            let mut edge_polys: Vec<Vec<[f64; 2]>> = Vec::new();
             for edge in &path.edges {
                 match edge {
                     BoundaryEdge::Polyline(poly) => {
@@ -1112,8 +1177,10 @@ impl Scene {
                         }
                     }
                     BoundaryEdge::Line(line) => {
-                        boundary.push(to_xy(line.start.x, line.start.y));
-                        boundary.push(to_xy(line.end.x, line.end.y));
+                        edge_polys.push(vec![
+                            to_xy(line.start.x, line.start.y),
+                            to_xy(line.end.x, line.end.y),
+                        ]);
                     }
                     BoundaryEdge::CircularArc(arc) => {
                         let (sa, span) = convert::tess_util::arc_signed_span(
@@ -1126,13 +1193,15 @@ impl Scene {
                             span.abs(),
                             convert::tess_util::fill_chord_tol(arc.radius),
                         );
+                        let mut pts = Vec::with_capacity(segs as usize + 1);
                         for i in 0..=segs {
                             let t = sa + span * (i as f64 / segs as f64);
-                            boundary.push(to_xy(
+                            pts.push(to_xy(
                                 arc.center.x + arc.radius * t.cos(),
                                 arc.center.y + arc.radius * t.sin(),
                             ));
                         }
+                        edge_polys.push(pts);
                     }
                     BoundaryEdge::EllipticArc(ell) => {
                         let r_maj = (ell.major_axis_endpoint.x * ell.major_axis_endpoint.x
@@ -1154,15 +1223,17 @@ impl Scene {
                             convert::tess_util::fill_chord_tol(r_maj),
                         );
                         let (cr, sr) = (rot.cos(), rot.sin());
+                        let mut pts = Vec::with_capacity(segs as usize + 1);
                         for i in 0..=segs {
                             let t = sa + span * (i as f64 / segs as f64);
                             let lx = r_maj * t.cos();
                             let ly = r_min * t.sin();
-                            boundary.push(to_xy(
+                            pts.push(to_xy(
                                 ell.center.x + lx * cr - ly * sr,
                                 ell.center.y + lx * sr + ly * cr,
                             ));
                         }
+                        edge_polys.push(pts);
                     }
                     BoundaryEdge::Spline(spline) => {
                         // DXF spline control_points pack (x, y, weight) into
@@ -1207,6 +1278,7 @@ impl Scene {
                         .sqrt();
                         let tol = convert::tess_util::fill_chord_tol(diag.max(1.0));
 
+                        let mut epts: Vec<[f64; 2]> = Vec::new();
                         let mut sampled = false;
                         if knot_ok {
                             if spline.rational {
@@ -1224,7 +1296,7 @@ impl Scene {
                                 let (t0, t1) = curve.range_tuple();
                                 let (_, pts) = curve.parameter_division((t0, t1), tol);
                                 for p in pts {
-                                    boundary.push(to_xy(p.x, p.y));
+                                    epts.push(to_xy(p.x, p.y));
                                 }
                                 sampled = true;
                             } else {
@@ -1237,7 +1309,7 @@ impl Scene {
                                 let (t0, t1) = bspl.range_tuple();
                                 let (_, pts) = bspl.parameter_division((t0, t1), tol);
                                 for p in pts {
-                                    boundary.push(to_xy(p.x, p.y));
+                                    epts.push(to_xy(p.x, p.y));
                                 }
                                 sampled = true;
                             }
@@ -1254,17 +1326,19 @@ impl Scene {
                             };
                             if !pts.is_empty() {
                                 for p in pts {
-                                    boundary.push(to_xy(p.x, p.y));
+                                    epts.push(to_xy(p.x, p.y));
                                 }
                             } else {
                                 for cp in &spline.control_points {
-                                    boundary.push(to_xy(cp.x, cp.y));
+                                    epts.push(to_xy(cp.x, cp.y));
                                 }
                             }
                         }
+                        edge_polys.push(epts);
                     }
                 }
             }
+            boundary.extend(chain_path_edges(edge_polys));
 
             if boundary.len() == path_start {
                 boundary.truncate(before_path);
