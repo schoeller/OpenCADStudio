@@ -296,7 +296,8 @@ impl OpenCADStudio {
             .clamp(crate::app::recent::RECENT_MIN, crate::app::recent::RECENT_MAX);
         self.recent_files.truncate(self.recent_limit);
         self.recent_limit_input = self.recent_limit.to_string();
-        self.refresh_recent_thumbs();
+        // Thumbnails are decoded by a background task queued at boot
+        // (`refresh_recent_thumbs`) — never here on the boot path.
         self.statusbar_config = cfg.statusbar;
         self.ribbon.set_collapse_mode(cfg.ribbon.collapse);
         self.plot_dialog = cfg.plot;
@@ -396,7 +397,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                         caches.corrupt_dropped
                     ));
                 }
-                self.push_recent(path.clone());
+                let thumbs_task = self.push_recent(path.clone());
 
                 let current_is_empty = {
                     let t = &self.tabs[self.active_tab];
@@ -587,7 +588,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                 self.tabs[i].dirty = false;
                 self.tabs[i].history = crate::app::document::HistoryState::default();
                 self.refresh_selected_grips();
-                self.drain_pending_open()
+                Task::batch([thumbs_task, self.drain_pending_open()])
     }
 
     pub(super) fn on_wblock_save_result_some(&mut self, block_name: String, path: std::path::PathBuf) -> Task<Message> {
