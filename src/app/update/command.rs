@@ -256,6 +256,11 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     // text falls through to the Enter / coordinate handling
                     // below, so a bare Enter still terminates and typed points
                     // still work when dynamic input is off. See #97.
+                    // Selection keywords (P / L) at a Select objects prompt
+                    // consume the token before any other interpretation (#426).
+                    if let Some(task) = self.try_selection_keyword(&text) {
+                        return task;
+                    }
                     if self.tabs[i]
                         .active_cmd
                         .as_ref()

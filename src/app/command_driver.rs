@@ -10,6 +10,14 @@ impl OpenCADStudio {
     /// through, so the routing from input → `on_*` method → `apply_cmd_result`
     /// lives in exactly one place. No-op when no command is active.
     pub(super) fn feed_command(&mut self, input: StepInput) -> Task<Message> {
+        // Selection keywords (P / PREVIOUS, L / LAST) consume the token
+        // before it reaches the command (#426).
+        if let StepInput::Text(s) = &input {
+            let kw_input = s.clone();
+            if let Some(task) = self.try_selection_keyword(&kw_input) {
+                return task;
+            }
+        }
         let i = self.active_tab;
         let ctrl = self.ctrl_down;
         let result: Option<CmdResult> = {
@@ -91,6 +99,75 @@ impl OpenCADStudio {
     /// coordinate is parsed (and, like the GUI command line, interpreted in the
     /// active UCS); anything else is an option keyword / value. Used by both the
     /// GUI command line and headless automation.
+    /// Standard selection keywords at a "Select objects:" prompt (#426):
+    /// P / PREVIOUS re-selects the set the last command worked on, and
+    /// L / LAST selects the most recently created object in the current
+    /// space. Returns `Some` when the token was consumed as a keyword.
+    /// Handled centrally so every gathering command gets them for free.
+    pub(super) fn try_selection_keyword(&mut self, text: &str) -> Option<Task<Message>> {
+        let i = self.active_tab;
+        let gathering = self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .map_or(false, |c| c.is_selection_gathering());
+        if !gathering {
+            return None;
+        }
+        let kw = text.trim().to_ascii_uppercase();
+        let add: Vec<Handle> = match kw.as_str() {
+            "P" | "PREVIOUS" => self.tabs[i]
+                .prev_selection
+                .iter()
+                .copied()
+                .filter(|&h| {
+                    self.tabs[i].scene.document.get_entity(h).is_some()
+                        && !self.tabs[i].scene.is_layer_locked(h)
+                })
+                .collect(),
+            // Highest handle among the selectable wires of the current space —
+            // handles are handed out monotonically, so that is the most
+            // recently created object.
+            "L" | "LAST" => self.tabs[i]
+                .scene
+                .entity_wires()
+                .iter()
+                .filter_map(|w| crate::scene::Scene::handle_from_wire_name(&w.name))
+                .filter(|&h| !self.tabs[i].scene.is_layer_locked(h))
+                .max_by_key(|h| h.value())
+                .into_iter()
+                .collect(),
+            _ => return None,
+        };
+        if add.is_empty() {
+            self.command_line.push_info(match kw.as_str() {
+                "P" | "PREVIOUS" => "No previous selection set.",
+                _ => "No last object.",
+            });
+            return Some(Task::none());
+        }
+        let count = add.len();
+        for h in add {
+            self.tabs[i].scene.select_entity(h, false);
+        }
+        self.command_line
+            .push_info(&format!("{count} object(s) added to selection."));
+        self.refresh_properties();
+        let handles: Vec<Handle> = self.tabs[i]
+            .scene
+            .selected_entities()
+            .into_iter()
+            .map(|(h, _)| h)
+            .collect();
+        let result = self.tabs[i]
+            .active_cmd
+            .as_mut()
+            .map(|cmd| cmd.on_selection_complete(handles));
+        Some(match result {
+            Some(r) => self.apply_cmd_result(r),
+            None => Task::none(),
+        })
+    }
+
     pub(super) fn feed_active_cmd(&mut self, token: &str) {
         let i = self.active_tab;
         // Object-pick step: the token is a handle (as returned by `query`).
@@ -164,6 +241,10 @@ impl OpenCADStudio {
             && self.tabs[i].active_cmd.is_none()
             && !self.tabs[i].scene.selected.is_empty()
         {
+            // Remember the working set for the "Previous" selection keyword
+            // (#426) before dropping it.
+            self.tabs[i].prev_selection =
+                self.tabs[i].scene.selected.iter().copied().collect();
             self.tabs[i].scene.deselect_all();
             self.refresh_properties();
         }

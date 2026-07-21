@@ -11,7 +11,7 @@
 use acadrust::Handle;
 use glam::DVec3;
 
-use crate::command::{CadCommand, CmdResult};
+use crate::command::{CadCommand, CmdOption, CmdResult};
 use crate::scene::model::wire_model::WireModel;
 
 pub struct SelectObjectsCommand {
@@ -66,6 +66,18 @@ impl CadCommand for SelectObjectsCommand {
     // the normal selection system and calls on_selection_complete after each action.
     fn is_selection_gathering(&self) -> bool {
         true
+    }
+
+    // Clickable selection keywords (#426): Previous re-selects the set the
+    // last command worked on, Last the most recently created object. The
+    // keywords are consumed centrally in `try_selection_keyword`, so they
+    // also work typed — these buttons just surface them.
+    fn options(&self) -> Vec<CmdOption> {
+        if self.commit_on_enter {
+            vec![CmdOption::new("Previous", "P"), CmdOption::new("Last", "L")]
+        } else {
+            Vec::new()
+        }
     }
 
     fn on_selection_complete(&mut self, handles: Vec<Handle>) -> CmdResult {

@@ -170,6 +170,10 @@ pub(super) struct DocumentTab {
     pub(super) properties: PropertiesPanel,
     pub(super) layers: LayerPanel,
     pub(super) active_cmd: Option<Box<dyn CadCommand>>,
+    /// The selection set the most recent command worked on, captured when a
+    /// finishing command drops the live selection — re-selectable with the
+    /// "Previous" keyword at any Select objects prompt (#426).
+    pub(super) prev_selection: Vec<acadrust::Handle>,
     pub(super) last_cmd: Option<String>,
     pub(super) snap_result: Option<SnapResult>,
     pub(super) active_grip: Option<GripEdit>,
@@ -441,6 +445,7 @@ impl DocumentTab {
             last_published_geometry_epoch: 0,
             current_path: None,
             dirty: false,
+            prev_selection: Vec::new(),
             tab_title: format!("Drawing{}", n),
             properties: PropertiesPanel::empty(),
             layers: LayerPanel::default(),
