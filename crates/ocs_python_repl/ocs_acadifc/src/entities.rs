@@ -400,6 +400,283 @@ impl PyInsert {
     }
 }
 
+#[pyclass(name = "Hatch")]
+#[derive(Clone)]
+pub struct PyHatch {
+    pub boundary: Vec<(f64, f64)>,
+    pub is_solid: bool,
+    pub layer: String,
+}
+
+#[pymethods]
+impl PyHatch {
+    #[new]
+    #[pyo3(signature = (boundary=None, is_solid=true, layer=None))]
+    fn new(
+        boundary: Option<Vec<(f64, f64)>>,
+        is_solid: bool,
+        layer: Option<String>,
+    ) -> Self {
+        Self {
+            boundary: boundary.unwrap_or_default(),
+            is_solid,
+            layer: layer.unwrap_or_else(|| "0".to_string()),
+        }
+    }
+
+    #[getter]
+    fn boundary(&self) -> Vec<(f64, f64)> {
+        self.boundary.clone()
+    }
+
+    #[getter]
+    fn is_solid(&self) -> bool {
+        self.is_solid
+    }
+
+    #[getter]
+    fn layer(&self) -> String {
+        self.layer.clone()
+    }
+}
+
+#[pyclass(name = "Dimension")]
+#[derive(Clone)]
+pub struct PyDimension {
+    pub start: PyVector3,
+    pub end: PyVector3,
+    pub layer: String,
+}
+
+#[pymethods]
+impl PyDimension {
+    #[new]
+    #[pyo3(signature = (start=None, end=None, layer=None))]
+    fn new(
+        start: Option<PyVector3>,
+        end: Option<PyVector3>,
+        layer: Option<String>,
+    ) -> Self {
+        Self {
+            start: start.unwrap_or(PyVector3 { x: 0.0, y: 0.0, z: 0.0 }),
+            end: end.unwrap_or(PyVector3 { x: 10.0, y: 0.0, z: 0.0 }),
+            layer: layer.unwrap_or_else(|| "0".to_string()),
+        }
+    }
+
+    #[getter]
+    fn start(&self) -> PyVector3 {
+        self.start.clone()
+    }
+
+    #[getter]
+    fn end(&self) -> PyVector3 {
+        self.end.clone()
+    }
+
+    #[getter]
+    fn layer(&self) -> String {
+        self.layer.clone()
+    }
+}
+
+#[pyclass(name = "Leader")]
+#[derive(Clone)]
+pub struct PyLeader {
+    pub vertices: Vec<PyVector3>,
+    pub layer: String,
+}
+
+#[pymethods]
+impl PyLeader {
+    #[new]
+    #[pyo3(signature = (vertices=None, layer=None))]
+    fn new(
+        vertices: Option<Vec<PyVector3>>,
+        layer: Option<String>,
+    ) -> Self {
+        Self {
+            vertices: vertices.unwrap_or_default(),
+            layer: layer.unwrap_or_else(|| "0".to_string()),
+        }
+    }
+
+    #[getter]
+    fn vertices(&self) -> Vec<PyVector3> {
+        self.vertices.clone()
+    }
+
+    #[getter]
+    fn layer(&self) -> String {
+        self.layer.clone()
+    }
+}
+
+#[pyclass(name = "Viewport")]
+#[derive(Clone)]
+pub struct PyViewport {
+    pub center: PyVector3,
+    pub width: f64,
+    pub height: f64,
+    pub id: i16,
+    pub layer: String,
+}
+
+#[pymethods]
+impl PyViewport {
+    #[new]
+    #[pyo3(signature = (center=None, width=1.0, height=1.0, id=2, layer=None))]
+    fn new(
+        center: Option<PyVector3>,
+        width: f64,
+        height: f64,
+        id: i16,
+        layer: Option<String>,
+    ) -> Self {
+        Self {
+            center: center.unwrap_or(PyVector3 { x: 0.0, y: 0.0, z: 0.0 }),
+            width,
+            height,
+            id,
+            layer: layer.unwrap_or_else(|| "0".to_string()),
+        }
+    }
+
+    #[getter]
+    fn center(&self) -> PyVector3 {
+        self.center.clone()
+    }
+
+    #[getter]
+    fn width(&self) -> f64 {
+        self.width
+    }
+
+    #[getter]
+    fn height(&self) -> f64 {
+        self.height
+    }
+
+    #[getter]
+    fn id(&self) -> i16 {
+        self.id
+    }
+
+    #[getter]
+    fn layer(&self) -> String {
+        self.layer.clone()
+    }
+}
+
+#[pyclass(name = "Spline")]
+#[derive(Clone)]
+pub struct PySpline {
+    pub control_points: Vec<PyVector3>,
+    pub knots: Vec<f64>,
+    pub degree: i16,
+    pub is_closed: bool,
+    pub layer: String,
+}
+
+#[pymethods]
+impl PySpline {
+    #[new]
+    #[pyo3(signature = (control_points=None, knots=None, degree=3, is_closed=false, layer=None))]
+    fn new(
+        control_points: Option<Vec<PyVector3>>,
+        knots: Option<Vec<f64>>,
+        degree: i16,
+        is_closed: bool,
+        layer: Option<String>,
+    ) -> Self {
+        Self {
+            control_points: control_points.unwrap_or_default(),
+            knots: knots.unwrap_or_default(),
+            degree,
+            is_closed,
+            layer: layer.unwrap_or_else(|| "0".to_string()),
+        }
+    }
+
+    #[getter]
+    fn control_points(&self) -> Vec<PyVector3> {
+        self.control_points.clone()
+    }
+
+    #[getter]
+    fn knots(&self) -> Vec<f64> {
+        self.knots.clone()
+    }
+
+    #[getter]
+    fn degree(&self) -> i16 {
+        self.degree
+    }
+
+    #[getter]
+    fn is_closed(&self) -> bool {
+        self.is_closed
+    }
+
+    #[getter]
+    fn layer(&self) -> String {
+        self.layer.clone()
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (boundary=None, is_solid=true, layer=None))]
+pub fn make_hatch(
+    boundary: Option<Vec<(f64, f64)>>,
+    is_solid: bool,
+    layer: Option<String>,
+) -> PyHatch {
+    PyHatch::new(boundary, is_solid, layer)
+}
+
+#[pyfunction]
+#[pyo3(signature = (start=None, end=None, layer=None))]
+pub fn make_dimension(
+    start: Option<PyVector3>,
+    end: Option<PyVector3>,
+    layer: Option<String>,
+) -> PyDimension {
+    PyDimension::new(start, end, layer)
+}
+
+#[pyfunction]
+#[pyo3(signature = (vertices=None, layer=None))]
+pub fn make_leader(
+    vertices: Option<Vec<PyVector3>>,
+    layer: Option<String>,
+) -> PyLeader {
+    PyLeader::new(vertices, layer)
+}
+
+#[pyfunction]
+#[pyo3(signature = (center=None, width=1.0, height=1.0, id=2, layer=None))]
+pub fn make_viewport(
+    center: Option<PyVector3>,
+    width: f64,
+    height: f64,
+    id: i16,
+    layer: Option<String>,
+) -> PyViewport {
+    PyViewport::new(center, width, height, id, layer)
+}
+
+#[pyfunction]
+#[pyo3(signature = (control_points=None, knots=None, degree=3, is_closed=false, layer=None))]
+pub fn make_spline(
+    control_points: Option<Vec<PyVector3>>,
+    knots: Option<Vec<f64>>,
+    degree: i16,
+    is_closed: bool,
+    layer: Option<String>,
+) -> PySpline {
+    PySpline::new(control_points, knots, degree, is_closed, layer)
+}
+
 #[pyfunction]
 #[pyo3(signature = (value=None, x=0.0, y=0.0, z=0.0, height=2.5, layer=None))]
 pub fn make_mtext(
@@ -594,6 +871,102 @@ pub(crate) fn entity_to_py(py: Python, entity: &EntityType) -> PyResult<PyObject
             };
             Ok(py_ins.into_py(py))
         }
+        EntityType::Hatch(h) => {
+            let boundary: Vec<(f64, f64)> = h
+                .paths
+                .first()
+                .map(|p| {
+                    p.edges
+                        .iter()
+                        .filter_map(|e| match e {
+                            acadrust::entities::hatch::BoundaryEdge::Line(l) => {
+                                Some((l.start.x, l.start.y))
+                            }
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let py_hatch = PyHatch {
+                boundary,
+                is_solid: h.is_solid,
+                layer: h.common.layer.clone(),
+            };
+            Ok(py_hatch.into_py(py))
+        }
+        EntityType::Dimension(d) => {
+            use acadrust::entities::Dimension;
+            match d {
+                Dimension::Linear(dim) => {
+                    let start = PyVector3 {
+                        x: dim.first_point.x,
+                        y: dim.first_point.y,
+                        z: dim.first_point.z,
+                    };
+                    let end = PyVector3 {
+                        x: dim.second_point.x,
+                        y: dim.second_point.y,
+                        z: dim.second_point.z,
+                    };
+                    let py_dim = PyDimension {
+                        start,
+                        end,
+                        layer: dim.base.common.layer.clone(),
+                    };
+                    Ok(py_dim.into_py(py))
+                }
+                _ => {
+                    let generic = PyEntity {
+                        handle: d.base().common.handle.value(),
+                        kind: format!("{:?}", d),
+                        layer: d.base().common.layer.clone(),
+                    };
+                    Ok(generic.into_py(py))
+                }
+            }
+        }
+        EntityType::Leader(l) => {
+            let vertices: Vec<PyVector3> = l
+                .vertices
+                .iter()
+                .map(|v| PyVector3 { x: v.x, y: v.y, z: v.z })
+                .collect();
+            let py_leader = PyLeader {
+                vertices,
+                layer: l.common.layer.clone(),
+            };
+            Ok(py_leader.into_py(py))
+        }
+        EntityType::Viewport(vp) => {
+            let center = PyVector3 {
+                x: vp.center.x,
+                y: vp.center.y,
+                z: vp.center.z,
+            };
+            let py_vp = PyViewport {
+                center,
+                width: vp.width,
+                height: vp.height,
+                id: vp.id,
+                layer: vp.common.layer.clone(),
+            };
+            Ok(py_vp.into_py(py))
+        }
+        EntityType::Spline(s) => {
+            let control_points: Vec<PyVector3> = s
+                .control_points
+                .iter()
+                .map(|p| PyVector3 { x: p.x, y: p.y, z: p.z })
+                .collect();
+            let py_spline = PySpline {
+                control_points,
+                knots: s.knots.clone(),
+                degree: s.degree as i16,
+                is_closed: s.flags.closed || s.flags.periodic,
+                layer: s.common.layer.clone(),
+            };
+            Ok(py_spline.into_py(py))
+        }
         _ => {
             let generic = PyEntity {
                 handle: entity.common().handle.value(),
@@ -693,6 +1066,76 @@ pub(crate) fn py_to_entity_op(obj: &Bound<'_, PyAny>) -> PyResult<EntityOp> {
         ins.rotation = insert.rotation;
         ins.common.layer = insert.layer;
         return Ok(EntityOp::Add(EntityType::Insert(ins)));
+    }
+    if let Ok(hatch) = obj.extract::<PyHatch>() {
+        use acadrust::entities::hatch::{BoundaryEdge, BoundaryPath, LineEdge};
+        use acadrust::entities::Hatch;
+        use acadrust::types::Vector2;
+        let mut h = Hatch::new();
+        h.is_solid = hatch.is_solid;
+        if !hatch.boundary.is_empty() {
+            let mut path = BoundaryPath::new();
+            let n = hatch.boundary.len();
+            for i in 0..n {
+                let (x0, y0) = hatch.boundary[i];
+                let (x1, y1) = hatch.boundary[(i + 1) % n];
+                path.edges.push(BoundaryEdge::Line(LineEdge {
+                    start: Vector2::new(x0, y0),
+                    end: Vector2::new(x1, y1),
+                }));
+            }
+            h.paths.push(path);
+        }
+        h.common.layer = hatch.layer;
+        return Ok(EntityOp::Add(EntityType::Hatch(h)));
+    }
+    if let Ok(dimension) = obj.extract::<PyDimension>() {
+        use acadrust::entities::{Dimension, DimensionLinear};
+        use acadrust::types::Vector3;
+        let mut d = DimensionLinear::new(
+            Vector3::new(dimension.start.x, dimension.start.y, dimension.start.z),
+            Vector3::new(dimension.end.x, dimension.end.y, dimension.end.z),
+        );
+        d.base.common.layer = dimension.layer;
+        return Ok(EntityOp::Add(EntityType::Dimension(Dimension::Linear(d))));
+    }
+    if let Ok(leader) = obj.extract::<PyLeader>() {
+        use acadrust::entities::Leader;
+        use acadrust::types::Vector3;
+        let mut l = Leader::new();
+        l.vertices = leader
+            .vertices
+            .into_iter()
+            .map(|v| Vector3::new(v.x, v.y, v.z))
+            .collect();
+        l.common.layer = leader.layer;
+        return Ok(EntityOp::Add(EntityType::Leader(l)));
+    }
+    if let Ok(viewport) = obj.extract::<PyViewport>() {
+        use acadrust::entities::Viewport;
+        use acadrust::types::Vector3;
+        let mut vp = Viewport::new();
+        vp.center = Vector3::new(viewport.center.x, viewport.center.y, viewport.center.z);
+        vp.width = viewport.width;
+        vp.height = viewport.height;
+        vp.id = viewport.id;
+        vp.common.layer = viewport.layer;
+        return Ok(EntityOp::Add(EntityType::Viewport(vp)));
+    }
+    if let Ok(spline) = obj.extract::<PySpline>() {
+        use acadrust::entities::Spline;
+        use acadrust::types::Vector3;
+        let mut s = Spline::new();
+        s.degree = spline.degree as i32;
+        s.control_points = spline
+            .control_points
+            .into_iter()
+            .map(|p| Vector3::new(p.x, p.y, p.z))
+            .collect();
+        s.knots = spline.knots;
+        s.flags.closed = spline.is_closed;
+        s.common.layer = spline.layer;
+        return Ok(EntityOp::Add(EntityType::Spline(s)));
     }
     Err(pyo3::exceptions::PyTypeError::new_err(
         "entity type not supported",

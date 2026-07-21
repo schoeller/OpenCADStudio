@@ -193,3 +193,93 @@ def make_insert(
     rotation: float = 0.0,
     layer: Optional[str] = None,
 ) -> Insert: ...
+
+class Hatch(Entity):
+    boundary: List[Tuple[float, float]]
+    is_solid: bool
+    layer: str
+    def __init__(
+        self,
+        boundary: Optional[List[Tuple[float, float]]] = None,
+        is_solid: bool = True,
+        layer: Optional[str] = None,
+    ) -> None: ...
+
+class Dimension(Entity):
+    start: Vector3
+    end: Vector3
+    layer: str
+    def __init__(
+        self,
+        start: Optional[Vector3] = None,
+        end: Optional[Vector3] = None,
+        layer: Optional[str] = None,
+    ) -> None: ...
+
+class Leader(Entity):
+    vertices: List[Vector3]
+    layer: str
+    def __init__(
+        self,
+        vertices: Optional[List[Vector3]] = None,
+        layer: Optional[str] = None,
+    ) -> None: ...
+
+class Viewport(Entity):
+    center: Vector3
+    width: float
+    height: float
+    id: int
+    layer: str
+    def __init__(
+        self,
+        center: Optional[Vector3] = None,
+        width: float = 1.0,
+        height: float = 1.0,
+        id: int = 2,
+        layer: Optional[str] = None,
+    ) -> None: ...
+
+class Spline(Entity):
+    control_points: List[Vector3]
+    knots: List[float]
+    degree: int
+    is_closed: bool
+    layer: str
+    def __init__(
+        self,
+        control_points: Optional[List[Vector3]] = None,
+        knots: Optional[List[float]] = None,
+        degree: int = 3,
+        is_closed: bool = False,
+        layer: Optional[str] = None,
+    ) -> None: ...
+
+def make_hatch(
+    boundary: Optional[List[Tuple[float, float]]] = None,
+    is_solid: bool = True,
+    layer: Optional[str] = None,
+) -> Hatch: ...
+def make_dimension(
+    start: Optional[Vector3] = None,
+    end: Optional[Vector3] = None,
+    layer: Optional[str] = None,
+) -> Dimension: ...
+def make_leader(
+    vertices: Optional[List[Vector3]] = None,
+    layer: Optional[str] = None,
+) -> Leader: ...
+def make_viewport(
+    center: Optional[Vector3] = None,
+    width: float = 1.0,
+    height: float = 1.0,
+    id: int = 2,
+    layer: Optional[str] = None,
+) -> Viewport: ...
+def make_spline(
+    control_points: Optional[List[Vector3]] = None,
+    knots: Optional[List[float]] = None,
+    degree: int = 3,
+    is_closed: bool = False,
+    layer: Optional[str] = None,
+) -> Spline: ...
