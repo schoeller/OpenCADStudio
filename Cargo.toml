@@ -11,7 +11,6 @@ members = [
     "crates/dwg-thumbnailer-win",
     "crates/ocs_plugin_runner",
     "crates/ocs_pythonshell",
-    "crates/ocs_python_lsp",
     "crates/ocs_python_repl",
     "crates/ocs_python_repl/ocs_acadifc",
     "crates/plugin-template-api3",

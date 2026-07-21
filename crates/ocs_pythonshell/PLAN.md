@@ -15,4 +15,4 @@ active document through the API v3 host surface.
 
 ## Out of scope
 
-Editor/LSP integration lives in the separate `crates/ocs_python_lsp` crate.
+Editor integration is now provided by `crates/ocs_python_repl`; the old `crates/ocs_python_lsp` LSP-based approach has been removed.
