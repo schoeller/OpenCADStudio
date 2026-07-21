@@ -132,6 +132,7 @@ class Document:
     text_styles: List[str]
     dim_styles: List[str]
     blocks: List[str]
+    styles: dict[str, List[str]]
     @property
     def entities(self) -> List[Entity]: ...
     def add(self, entity: Entity) -> None: ...

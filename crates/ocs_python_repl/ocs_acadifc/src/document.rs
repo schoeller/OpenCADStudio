@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 
 use pyo3::prelude::*;
-use pyo3::types::PyList;
+use pyo3::types::{PyDict, PyList};
 
 use acadrust::{CadDocument, Handle};
 use ocs_plugin_api::shm::{DocumentFullSnapshotReader, DocumentMutationView, EntityOp};
@@ -98,6 +98,25 @@ impl PyDocument {
             list.append(style.name.clone())?;
         }
         Ok(list.into())
+    }
+
+    #[getter]
+    fn styles(&self, py: Python) -> PyResult<Py<PyDict>> {
+        self.ensure_current(py)?;
+        let doc = self.cached_doc.borrow();
+        let doc = doc.as_ref().unwrap();
+        let dict = PyDict::new_bound(py);
+        let text_styles = PyList::empty_bound(py);
+        for style in doc.text_styles.iter() {
+            text_styles.append(style.name.clone())?;
+        }
+        let dim_styles = PyList::empty_bound(py);
+        for style in doc.dim_styles.iter() {
+            dim_styles.append(style.name.clone())?;
+        }
+        dict.set_item("text_styles", text_styles)?;
+        dict.set_item("dim_styles", dim_styles)?;
+        Ok(dict.into())
     }
 
     #[getter]
