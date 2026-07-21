@@ -40,6 +40,15 @@ pub fn create() -> io::Result<PathBuf> {
         include_str!("../assets/vscode_launch.json"),
     )?;
 
+    // Zed project settings: hide the REPL runtime files so the project panel
+    // shows only main.py and pyrightconfig.json.
+    let zed_dir = dir.join(".zed");
+    std::fs::create_dir_all(&zed_dir)?;
+    std::fs::write(
+        zed_dir.join("settings.json"),
+        include_str!("../assets/.zed/settings.json"),
+    )?;
+
     Ok(dir)
 }
 
@@ -60,6 +69,7 @@ mod tests {
         assert!(dir.join("ocs.pyi").exists());
         assert!(dir.join("pyrightconfig.json").exists());
         assert!(dir.join(".vscode").join("launch.json").exists());
+        assert!(dir.join(".zed").join("settings.json").exists());
         // ocs.py must NOT be present; the runtime module comes from the
         // ocs_acadifc extension loaded by the REPL bootstrap.
         assert!(!dir.join("ocs.py").exists());

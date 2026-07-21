@@ -1,0 +1,10 @@
+{
+  "file_scan_exclusions": [
+    "**/.vscode",
+    "**/_ocs_bootstrap.py",
+    "**/_ocs_config.json",
+    "**/_ocs_python.log",
+    "**/ocs.pyd",
+    "**/ocs.pyi"
+  ]
+}
