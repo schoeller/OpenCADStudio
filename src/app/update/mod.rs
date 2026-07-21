@@ -2648,6 +2648,32 @@ impl OpenCADStudio {
                                     crate::scene::view::dispatch::toggle_invisible(entity);
                                 }
                             }
+                            // Uniform-scale checkbox on a block reference
+                            // (#427): checking collapses Y/Z onto X; unchecking
+                            // only switches the panel to per-axis rows.
+                            "ins_uniform" => {
+                                let scales = match self.tabs[i].scene.document.get_entity(handle) {
+                                    Some(acadrust::EntityType::Insert(ins)) => {
+                                        Some((ins.x_scale(), ins.y_scale(), ins.z_scale()))
+                                    }
+                                    _ => None,
+                                };
+                                let Some((sx, sy, sz)) = scales else { continue };
+                                let eq = (sx - sy).abs() < 1e-12 && (sx - sz).abs() < 1e-12;
+                                let checked =
+                                    eq && !self.props_asym_scale.contains(&handle.value());
+                                if checked {
+                                    self.props_asym_scale.insert(handle.value());
+                                } else {
+                                    self.props_asym_scale.remove(&handle.value());
+                                    if let Some(acadrust::EntityType::Insert(ins)) =
+                                        self.tabs[i].scene.document.get_entity_mut(handle)
+                                    {
+                                        ins.set_y_scale(sx);
+                                        ins.set_z_scale(sx);
+                                    }
+                                }
+                            }
                             _ => {
                                 if let Some(entity) =
                                     self.tabs[i].scene.document.get_entity_mut(handle)

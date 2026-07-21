@@ -94,6 +94,12 @@ fn apply_geom_prop(ins: &mut Insert, field: &str, value: &str) {
                 acadrust::Entity::translate(att, delta);
             }
         }
+        // Single Scale row shown while "Uniform scale" is checked (#427).
+        "u_scale" => {
+            ins.set_x_scale(v);
+            ins.set_y_scale(v);
+            ins.set_z_scale(v);
+        }
         "x_scale" => ins.set_x_scale(v),
         "y_scale" => ins.set_y_scale(v),
         "z_scale" => ins.set_z_scale(v),

@@ -250,6 +250,10 @@ pub(super) struct OpenCADStudio {
     video_thumbs: std::collections::HashMap<String, iced::widget::image::Handle>,
     /// True while the boot-time playlist fetch is still in flight.
     videos_loading: bool,
+    /// Block references whose properties panel shows per-axis Scale X/Y/Z even
+    /// though the three factors are currently equal — the user unchecked the
+    /// "Uniform scale" box for them (#427). Keyed by entity handle.
+    props_asym_scale: std::collections::HashSet<u64>,
     /// Which Start-page section is shown when the page is too narrow for all
     /// three side by side and falls back to a tab bar.
     start_section: StartSection,
@@ -2220,6 +2224,7 @@ impl OpenCADStudio {
             videos: Vec::new(),
             video_thumbs: std::collections::HashMap::new(),
             videos_loading: false,
+            props_asym_scale: std::collections::HashSet::new(),
             start_section: StartSection::default(),
             props_expanded: false,
             history_content: iced::widget::text_editor::Content::new(),
