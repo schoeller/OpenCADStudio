@@ -63,7 +63,7 @@ impl ReplSession {
 
         let extension = find_extension()?;
         let bootstrap = workspace.join("_ocs_bootstrap.py");
-        write_bootstrap(&bootstrap, workspace, &extension, &full, &queue, &control_socket_name)?;
+        write_bootstrap(&bootstrap, workspace, &full, &queue, &control_socket_name)?;
 
         // Write a config file so the script can self-initialize when run directly
         // (e.g. by Zed's debugpy runner) without going through the bootstrap.
@@ -75,16 +75,10 @@ impl ReplSession {
         });
         std::fs::write(&config, serde_json::to_string_pretty(&config_json)?)?;
 
-        // Windows: copy the extension to the workspace so Python can load it by name.
-        #[cfg(windows)]
-        {
-            let ext_name = extension
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
-            let _ = std::fs::copy(&extension, workspace.join(&ext_name));
-        }
+        // Copy the extension into the workspace with the Python module name so
+        // the bootstrap can import it as `ocs` regardless of platform.
+        let module_name = if cfg!(windows) { "ocs.pyd" } else { "ocs.so" };
+        let _ = std::fs::copy(&extension, workspace.join(module_name));
 
         let mut child = Command::new(python)
             .arg("-u")
@@ -253,15 +247,16 @@ fn find_extension() -> io::Result<PathBuf> {
         }
     }
 
+    // The actual cdylib artifact produced by Cargo. We copy/rename it to the
+    // Python module name (`ocs.pyd` / `ocs.so`) in the workspace before running.
     let ext = if cfg!(windows) {
-        "ocs.pyd"
+        "ocs_acadifc.dll"
     } else if cfg!(target_os = "macos") {
-        "ocs.so"
+        "libocs_acadifc.dylib"
     } else {
-        "ocs.so"
+        "libocs_acadifc.so"
     };
 
-    // The plugin runs inside the plugin runner process, so current_exe is the runner.
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             let candidate = dir.join(ext);
@@ -274,7 +269,7 @@ fn find_extension() -> io::Result<PathBuf> {
     Err(io::Error::new(
         io::ErrorKind::NotFound,
         format!(
-            "cannot find {ext}; build the ocs_acadifc extension and rename/copy it to ocs.pyd (or set OCS_ACADIFC_EXTENSION)"
+            "cannot find {ext}; build the ocs_acadifc extension and set OCS_ACADIFC_EXTENSION if needed"
         ),
     ))
 }
@@ -282,12 +277,11 @@ fn find_extension() -> io::Result<PathBuf> {
 fn write_bootstrap(
     path: &Path,
     workspace: &Path,
-    extension: &Path,
     full: &DocumentFullSnapshotInfo,
     queue: &DocumentMutationQueueInfo,
     control_socket: &str,
 ) -> io::Result<()> {
-    let ext_dir = extension.parent().unwrap_or(Path::new("."));
+    let ext_dir = workspace;
     let bootstrap = format!(
         r#"import os, sys, site, socket
 sys.path.insert(0, {ext_dir:?})
