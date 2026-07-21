@@ -557,6 +557,10 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     self.refresh_properties();
                     let mut sel = self.tabs[i].scene.selection.borrow_mut();
                     sel.box_anchor = None;
+                    // Also drop the world-space anchor, or the next pan/zoom
+                    // re-projects it back into `box_anchor` and the cancelled
+                    // marquee springs back to life (reproject_box_anchor).
+                    sel.box_anchor_world = None;
                     sel.box_current = None;
                     sel.box_crossing = false;
                 }
