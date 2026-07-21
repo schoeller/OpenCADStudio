@@ -831,6 +831,8 @@ pub enum ColorPickTarget {
     Table(u8, &'static str),
     /// Selected entities' colour (left properties panel).
     Properties,
+    /// Selected entities' background colour (hatch / MTEXT background row).
+    PropertiesBg,
     /// Current creation colour (ribbon).
     Ribbon,
     /// A layer's colour, by panel row index.

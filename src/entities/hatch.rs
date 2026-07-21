@@ -109,19 +109,32 @@ pub fn background_color(h: &Hatch) -> Option<acadrust::types::Color> {
         _ => None,
     })?;
     match (raw >> 24) & 0xFF {
-        0xC2 | 0xC3 => Some(acadrust::types::Color::Rgb {
+        // Colour-method byte: C0 = ByLayer, C1 = ByBlock, C2 = true colour,
+        // C3 = ACI index.
+        0xC0 => Some(acadrust::types::Color::ByLayer),
+        0xC1 => Some(acadrust::types::Color::ByBlock),
+        0xC2 => Some(acadrust::types::Color::Rgb {
             r: ((raw >> 16) & 0xFF) as u8,
             g: ((raw >> 8) & 0xFF) as u8,
             b: (raw & 0xFF) as u8,
         }),
+        0xC3 => Some(acadrust::types::Color::Index((raw & 0xFF) as u8)),
         _ => None,
     }
 }
 
 /// Pack an RGB colour into a `HATCHBACKGROUNDCOLOR` group-1071 true-colour word.
 pub fn pack_background_color(c: &acadrust::types::Color) -> i32 {
-    let (r, g, b) = c.rgb().unwrap_or((255, 255, 255));
-    (0xC2000000u32 | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)) as i32
+    use acadrust::types::Color;
+    (match c {
+        Color::ByLayer => 0xC0000000u32,
+        Color::ByBlock => 0xC1000000u32,
+        Color::Index(i) => 0xC3000000u32 | (*i as u8 as u32),
+        _ => {
+            let (r, g, b) = c.rgb().unwrap_or((255, 255, 255));
+            0xC2000000u32 | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
+        }
+    }) as i32
 }
 
 /// Replace (or insert) the hatch's `HATCHBACKGROUNDCOLOR` extended-data record,
@@ -146,6 +159,25 @@ pub fn set_background_color(h: &mut Hatch, c: &acadrust::types::Color) {
     h.common.extended_data.add_record(rec);
 }
 
+/// Remove the hatch's `HATCHBACKGROUNDCOLOR` extended-data record (background
+/// off), preserving every other application's records.
+pub fn clear_background_color(h: &mut Hatch) {
+    use acadrust::xdata::ExtendedDataRecord;
+    const APP: &str = "HATCHBACKGROUNDCOLOR";
+    let kept: Vec<ExtendedDataRecord> = h
+        .common
+        .extended_data
+        .records()
+        .iter()
+        .filter(|r| r.application_name != APP)
+        .cloned()
+        .collect();
+    h.common.extended_data.clear();
+    for r in kept {
+        h.common.extended_data.add_record(r);
+    }
+}
+
 fn properties(h: &Hatch) -> Vec<PropSection> {
     let pattern_type = match h.pattern_type {
         acadrust::entities::HatchPatternType::Predefined => "Predefined",
@@ -162,13 +194,14 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
     let default_col = acadrust::types::Color::Index(7);
     let grad_c1 = g.colors.first().map(|e| e.color).unwrap_or(default_col);
     let grad_c2 = g.colors.get(1).map(|e| e.color).unwrap_or(default_col);
+    let bg_on = background_color(h).is_some();
     let bg_col = background_color(h).unwrap_or(default_col);
 
     if g.enabled {
         // ── Gradient fill ──────────────────────────────────────────────────
         let grad_type = if g.is_single_color { "One color" } else { "Two color" };
         let centered = if g.shift.abs() < 1e-9 { "Yes" } else { "No" };
-        return vec![
+        let mut sections = vec![
             PropSection {
                 title: "Pattern".into(),
                 props: vec![
@@ -214,14 +247,28 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
                     ro("Annotative", "annotative", String::new()),
                     ro("Island detection style", "style", style),
                     Property {
-                    label: "Background color".into(),
-                    field: "background_color",
-                    value: PropValue::ColorChoice(bg_col),
-                },
+                        label: "Background".into(),
+                        field: "bg_enabled",
+                        value: PropValue::BoolToggle {
+                            field: "bg_enabled",
+                            value: bg_on,
+                        },
+                    },
                 ],
             },
         ];
+        if bg_on {
+            if let Some(sec) = sections.last_mut() {
+                sec.props.push(Property {
+                    label: "Background color".into(),
+                    field: "background_color",
+                    value: PropValue::ColorChoice(bg_col),
+                });
+            }
+        }
+        return sections;
     }
+
 
     // ── Hatch (pattern / solid) ────────────────────────────────────────────
     // "Type" = pattern definition source (Predefined / User Defined / Custom).
@@ -279,7 +326,7 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
         .map(|l| (l.base_point.x, l.base_point.y))
         .unwrap_or((0.0, 0.0));
 
-    vec![
+    let mut sections = vec![
         PropSection {
             title: "Pattern".into(),
             props: vec![
@@ -296,9 +343,12 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
                 associative_row,
                 island_row,
                 Property {
-                    label: "Background color".into(),
-                    field: "background_color",
-                    value: PropValue::ColorChoice(bg_col),
+                    label: "Background".into(),
+                    field: "bg_enabled",
+                    value: PropValue::BoolToggle {
+                        field: "bg_enabled",
+                        value: bg_on,
+                    },
                 },
             ],
         },
@@ -310,7 +360,17 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
                 ro("Cumulative area", "cumulative_area", format!("{:.4}", area)),
             ],
         },
-    ]
+    ];
+    if bg_on {
+        if let Some(sec) = sections.first_mut() {
+            sec.props.push(Property {
+                label: "Background color".into(),
+                field: "background_color",
+                value: PropValue::ColorChoice(bg_col),
+            });
+        }
+    }
+    sections
 }
 
 fn apply_geom_prop(h: &mut Hatch, field: &str, value: &str) {
@@ -318,6 +378,17 @@ fn apply_geom_prop(h: &mut Hatch, field: &str, value: &str) {
     // Non-numeric fields (bool toggles / enum choices) — handled before the
     // f64 parse below, which would otherwise reject their string values.
     match field {
+        // Background on/off (#415): off removes the HATCHBACKGROUNDCOLOR
+        // record entirely (no background), on seeds a white one for the
+        // colour picker to change.
+        "bg_enabled" => {
+            if background_color(h).is_some() {
+                clear_background_color(h);
+            } else {
+                set_background_color(h, &acadrust::types::Color::ByLayer);
+            }
+            return;
+        }
         "double" => {
             h.is_double = if value == "toggle" {
                 !h.is_double
@@ -364,7 +435,26 @@ fn apply_geom_prop(h: &mut Hatch, field: &str, value: &str) {
     match field {
         "pattern_angle" if h.gradient_color.enabled => h.gradient_color.angle = v.to_radians(),
         "pattern_angle" => h.pattern_angle = v.to_radians(),
-        "pattern_scale" if v > 0.0 => h.pattern_scale = v,
+        // The stored pattern lines are the FINAL rendered geometry (offsets,
+        // base points and dashes in world units — see the prebaked path in
+        // hatch_model_from_dxf), so changing the scale must rescale them by
+        // the ratio or the edit has no visible effect (#415).
+        "pattern_scale" if v > 0.0 => {
+            let old = h.pattern_scale;
+            if old > 1e-12 {
+                let k = v / old;
+                for line in h.pattern.lines.iter_mut() {
+                    line.base_point.x *= k;
+                    line.base_point.y *= k;
+                    line.offset.x *= k;
+                    line.offset.y *= k;
+                    for d in line.dash_lengths.iter_mut() {
+                        *d *= k;
+                    }
+                }
+            }
+            h.pattern_scale = v;
+        }
         // Scale every pattern line's offset so the first line's spacing = v,
         // preserving the relative spacing between lines.
         "spacing" if v > 0.0 => {

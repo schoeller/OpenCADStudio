@@ -708,7 +708,22 @@ impl Scene {
                         if let Some(bg) = crate::entities::hatch::background_color(dxf) {
                             let mut b = m.clone();
                             b.pattern = model::hatch_model::HatchPattern::Solid;
-                            b.color = crate::scene::convert::tess_util::aci_to_rgba(&bg);
+                            // ByLayer / ByBlock backgrounds resolve through the
+                            // normal style chain instead of the raw ACI table
+                            // (#415).
+                            b.color = match bg {
+                                acadrust::types::Color::ByLayer => {
+                                    crate::scene::view::render::layer_render_style(
+                                        &self.document,
+                                        &dxf.common.layer,
+                                    )
+                                    .color
+                                }
+                                acadrust::types::Color::ByBlock => self.render_style(e).0,
+                                other => {
+                                    crate::scene::convert::tess_util::aci_to_rgba(&other)
+                                }
+                            };
                             b.name = "SOLID".into();
                             backdrop = Some(b);
                         }
@@ -1583,6 +1598,27 @@ impl Scene {
             }
         }
         self.bump_geometry();
+    }
+
+    /// Rebuild the cached fill model (hatch / DXF SOLID) for `handle` after
+    /// its document entity was edited in place. The fill models are prebuilt
+    /// at load, so a pattern-scale / background / boundary edit stays
+    /// invisible until the cached model is refreshed (#415).
+    pub fn refresh_fill_model(&mut self, handle: Handle) {
+        let new_model = match self.document.get_entity(handle) {
+            Some(EntityType::Hatch(dxf)) => {
+                let color = convert::tess_util::aci_to_rgba(&dxf.common.color);
+                Self::hatch_model_from_dxf(dxf, color)
+            }
+            Some(EntityType::Solid(s)) => {
+                let color = convert::tess_util::aci_to_rgba(&s.common.color);
+                Some(Self::solid_hatch_model(s, color))
+            }
+            _ => None,
+        };
+        if let Some(model) = new_model {
+            self.hatches.insert(handle, model);
+        }
     }
 
     pub fn populate_hatches_from_document(&mut self) {

@@ -1087,6 +1087,10 @@ impl OpenCADStudio {
     pub(super) fn invalidate_property_targets(&mut self, i: usize, handles: &[Handle]) {
         for &handle in handles {
             self.tabs[i].scene.mark_entity_dirty(handle);
+            // Hatch / SOLID fills render from prebuilt cached models; rebuild
+            // them or pattern edits (scale, background, …) stay invisible
+            // (#415).
+            self.tabs[i].scene.refresh_fill_model(handle);
         }
         // Solid (ACIS) meshes bake their colour into the mesh, so a colour /
         // layer change needs an explicit recolour — re-tessellating wires
