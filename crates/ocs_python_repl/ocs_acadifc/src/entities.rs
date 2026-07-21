@@ -34,10 +34,16 @@ impl PyEntity {
 
     fn delete(&self) -> PyResult<()> {
         let mut queue = crate::document::open_queue()?;
-        queue
+        if queue
             .push(&EntityOp::Remove(Handle::new(self.handle)))
-            .map_err(crate::document::queue_err)?;
-        Ok(())
+            .map_err(crate::document::queue_err)?
+        {
+            Ok(())
+        } else {
+            Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "mutation queue full; call commit() more often",
+            ))
+        }
     }
 }
 

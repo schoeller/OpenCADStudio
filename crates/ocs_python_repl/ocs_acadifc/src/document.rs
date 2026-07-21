@@ -154,8 +154,13 @@ impl PyDocument {
     fn add(&self, entity: &Bound<'_, PyAny>) -> PyResult<()> {
         let op = crate::entities::py_to_entity_op(entity)?;
         let mut queue = open_queue()?;
-        queue.push(&op).map_err(queue_err)?;
-        Ok(())
+        if queue.push(&op).map_err(queue_err)? {
+            Ok(())
+        } else {
+            Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "mutation queue full; call commit() more often",
+            ))
+        }
     }
 
     fn add_many(&self, entities: &Bound<'_, PyAny>) -> PyResult<()> {
@@ -182,11 +187,15 @@ impl PyDocument {
         let doc = self.cached_doc.borrow();
         let doc = doc.as_ref().unwrap();
         let handles: Vec<Handle> = doc.entities().map(|e| e.common().handle).collect();
+        let expected = handles.len();
         let ops = handles.into_iter().map(EntityOp::Remove);
         let mut queue = open_queue()?;
-        queue
-            .push_many(ops)
-            .map_err(queue_err)?;
+        let queued = queue.push_many(ops).map_err(queue_err)?;
+        if queued < expected {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "mutation queue overflow: queued {queued} of {expected} remove operations; call commit() more often"
+            )));
+        }
         Ok(())
     }
 

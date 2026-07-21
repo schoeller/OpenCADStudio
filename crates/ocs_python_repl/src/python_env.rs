@@ -30,29 +30,19 @@ fn find_python() -> io::Result<PathBuf> {
 }
 
 fn find_pip(python: &std::path::Path) -> io::Result<PathBuf> {
-    // Try `python -m pip` first.
+    // Verify pip is available through the selected interpreter. Callers use
+    // `python -m pip` so we always return the interpreter path, not a
+    // standalone pip executable.
     let output = Command::new(python)
         .args(["-m", "pip", "--version"])
         .output()?;
     if output.status.success() {
-        // Return the same interpreter; callers will invoke `python -m pip`.
         return Ok(python.to_path_buf());
     }
 
-    // Fall back to a standalone `pip`/`pip3` executable.
-    let names: &[&str] = if cfg!(windows) {
-        &["pip", "pip3"]
-    } else {
-        &["pip3", "pip"]
-    };
-    for name in names {
-        if let Ok(path) = which(name) {
-            return Ok(path);
-        }
-    }
     Err(io::Error::new(
         io::ErrorKind::NotFound,
-        "pip not found; install pip for the selected Python interpreter",
+        "pip not found for the selected Python interpreter",
     ))
 }
 
