@@ -396,6 +396,10 @@ impl OpenCADStudio {
                         &mut self.tabs[i].scene,
                         &path,
                     );
+                    // Resolving the xref merged its layer / linetype tables
+                    // into the document — mirror them into the Layers panel
+                    // and ribbon dropdowns now, not on the next reopen (#407).
+                    self.refresh_layer_panel();
                 }
                 // Record where this draw ended so ARC_CONT can continue from it
                 // (before `entity` is moved into commit_entity).

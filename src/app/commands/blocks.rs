@@ -540,6 +540,10 @@ impl OpenCADStudio {
                         self.tabs[i].scene.populate_hatches_from_document();
                         self.tabs[i].scene.populate_images_from_document();
                         self.tabs[i].scene.populate_meshes_from_document();
+                        // The reload may have merged new xref layers /
+                        // linetypes — mirror them into the Layers panel and
+                        // ribbon dropdowns (#407).
+                        self.refresh_layer_panel();
                     }
                 } else {
                     self.command_line
