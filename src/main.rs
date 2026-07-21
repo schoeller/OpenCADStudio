@@ -13,6 +13,7 @@ mod entities;
 mod io;
 mod modules;
 mod patreon;
+mod videos;
 mod plugin;
 mod scene;
 mod snap;

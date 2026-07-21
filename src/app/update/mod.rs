@@ -3388,6 +3388,22 @@ impl OpenCADStudio {
                 self.patrons = crate::patreon::merge_manual(Vec::new());
                 Task::none()
             }
+            Message::VideosFetched(Ok(videos)) => {
+                self.videos_loading = false;
+                self.set_videos(videos);
+                Task::none()
+            }
+            // Offline / markup change: keep whatever the on-disk cache seeded.
+            Message::VideosFetched(Err(_)) => {
+                self.videos_loading = false;
+                Task::none()
+            }
+            Message::RecentThumbsLoaded(thumbs) => {
+                for (path, handle) in thumbs {
+                    self.recent_thumbs.insert(path, handle);
+                }
+                Task::none()
+            }
             Message::PluginReleasesFetched(repo, Ok(tags)) => {
                 if let Some(first) = tags.first() {
                     self.repo_selected_tag

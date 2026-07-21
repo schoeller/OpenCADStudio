@@ -214,6 +214,7 @@ struct AddSelectedRestore {
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub enum StartSection {
     Recent,
+    Videos,
     #[default]
     Welcome,
     Supporters,
@@ -241,6 +242,14 @@ pub(super) struct OpenCADStudio {
     /// Paying Patreon supporters shown on the Start page (name, pledge cents),
     /// fetched once at boot, highest pledge first.
     patrons: Vec<(String, i64)>,
+    /// Tutorial-playlist videos for the Start page: seeded from the on-disk
+    /// cache at boot, refreshed by a live playlist fetch.
+    videos: Vec<crate::videos::VideoEntry>,
+    /// Decoded thumbnail handles keyed by video id — built once per video when
+    /// the list arrives, so the view never re-decodes JPEG bytes per frame.
+    video_thumbs: std::collections::HashMap<String, iced::widget::image::Handle>,
+    /// True while the boot-time playlist fetch is still in flight.
+    videos_loading: bool,
     /// Which Start-page section is shown when the page is too narrow for all
     /// three side by side and falls back to a tab bar.
     start_section: StartSection,
@@ -1797,6 +1806,12 @@ pub enum Message {
     PluginRegistryFetched(Result<Vec<crate::plugin::external::RegistryEntry>, String>),
     /// Patreon supporters fetched at boot for the Start page (name, pledge cents).
     PatronsFetched(Result<Vec<(String, i64)>, String>),
+    /// Tutorial-playlist videos fetched at boot for the Start page.
+    VideosFetched(Result<Vec<crate::videos::VideoEntry>, String>),
+    /// Recent-file DWG preview thumbnails decoded on a background thread.
+    RecentThumbsLoaded(
+        Vec<(std::path::PathBuf, Option<iced::widget::image::Handle>)>,
+    ),
     /// Installable release tags fetched for `owner/repo`.
     PluginReleasesFetched(String, Result<Vec<String>, String>),
     /// Choose a release tag for a repo (`repo`, `tag`).
@@ -2164,6 +2179,26 @@ pub enum Message {
 }
 
 impl OpenCADStudio {
+    /// Install the Start-page video list, decoding each thumbnail's JPEG into
+    /// an image Handle exactly once (a fresh Handle per view frame would
+    /// re-upload the texture every frame).
+    fn set_videos(&mut self, videos: Vec<crate::videos::VideoEntry>) {
+        if videos.is_empty() {
+            return;
+        }
+        self.video_thumbs = videos
+            .iter()
+            .filter_map(|v| {
+                let bytes = v.thumb.clone()?;
+                Some((
+                    v.id.clone(),
+                    iced::widget::image::Handle::from_bytes(bytes),
+                ))
+            })
+            .collect();
+        self.videos = videos;
+    }
+
     fn new() -> Self {
         // Boot with only the Welcome/Start tab. The user creates drawings
         // explicitly (File → New); we never auto-spawn Drawing1.
@@ -2182,6 +2217,9 @@ impl OpenCADStudio {
             recent_limit_input: recent::RECENT_DEFAULT.to_string(),
             command_line: CommandLine::new(),
             patrons: Vec::new(),
+            videos: Vec::new(),
+            video_thumbs: std::collections::HashMap::new(),
+            videos_loading: false,
             start_section: StartSection::default(),
             props_expanded: false,
             history_content: iced::widget::text_editor::Content::new(),
@@ -2620,6 +2658,32 @@ impl OpenCADStudio {
         );
         #[cfg(target_arch = "wasm32")]
         let patrons_fetch = Task::none();
+        // Tutorial videos: show the on-disk cache instantly, refresh from the
+        // live playlist in the background. Nothing ships in the binary. The
+        // fetch runs on its own OS thread — its several sequential HTTP
+        // requests would otherwise sit on the async executor and hold up the
+        // rest of the boot tasks (the Start page waited on it).
+        #[cfg(not(target_arch = "wasm32"))]
+        let videos_fetch = {
+            s.set_videos(crate::videos::load_cached());
+            s.videos_loading = true;
+            let (tx, rx) = iced::futures::channel::oneshot::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(crate::videos::fetch_playlist());
+            });
+            Task::perform(
+                async move {
+                    rx.await
+                        .unwrap_or_else(|_| Err("video fetch thread died".into()))
+                },
+                Message::VideosFetched,
+            )
+        };
+        #[cfg(target_arch = "wasm32")]
+        let videos_fetch = Task::none();
+        // Recent-file thumbnails: decoded off-thread — parsing every recent
+        // DWG's preview on the boot path held the first frame back.
+        let thumbs_fetch = s.refresh_recent_thumbs();
         (
             s,
             Task::batch([
@@ -2630,6 +2694,8 @@ impl OpenCADStudio {
                 script,
                 assoc_prompt,
                 patrons_fetch,
+                videos_fetch,
+                thumbs_fetch,
             ]),
         )
     }

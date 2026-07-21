@@ -117,6 +117,9 @@ impl OpenCADStudio {
         let viewport_3d: Element<'_, Message> = if tab.is_start {
             start_page_view(
                 &self.patrons,
+                &self.videos,
+                self.videos_loading,
+                &self.video_thumbs,
                 &self.recent_files,
                 &self.recent_thumbs,
                 self.recent_limit,
@@ -2274,6 +2277,9 @@ pub(super) fn collapse_bar<'a>(name: &str, on_press: Message) -> Element<'a, Mes
 
 pub(super) fn start_page_view<'a>(
     patrons: &'a [(String, i64)],
+    videos: &'a [crate::videos::VideoEntry],
+    videos_loading: bool,
+    video_thumbs: &'a std::collections::HashMap<String, iced::widget::image::Handle>,
     recents: &'a [std::path::PathBuf],
     thumbs: &'a std::collections::HashMap<
         std::path::PathBuf,
@@ -2447,133 +2453,6 @@ pub(super) fn start_page_view<'a>(
         .spacing_x(12.0)
         .row_h(44.0);
 
-    // Intro videos: clickable thumbnails with a play badge, side by side.
-    // Native iced has no embedded web player, so a click opens the video in the
-    // system browser.
-    const INTRO_VIDEO_URL: &str = "https://youtu.be/uN9zxM7p_fc";
-    const INTRO_VIDEO_URL_2: &str = "https://youtu.be/4_glyJFo0qI";
-    // Build each image Handle ONCE — `Handle::from_bytes` mints a fresh unique
-    // id on every call, so doing it per-view re-decodes + re-uploads the JPEG
-    // each frame (the thumbnail then appears only after a long delay). A cached
-    // Handle decodes once; cloning it per view shares the id + bytes.
-    fn intro_thumb_1() -> iced::widget::image::Handle {
-        use std::sync::OnceLock;
-        static H: OnceLock<iced::widget::image::Handle> = OnceLock::new();
-        H.get_or_init(|| {
-            iced::widget::image::Handle::from_bytes(
-                include_bytes!("../../../assets/intro_thumb.jpg").to_vec(),
-            )
-        })
-        .clone()
-    }
-    fn intro_thumb_2() -> iced::widget::image::Handle {
-        use std::sync::OnceLock;
-        static H: OnceLock<iced::widget::image::Handle> = OnceLock::new();
-        H.get_or_init(|| {
-            iced::widget::image::Handle::from_bytes(
-                include_bytes!("../../../assets/intro_thumb2.jpg").to_vec(),
-            )
-        })
-        .clone()
-    }
-    // One clickable video card: cover-fitted thumbnail with a white play triangle
-    // on a translucent disc, opening `url` in the browser on click.
-    let video_card = |handle: iced::widget::image::Handle, url: &str, card_w: f32, card_h: f32| {
-        let thumb = iced::widget::image(handle)
-            .width(Fill)
-            .height(Fill)
-            .content_fit(iced::ContentFit::Cover);
-        let play_badge = container(
-            container(crate::ui::icons::arrow_right(24.0, Color::WHITE))
-                .width(iced::Length::Fixed(56.0))
-                .height(iced::Length::Fixed(56.0))
-                .center_x(iced::Length::Fixed(56.0))
-                .center_y(iced::Length::Fixed(56.0))
-                .style(|_: &Theme| container::Style {
-                    background: Some(Background::Color(Color {
-                        r: 0.0,
-                        g: 0.0,
-                        b: 0.0,
-                        a: 0.55,
-                    })),
-                    border: Border {
-                        color: Color {
-                            r: 1.0,
-                            g: 1.0,
-                            b: 1.0,
-                            a: 0.85,
-                        },
-                        width: 2.0,
-                        radius: 28.0.into(),
-                    },
-                    ..Default::default()
-                }),
-        )
-        .center_x(Fill)
-        .center_y(Fill);
-        mouse_area(
-            container(iced::widget::stack![thumb, play_badge])
-                .width(iced::Length::Fixed(card_w))
-                .height(iced::Length::Fixed(card_h))
-                .style(|_: &Theme| container::Style {
-                    background: Some(Background::Color(CARD_BG)),
-                    border: Border {
-                        color: CARD_BORDER,
-                        width: 1.0,
-                        radius: 8.0.into(),
-                    },
-                    ..Default::default()
-                })
-                .clip(true),
-        )
-        .interaction(iced::mouse::Interaction::Pointer)
-        .on_press(Message::OpenUrl(url.to_string()))
-    };
-    // The two video cards keep their 16:9-ish aspect. They sit side by side
-    // while there's room; when the width gets tight they WRAP to a stacked
-    // column; and when even the stack won't fit the remaining height they
-    // SHRINK to fit — never overflowing onto the status bar.
-    let cards = container(responsive(move |size| {
-        const GAP: f32 = 12.0;
-        const MAX_W: f32 = 352.0;
-        let aspect = 352.0f32 / 198.0; // width / height
-
-        // Wrap to a stacked column once side-by-side cards would get too small.
-        let side_w = ((size.width - GAP) / 2.0).min(MAX_W);
-        let stacked = side_w < 220.0;
-
-        let (mut cw, mut ch, rows) = if stacked {
-            let w = size.width.min(MAX_W);
-            (w, w / aspect, 2.0f32)
-        } else {
-            (side_w, side_w / aspect, 1.0f32)
-        };
-
-        // Shrink to fit the height the page can give the cards.
-        let needed_h = ch * rows + if rows > 1.0 { GAP } else { 0.0 };
-        if needed_h > size.height && needed_h > 1.0 {
-            let scale = (size.height / needed_h).max(0.0);
-            cw *= scale;
-            ch *= scale;
-        }
-
-        let c1 = video_card(intro_thumb_1(), INTRO_VIDEO_URL, cw, ch);
-        let c2 = video_card(intro_thumb_2(), INTRO_VIDEO_URL_2, cw, ch);
-        let inner: Element<'_, Message> = if stacked {
-            column![c1, c2].spacing(GAP).into()
-        } else {
-            iced::widget::row![c1, c2].spacing(GAP).into()
-        };
-        container(inner)
-            .center_x(Fill)
-            .center_y(Fill)
-            .width(Fill)
-            .height(Fill)
-            .into()
-    }))
-    .width(Fill)
-    .height(Fill);
-
     // Buttons sit on a transparent container with a large, brand-tinted
     // ambient shadow (offset = 0, big blur) — produces a soft halo behind
     // the action row, matching the Thunderbird coloured-glow look against
@@ -2607,8 +2486,7 @@ pub(super) fn start_page_view<'a>(
         container(primary_glow).center_x(Fill),
         Space::new().height(iced::Length::Fixed(10.0)),
         container(secondary_row).center_x(Fill),
-        Space::new().height(iced::Length::Fixed(24.0)),
-        cards,
+        Space::new().height(Fill),
     ]
     .spacing(0)
     .width(Fill)
@@ -2627,13 +2505,122 @@ pub(super) fn start_page_view<'a>(
     // while they fit; when the page is too narrow it becomes a tab bar with the
     // Welcome tab open by default.
     let recent_w = 280.0f32;
+    let videos_w = 300.0f32;
     let sup_w = 240.0f32;
     let welcome_min = 480.0f32;
     let avail = (avail_w - 16.0).max(0.0); // minus the page's l/r padding
-    let fits_all = avail >= recent_w + welcome_min + sup_w;
+    // The videos rail overlays the welcome column's left side, and the welcome
+    // content is CENTRED in that column — so side-by-side only works while the
+    // centred `welcome_min` block still leaves a rail-sized gap on its left:
+    // the column must fit welcome_min plus a videos_w + spacing margin on BOTH
+    // sides (centring is symmetric). Below that, the centre content would
+    // slide over the rail — switch to the tabbed layout instead.
+    let fits_all = avail
+        >= recent_w + sup_w + 2.0 * 16.0 + welcome_min + 2.0 * (videos_w + 16.0);
 
     let recent = recent_files_panel(recents, thumbs, recent_limit, recent_limit_input);
     let welcome = container(content).width(Fill).height(Fill);
+
+    // Tutorial-videos rail: the official playlist, fetched at boot (cached on
+    // disk) — thumbnail card + title per video, click opens the browser.
+    let videos_panel: Element<'a, Message> = {
+        const NAME_COLOR: Color = Color {
+            r: 0.80,
+            g: 0.80,
+            b: 0.82,
+            a: 1.0,
+        };
+        // Inner width = panel 300 − padding 2×16 − scrollbar gutter 14.
+        const THUMB_H: f32 = (300.0 - 32.0 - 14.0) * 9.0 / 16.0;
+        let mut list = column![text("Tutorials").size(15).color(TEXT)]
+            .spacing(10)
+            .width(Fill)
+            // Keep the scrollbar off the thumbnails.
+            .padding(iced::Padding {
+                right: 14.0,
+                ..iced::Padding::ZERO
+            });
+        for v in videos {
+            let mut card = column![].spacing(6).width(Fill);
+            if let Some(handle) = video_thumbs.get(&v.id) {
+                card = card.push(
+                    container(
+                        iced::widget::image(handle.clone())
+                            .width(Fill)
+                            .height(iced::Length::Fixed(THUMB_H))
+                            .content_fit(iced::ContentFit::Cover),
+                    )
+                    .width(Fill)
+                    .height(iced::Length::Fixed(THUMB_H))
+                    .style(|_: &Theme| container::Style {
+                        border: Border {
+                            color: CARD_BORDER,
+                            width: 1.0,
+                            radius: 6.0.into(),
+                        },
+                        ..Default::default()
+                    })
+                    .clip(true),
+                );
+            }
+            card = card.push(text(v.title.clone()).size(12).color(NAME_COLOR));
+            list = list.push(
+                mouse_area(card)
+                    .interaction(iced::mouse::Interaction::Pointer)
+                    .on_press(Message::OpenUrl(crate::videos::watch_url(&v.id))),
+            );
+        }
+        if videos.is_empty() {
+            let note = if videos_loading {
+                "Loading videos…"
+            } else {
+                "Videos load from the internet."
+            };
+            list = list.push(text(note).size(12).color(NAME_COLOR));
+        }
+        let playlist_btn = mouse_area(
+            container(
+                text("Open playlist on YouTube").size(12).color(Color::WHITE),
+            )
+            .padding([6, 10])
+            .width(Fill)
+            .center_x(Fill)
+            .style(|_: &Theme| container::Style {
+                background: Some(Background::Color(Color {
+                    r: 0.85,
+                    g: 0.15,
+                    b: 0.15,
+                    a: 1.0,
+                })),
+                border: Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: 6.0.into(),
+                },
+                ..Default::default()
+            }),
+        )
+        .interaction(iced::mouse::Interaction::Pointer)
+        .on_press(Message::OpenUrl(crate::videos::PLAYLIST_URL.to_string()));
+        container(column![
+            iced::widget::scrollable(list).height(Fill),
+            Space::new().height(iced::Length::Fixed(12.0)),
+            playlist_btn,
+        ])
+        .width(iced::Length::Fixed(videos_w))
+        .height(Fill)
+        .padding(16)
+        .style(|_: &Theme| container::Style {
+            background: Some(Background::Color(CARD_BG)),
+            border: Border {
+                color: CARD_BORDER,
+                width: 1.0,
+                radius: 8.0.into(),
+            },
+            ..Default::default()
+        })
+        .into()
+    };
 
     // Right rail: Patreon supporters, fetched at boot. When the list is empty
     // (no token configured / offline) only the "Support on Patreon" button
@@ -2715,9 +2702,17 @@ pub(super) fn start_page_view<'a>(
     };
 
     let body: Element<'a, Message> = if fits_all {
-        iced::widget::row![recent, welcome, supporters]
-            .spacing(16)
-            .into()
+        // The videos rail OVERLAYS the welcome column's empty left side
+        // instead of participating in the row: the welcome content keeps the
+        // same width and centre as before, so the action buttons don't move.
+        let base = iced::widget::row![recent, welcome, supporters].spacing(16);
+        let rail = container(videos_panel)
+            .padding(iced::Padding {
+                left: recent_w + 16.0,
+                ..iced::Padding::ZERO
+            })
+            .height(Fill);
+        iced::widget::stack![base, rail].into()
     } else {
         let tab_btn = |label: &'static str, section: super::StartSection| {
             let is_active = active == section;
@@ -2760,12 +2755,18 @@ pub(super) fn start_page_view<'a>(
         };
         let tab_bar = iced::widget::row![
             tab_btn("Recent Files", super::StartSection::Recent),
+            tab_btn("Videos", super::StartSection::Videos),
             tab_btn("Welcome", super::StartSection::Welcome),
             tab_btn("Supporters", super::StartSection::Supporters),
         ]
         .spacing(6);
         let section_body: Element<'a, Message> = match active {
             super::StartSection::Recent => container(recent)
+                .width(Fill)
+                .height(Fill)
+                .center_x(Fill)
+                .into(),
+            super::StartSection::Videos => container(videos_panel)
                 .width(Fill)
                 .height(Fill)
                 .center_x(Fill)
