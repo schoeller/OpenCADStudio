@@ -432,7 +432,7 @@ Done:
 - [x] Spawn and per-call IPC timeouts so a stuck runner cannot freeze the host.
 - [x] Separate lightweight `ocs_plugin_runner` binary (no iced/wgpu).
 - [x] API v3 panels + async events (`HostAsync` / `PluginAsync`).
-- [x] Autonomous Python shell plugin (`crates/ocs_pythonshell`).
+- [x] Autonomous Python shell plugin (`crates/ocs_pythonshell` → replaced by `crates/ocs_python_repl`).
 
 Next:
 
@@ -453,7 +453,7 @@ Next:
 | Plugin runner implementation | [`crates/ocs_plugin_api/src/runner.rs`](../crates/ocs_plugin_api/src/runner.rs) |
 | Host spawn logic | [`crates/ocs_plugin_api/src/process.rs`](../crates/ocs_plugin_api/src/process.rs) |
 | Host plugin integration | `src/plugin/`, `src/app/plugin_host.rs` |
-| Python shell plugin | [`crates/ocs_pythonshell`](../crates/ocs_pythonshell) |
+| Python REPL plugin | [`crates/ocs_python_repl`](../crates/ocs_python_repl) |
 | Core module registry generator | `build.rs` (writes to `OUT_DIR`, included by `src/modules/registry.rs`) |
 | Marketplace + registry | `src/plugin/marketplace.rs`, [`plugins/registry.json`](../plugins/registry.json) |
 | Template scaffold | [`docs/plugin-template/`](plugin-template) |
