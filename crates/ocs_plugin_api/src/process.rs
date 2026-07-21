@@ -202,6 +202,9 @@ pub struct PluginProcess {
     async_reader_alive: Arc<AtomicBool>,
     async_writer_handle: Mutex<Option<std::thread::JoinHandle<()>>>,
     async_reader_handle: Mutex<Option<std::thread::JoinHandle<()>>>,
+    /// Set to true when the host is deliberately shutting this plugin down so
+    /// the async reader can suppress the expected socket-close error message.
+    shutting_down: Arc<AtomicBool>,
     /// Path to a temp file capturing the runner's stderr, used for crash
     /// diagnostics when the runner exits unexpectedly.
     stderr_path: PathBuf,
@@ -424,6 +427,7 @@ impl PluginProcess {
         });
         let writer_alive = Arc::new(AtomicBool::new(true));
         let reader_alive = Arc::new(AtomicBool::new(true));
+        let shutting_down = Arc::new(AtomicBool::new(false));
 
         // Split the async socket so the reader and writer threads can operate
         // concurrently without contending for a single stream lock.
@@ -441,8 +445,9 @@ impl PluginProcess {
 
         let reader_alive_for_thread = Arc::clone(&reader_alive);
         let reader_inbox = Arc::clone(&async_inbox);
+        let shutting_down_for_reader = Arc::clone(&shutting_down);
         let async_reader_handle = std::thread::spawn(move || {
-            async_reader(async_recv, reader_inbox, reader_alive_for_thread);
+            async_reader(async_recv, reader_inbox, reader_alive_for_thread, shutting_down_for_reader);
         });
 
         Ok(Self {
@@ -460,6 +465,7 @@ impl PluginProcess {
             async_reader_alive: reader_alive,
             async_writer_handle: Mutex::new(Some(async_writer_handle)),
             async_reader_handle: Mutex::new(Some(async_reader_handle)),
+            shutting_down,
             stderr_path,
         })
     }
@@ -710,6 +716,9 @@ impl PluginProcess {
     /// timeout. The child is killed before taking streams so that any thread
     /// blocked on the async socket is unblocked first.
     pub fn shutdown(&self) {
+        // Let the async reader know this shutdown is intentional so it can
+        // suppress the expected socket-close error message.
+        self.shutting_down.store(true, Ordering::SeqCst);
         // Dropping the sender wakes the writer thread so it can exit cleanly.
         drop(
             self.async_writer_tx
@@ -929,7 +938,12 @@ fn async_writer(
 /// Dedicated reader thread that receives plugin async events and fire-and-forget
 /// requests on the async socket receive half. Enqueues them for the host UI
 /// thread and sets the liveness flag to false on any recv error.
-fn async_reader(mut recv_half: RecvHalf, inbox: Arc<AsyncInbox>, alive: Arc<AtomicBool>) {
+fn async_reader(
+    mut recv_half: RecvHalf,
+    inbox: Arc<AsyncInbox>,
+    alive: Arc<AtomicBool>,
+    shutting_down: Arc<AtomicBool>,
+) {
     loop {
         match recv(&mut recv_half) {
             Ok(PluginToHost::Async(event)) => {
@@ -956,7 +970,9 @@ fn async_reader(mut recv_half: RecvHalf, inbox: Arc<AsyncInbox>, alive: Arc<Atom
                 eprintln!("[plugin] unexpected PluginToHost::Response on async socket: {resp:?}");
             }
             Err(e) => {
-                eprintln!("[plugin] async reader recv error: {e}");
+                if !shutting_down.load(Ordering::SeqCst) {
+                    eprintln!("[plugin] async reader recv error: {e}");
+                }
                 alive.store(false, Ordering::SeqCst);
                 break;
             }
@@ -1463,6 +1479,7 @@ mod timeout_tests {
             async_reader_alive: Arc::new(AtomicBool::new(true)),
             async_writer_handle: Mutex::new(None),
             async_reader_handle: Mutex::new(None),
+            shutting_down: Arc::new(AtomicBool::new(false)),
             stderr_path: generate_stderr_path(),
         };
         (process, runner_stream)
