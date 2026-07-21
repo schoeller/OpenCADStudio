@@ -166,8 +166,37 @@ impl Transformable for Polyline {
 
 // ── Polyline2D (heavy 2D polyline with bulge) ─────────────────────────────────
 
+/// The vertices a curve-/spline-fit 2D polyline actually DRAWS: the
+/// fit-generated points (VertexFlags 8 / 1) plus any unflagged originals,
+/// with the spline-frame CONTROL points (flag 16) dropped — those are editing
+/// scaffolding shown only under SPLFRAME, and chaining through them draws
+/// spokes across the fitted curve (#408). `None` = no fit data, draw the
+/// stored vertices as-is. A fit-flagged polyline whose fit points are missing
+/// falls back to the stored vertices rather than drawing nothing.
+pub fn drawn_vertices2d(
+    pl: &Polyline2D,
+) -> Option<Vec<acadrust::entities::Vertex2D>> {
+    use acadrust::entities::polyline::VertexFlags;
+    let has_fit = pl.vertices.iter().any(|v| {
+        v.flags.bits()
+            & (VertexFlags::SPLINE_VERTEX.bits() | VertexFlags::EXTRA_VERTEX.bits())
+            != 0
+    });
+    if !has_fit {
+        return None;
+    }
+    let kept: Vec<_> = pl
+        .vertices
+        .iter()
+        .filter(|v| v.flags.bits() & VertexFlags::SPLINE_CONTROL.bits() == 0)
+        .cloned()
+        .collect();
+    (kept.len() >= 2).then_some(kept)
+}
+
 fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
-    let verts = &pl.vertices;
+    let filtered = drawn_vertices2d(pl);
+    let verts: &[acadrust::entities::Vertex2D] = filtered.as_deref().unwrap_or(&pl.vertices);
     if verts.is_empty() {
         return TruckEntity {
             pick_tris: Vec::new(),
@@ -355,8 +384,9 @@ fn tapered_band_verts_2d(
     pl: &acadrust::entities::Polyline2D,
 ) -> Option<Vec<([f64; 2], f64, f64, f64)>> {
     let d = pl.start_width.max(pl.end_width);
-    let band: Vec<([f64; 2], f64, f64, f64)> = pl
-        .vertices
+    let filtered = drawn_vertices2d(pl);
+    let verts: &[acadrust::entities::Vertex2D] = filtered.as_deref().unwrap_or(&pl.vertices);
+    let band: Vec<([f64; 2], f64, f64, f64)> = verts
         .iter()
         .map(|v| {
             let sw = if v.start_width > 1e-9 { v.start_width } else { d };
@@ -835,7 +865,8 @@ pub(crate) fn wide_fills(pl: &acadrust::entities::Polyline2D) -> ([f64; 2], Vec<
     // The stored widths are the band's FULL width and `polyline_segment_fill`
     // offsets ±hw about the centreline — halve them. See `lwpolyline::wide_fills`.
     let hw_default = pl.start_width.max(pl.end_width) as f32 * 0.5;
-    let verts = &pl.vertices;
+    let filtered = drawn_vertices2d(pl);
+    let verts: &[acadrust::entities::Vertex2D] = filtered.as_deref().unwrap_or(&pl.vertices);
     let n = verts.len();
     if n < 2 {
         return ([0.0; 2], vec![]);
