@@ -4,7 +4,7 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -17,20 +17,17 @@ use ocs_plugin_api::shm::{DocumentFullSnapshotInfo, DocumentFullSnapshotReader, 
 
 pub struct ReplSession {
     child: Child,
+    workspace: PathBuf,
 }
 
 impl ReplSession {
     /// Spawn a Python REPL child and start a background thread that forwards
     /// control messages to the host as `PluginAsync` events.
-    pub fn spawn<F>(
+    pub fn spawn(
         python: &Path,
         workspace: &Path,
         host: &mut dyn HostApi,
-        _status: F,
-    ) -> io::Result<Self>
-    where
-        F: FnOnce(String) + Send + 'static,
-    {
+    ) -> io::Result<Self> {
         let Some(sender) = host.async_sender() else {
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
@@ -129,6 +126,7 @@ impl ReplSession {
 
         Ok(Self {
             child,
+            workspace: workspace.to_path_buf(),
         })
     }
 
@@ -140,6 +138,7 @@ impl ReplSession {
     pub fn shutdown(&mut self) -> io::Result<()> {
         let _ = self.child.kill();
         self.child.wait()?;
+        let _ = crate::workspace::remove(&self.workspace);
         Ok(())
     }
 }
@@ -151,35 +150,37 @@ impl Drop for ReplSession {
 }
 
 fn forward_logs(stdout: std::process::ChildStdout, stderr: std::process::ChildStderr, log: &Path) {
-    let mut out = BufReader::new(stdout);
-    let mut err = BufReader::new(stderr);
-    let mut file = match std::fs::OpenOptions::new()
+    let file = match std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(log)
     {
-        Ok(f) => f,
+        Ok(f) => Arc::new(Mutex::new(f)),
         Err(_) => return,
     };
-    let mut line = String::new();
-    loop {
-        line.clear();
-        let Ok(n) = out.read_line(&mut line) else { break; };
-        if n == 0 && line.is_empty() {
-            break;
+
+    fn forward_stream<R: std::io::Read + Send + 'static>(
+        reader: R,
+        file: Arc<Mutex<std::fs::File>>,
+    ) {
+        let mut reader = BufReader::new(reader);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            let Ok(n) = reader.read_line(&mut line) else { break; };
+            if n == 0 && line.is_empty() {
+                break;
+            }
+            let mut f = file.lock().unwrap();
+            let _ = f.write_all(line.as_bytes());
+            let _ = f.flush();
         }
-        let _ = file.write_all(line.as_bytes());
-        let _ = file.flush();
     }
-    loop {
-        line.clear();
-        let Ok(n) = err.read_line(&mut line) else { break; };
-        if n == 0 && line.is_empty() {
-            break;
-        }
-        let _ = file.write_all(line.as_bytes());
-        let _ = file.flush();
-    }
+
+    let out_file = Arc::clone(&file);
+    let err_file = Arc::clone(&file);
+    thread::spawn(move || forward_stream(stdout, out_file));
+    thread::spawn(move || forward_stream(stderr, err_file));
 }
 
 fn forward_control(stream: Stream, sender: Arc<dyn PluginAsyncSender>, full_path: &Path) {

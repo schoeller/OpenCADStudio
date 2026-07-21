@@ -1036,8 +1036,12 @@ pub fn apply_entity_batch(editor: &mut dyn EntityBatchEditor, ops: Vec<EntityOp>
     for op in ops {
         match op {
             EntityOp::Add(entity) => {
-                editor.add_entity(entity);
-                applied += 1;
+                let handle = editor.add_entity(entity);
+                if handle == Handle::NULL {
+                    failed += 1;
+                } else {
+                    applied += 1;
+                }
             }
             EntityOp::Update(entity) => {
                 if editor.update_entity(entity) {

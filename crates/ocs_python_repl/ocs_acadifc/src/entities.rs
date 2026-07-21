@@ -7,6 +7,12 @@ use ocs_plugin_api::shm::EntityOp;
 
 use crate::geometry::PyVector3;
 
+/// Return a short type name for an enum variant (e.g. "Point", "Hatch").
+fn entity_kind_name(entity: impl std::fmt::Debug) -> String {
+    let s = format!("{:?}", entity);
+    s.split('(').next().unwrap_or("Entity").to_string()
+}
+
 #[pyclass(name = "Entity")]
 #[derive(Clone)]
 pub struct PyEntity {
@@ -924,7 +930,7 @@ pub(crate) fn entity_to_py(py: Python, entity: &EntityType) -> PyResult<PyObject
                 _ => {
                     let generic = PyEntity {
                         handle: d.base().common.handle.value(),
-                        kind: format!("{:?}", d),
+                        kind: entity_kind_name(d),
                         layer: d.base().common.layer.clone(),
                     };
                     Ok(generic.into_py(py))
@@ -976,7 +982,7 @@ pub(crate) fn entity_to_py(py: Python, entity: &EntityType) -> PyResult<PyObject
         _ => {
             let generic = PyEntity {
                 handle: entity.common().handle.value(),
-                kind: format!("{:?}", entity),
+                kind: entity_kind_name(entity),
                 layer: entity.common().layer.clone(),
             };
             Ok(generic.into_py(py))

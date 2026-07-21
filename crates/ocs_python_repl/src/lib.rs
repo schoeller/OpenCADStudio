@@ -182,11 +182,7 @@ impl BuiltinPlugin for PythonReplPlugin {
         }
 
         // Spawn the Python REPL / child process.
-        let status = Arc::clone(&self.state);
-        match repl::ReplSession::spawn(&python, &workspace, host, move |msg| {
-            let mut s = status.lock().unwrap();
-            s.status = msg;
-        }) {
+        match repl::ReplSession::spawn(&python, &workspace, host) {
             Ok(session) => {
                 let msg = format!(
                     "Python REPL started.\nInterpreter: {}\nWorkspace: {}",
