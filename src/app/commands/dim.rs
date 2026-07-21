@@ -943,7 +943,7 @@ impl OpenCADStudio {
             }
 
             "OFFSET" => {
-                use crate::modules::draw::modify::offset::OffsetCommand;
+                use crate::modules::draw::modify::offset::{is_offsettable, OffsetCommand};
                 let all_entities: Vec<_> = self.tabs[i]
                     .scene
                     .entity_wires()
@@ -953,7 +953,20 @@ impl OpenCADStudio {
                         self.tabs[i].scene.document.get_entity(h).cloned()
                     })
                     .collect();
-                let new_cmd = OffsetCommand::new(all_entities);
+                // Pick-first (#422): with offsettable objects already selected,
+                // skip the pick step and go straight to distance / side.
+                let preselected: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(_, e)| e.clone())
+                    .filter(is_offsettable)
+                    .collect();
+                let new_cmd = if preselected.is_empty() {
+                    OffsetCommand::new(all_entities)
+                } else {
+                    OffsetCommand::with_selection(all_entities, preselected)
+                };
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
