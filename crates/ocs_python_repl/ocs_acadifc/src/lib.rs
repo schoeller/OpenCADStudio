@@ -37,6 +37,15 @@ fn _init(
     queue_path: String,
     control_socket: String,
 ) -> PyResult<()> {
+    init_runtime(py, snapshot_path, queue_path, control_socket)
+}
+
+fn init_runtime(
+    py: Python,
+    snapshot_path: String,
+    queue_path: String,
+    control_socket: String,
+) -> PyResult<()> {
     {
         let mut rt = RUNTIME.lock().unwrap();
         *rt = Some(Runtime {
@@ -51,6 +60,72 @@ fn _init(
     let doc = document::get_doc(py)?;
     let module = py.import_bound("ocs")?;
     module.setattr("doc", doc)?;
+    Ok(())
+}
+
+/// Try to auto-initialize the extension from `_ocs_config.json` next to the
+/// module binary or in the current working directory. This lets a simple
+/// `import ocs` in Zed/debugpy work without explicit self-initialization boilerplate.
+fn try_auto_init(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    {
+        let rt = RUNTIME.lock().unwrap();
+        if rt.is_some() {
+            return Ok(());
+        }
+    }
+
+    // Candidate directories: module's directory, then cwd.
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(file) = m.getattr("__file__") {
+        if let Ok(path) = file.extract::<String>() {
+            if let Some(parent) = PathBuf::from(path).parent() {
+                candidates.push(parent.to_path_buf());
+            }
+        }
+    }
+    candidates.push(std::env::current_dir().unwrap_or_default());
+
+    for dir in &candidates {
+        let config_path = dir.join("_ocs_config.json");
+        if config_path.exists() {
+            return init_from_config_file(py, m, &config_path);
+        }
+    }
+
+    Ok(())
+}
+
+fn init_from_config_file(
+    py: Python,
+    m: &Bound<'_, PyModule>,
+    config_path: &std::path::Path,
+) -> PyResult<()> {
+    let contents = std::fs::read_to_string(config_path)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("read config: {e}")))?;
+    let cfg: serde_json::Value = serde_json::from_str(&contents)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("parse config: {e}")))?;
+
+    let snapshot_path = cfg["snapshot_path"].as_str().ok_or_else(|| {
+        pyo3::exceptions::PyRuntimeError::new_err("config missing snapshot_path")
+    })?;
+    let queue_path = cfg["queue_path"].as_str().ok_or_else(|| {
+        pyo3::exceptions::PyRuntimeError::new_err("config missing queue_path")
+    })?;
+    let control_socket = cfg["control_socket"].as_str().ok_or_else(|| {
+        pyo3::exceptions::PyRuntimeError::new_err("config missing control_socket")
+    })?;
+
+    {
+        let mut rt = RUNTIME.lock().unwrap();
+        *rt = Some(Runtime {
+            snapshot_path: PathBuf::from(snapshot_path),
+            queue_path: PathBuf::from(queue_path),
+            control_socket: control_socket.to_string(),
+        });
+    }
+
+    let doc = document::get_doc(py)?;
+    m.setattr("doc", doc)?;
     Ok(())
 }
 
@@ -129,7 +204,7 @@ pub(crate) fn send_control_message(msg: &str) -> PyResult<()> {
 
 /// `ocs` module entry.
 #[pymodule(name = "ocs")]
-fn ocs_acadifc(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn ocs_acadifc(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_init, m)?)?;
     m.add_function(wrap_pyfunction!(document::get_doc, m)?)?;
     m.add_function(wrap_pyfunction!(entities::make_point, m)?)?;
@@ -150,5 +225,6 @@ fn ocs_acadifc(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyColor>()?;
     m.add_class::<PyMutationQueue>()?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    try_auto_init(py, m)?;
     Ok(())
 }
