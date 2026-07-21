@@ -786,6 +786,7 @@ impl Snapper {
         let radius2 = self.osnap_radius_px * self.osnap_radius_px;
         let mut best: Option<SnapResult> = None;
         let mut best_rank = u8::MAX;
+        let mut best_sub = u8::MAX;
         let mut best_d2 = f32::MAX;
 
         // Reject candidates projecting outside the pane rectangle. The GPU
@@ -828,7 +829,8 @@ impl Snapper {
                         extension_base: None,
                         extension_base2: None,
                     });
-                    best_rank = snap_priority(SnapType::Grid);
+                    best_rank = snap_tier(SnapType::Grid);
+                    best_sub = snap_priority(SnapType::Grid);
                     best_d2 = d2;
                 }
             }
@@ -912,9 +914,10 @@ impl Snapper {
             if !(d2 < radius2) {
                 return;
             }
-            let rank = snap_priority(snap_type);
-            if rank < best_rank || (rank == best_rank && d2 < best_d2) {
-                best_rank = rank;
+            let (tier, sub) = (snap_tier(snap_type), snap_priority(snap_type));
+            if snap_better(tier, d2, sub, (best_rank, best_d2, best_sub)) {
+                best_rank = tier;
+                best_sub = sub;
                 best_d2 = d2;
                 best = Some(SnapResult {
                     world,
@@ -1297,13 +1300,15 @@ impl Snapper {
                             (w, edge_d * edge_d)
                         }
                     };
-                    let rank = snap_priority(SnapType::Tangent);
+                    let (tier, sub) =
+                        (snap_tier(SnapType::Tangent), snap_priority(SnapType::Tangent));
                     let screen_pt = world_to_screen(world_pt.as_dvec3(), view_rot, eye, bounds);
                     if d2 < radius2
                         && in_bounds(screen_pt)
-                        && (rank < best_rank || (rank == best_rank && d2 < best_d2))
+                        && snap_better(tier, d2, sub, (best_rank, best_d2, best_sub))
                     {
-                        best_rank = rank;
+                        best_rank = tier;
+                        best_sub = sub;
                         best_d2 = d2;
                         let tangent_obj = match tg {
                             TangentGeom::Line { p1, p2 } => TangentObject::Line {
@@ -1360,12 +1365,20 @@ impl Snapper {
                     curve_d2 = curve_d2.min(dist2(sp, cursor_screen));
                 }
                 let screen = world_to_screen(center, view_rot, eye, bounds);
-                let rank = snap_priority(SnapType::Center);
+                // Rim-hover Center: the cursor is on the CURVE, not near the
+                // centre, so its distance metric (curve_d2 ≈ 0 anywhere on the
+                // rim) must not compete inside the discrete tier — it would
+                // mask the circle's own Quadrants at every rim position
+                // (#420). Tier 1 sits below every discrete point snap and
+                // above the continuous ones; the pre-baked Center point (true
+                // cursor-to-centre distance) stays in tier 0.
+                let (tier, sub) = (1u8, snap_priority(SnapType::Center));
                 if curve_d2 < radius2
                     && in_bounds(screen)
-                    && (rank < best_rank || (rank == best_rank && curve_d2 < best_d2))
+                    && snap_better(tier, curve_d2, sub, (best_rank, best_d2, best_sub))
                 {
-                    best_rank = rank;
+                    best_rank = tier;
+                    best_sub = sub;
                     best_d2 = curve_d2;
                     best = Some(SnapResult {
                         world: center,
@@ -1404,6 +1417,40 @@ impl Snapper {
 /// along the geometry, so enabling a continuous snap can't suppress the
 /// discrete ones the user also turned on. Mirrors the usual CAD running-osnap
 /// precedence. See #118.
+/// Priority TIER for candidate selection. All discrete point snaps
+/// (Endpoint … Insertion) share one tier so the cursor's nearest feature wins
+/// among them — a circle's Center must not mask its Quadrants just by rank
+/// (#420). Continuous snaps keep their individual lower tiers, preserving the
+/// #118 guarantee that they never suppress a discrete snap in the aperture.
+fn snap_tier(t: SnapType) -> u8 {
+    match t {
+        SnapType::Endpoint
+        | SnapType::Intersection
+        | SnapType::ApparentIntersection
+        | SnapType::Midpoint
+        | SnapType::Center
+        | SnapType::Node
+        | SnapType::Quadrant
+        | SnapType::Insertion => 0,
+        other => snap_priority(other),
+    }
+}
+
+/// Candidate ordering: tier first, then cursor distance, and only when two
+/// candidates are effectively equidistant (coincident features) the classic
+/// sub-priority — so an Endpoint still beats an Intersection sitting on the
+/// exact same point. Distances are screen-px²; 4.0 ≈ a 2 px coincidence band.
+fn snap_better(tier: u8, d2: f32, sub: u8, best: (u8, f32, u8)) -> bool {
+    let (bt, bd2, bsub) = best;
+    if tier != bt {
+        return tier < bt;
+    }
+    if (d2 - bd2).abs() > 4.0 {
+        return d2 < bd2;
+    }
+    sub < bsub
+}
+
 fn snap_priority(t: SnapType) -> u8 {
     match t {
         SnapType::Endpoint => 0,
