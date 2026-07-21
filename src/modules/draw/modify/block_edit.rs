@@ -43,7 +43,7 @@ pub fn block_edit_tools() -> Vec<ToolDef> {
 // ── Session state (held in DocumentTab) ───────────────────────────────────
 
 /// Active BEDIT block-editor session. Lives in `DocumentTab::block_edit`.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct BlockEditSession {
     /// Name of the block being edited (also the space-tab label).
     pub block_name: String,
@@ -55,6 +55,9 @@ pub struct BlockEditSession {
     /// The block's block-local entities captured on entry, so Discard can
     /// restore the definition (structural Block/BlockEnd/AttDef excluded).
     pub snapshot: Vec<EntityType>,
+    /// Camera state of the space that was active when BEDIT began, restored
+    /// on Save/Discard so the view returns exactly where it was (#425).
+    pub return_camera: crate::scene::view::camera::Camera,
 }
 
 // ── BEDIT pick command ─────────────────────────────────────────────────────

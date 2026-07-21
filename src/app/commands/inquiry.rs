@@ -385,6 +385,9 @@ impl OpenCADStudio {
                 self.push_undo_snapshot(i, "BEDIT");
 
                 let return_layout = self.tabs[i].scene.current_layout.clone();
+                // Capture the camera before the editor reframes it, so leaving
+                // the block editor returns the view exactly where it was (#425).
+                let return_camera = self.tabs[i].scene.camera.borrow().clone();
                 // A block editor renders in model style; switch to Model first so
                 // the paper-space code paths stay off, then scope to the block.
                 if return_layout != "Model" {
@@ -396,6 +399,7 @@ impl OpenCADStudio {
                     br_handle,
                     return_layout,
                     snapshot,
+                    return_camera,
                 });
 
                 self.tabs[i].scene.deselect_all();
@@ -426,6 +430,9 @@ impl OpenCADStudio {
                 self.tabs[i].scene.block_edit_block = None;
                 self.tabs[i].scene.deselect_all();
                 self.tabs[i].scene.set_current_layout(session.return_layout.clone());
+                // Return the view to where it was when BEDIT began (#425).
+                *self.tabs[i].scene.camera.borrow_mut() = session.return_camera.clone();
+                self.tabs[i].scene.camera_generation += 1;
                 self.tabs[i].scene.rebuild_derived_caches();
                 self.tabs[i].dirty = true;
                 self.command_line.push_output(&format!(
@@ -474,6 +481,9 @@ impl OpenCADStudio {
                 self.tabs[i].scene.block_edit_block = None;
                 self.tabs[i].scene.deselect_all();
                 self.tabs[i].scene.set_current_layout(session.return_layout.clone());
+                // Return the view to where it was when BEDIT began (#425).
+                *self.tabs[i].scene.camera.borrow_mut() = session.return_camera.clone();
+                self.tabs[i].scene.camera_generation += 1;
                 self.tabs[i].scene.rebuild_derived_caches();
                 self.tabs[i].dirty = true;
                 self.command_line.push_output(&format!(
