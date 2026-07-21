@@ -212,6 +212,9 @@ fn ocs_acadifc(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(entities::make_arc, m)?)?;
     m.add_function(wrap_pyfunction!(entities::make_circle, m)?)?;
     m.add_function(wrap_pyfunction!(entities::make_text, m)?)?;
+    m.add_function(wrap_pyfunction!(entities::make_mtext, m)?)?;
+    m.add_function(wrap_pyfunction!(entities::make_lwpolyline, m)?)?;
+    m.add_function(wrap_pyfunction!(entities::make_insert, m)?)?;
     m.add_class::<PyDocument>()?;
     m.add_class::<PyLayer>()?;
     m.add_class::<PyEntity>()?;
@@ -220,6 +223,9 @@ fn ocs_acadifc(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyArc>()?;
     m.add_class::<PyCircle>()?;
     m.add_class::<PyText>()?;
+    m.add_class::<entities::PyMText>()?;
+    m.add_class::<entities::PyLwPolyline>()?;
+    m.add_class::<entities::PyInsert>()?;
 
     m.add_class::<PyVector3>()?;
     m.add_class::<PyColor>()?;

@@ -70,7 +70,22 @@ class Arc(Entity):
     ) -> None: ...
 
 class Text(Entity):
-    text: str
+    value: str
+    location: Vector3
+    height: float
+    layer: str
+    def __init__(
+        self,
+        value: Optional[str] = None,
+        x: float = 0.0,
+        y: float = 0.0,
+        z: float = 0.0,
+        height: float = 2.5,
+        layer: Optional[str] = None,
+    ) -> None: ...
+
+class MText(Entity):
+    value: str
     insertion_point: Vector3
     height: float
     layer: str
@@ -83,6 +98,33 @@ class Text(Entity):
         height: float = 2.5,
         layer: Optional[str] = None,
     ) -> None: ...
+
+class LwPolyline(Entity):
+    vertices: List[Tuple[float, float, float]]
+    is_closed: bool
+    layer: str
+    def __init__(
+        self,
+        vertices: Optional[List[Tuple[float, float, float]]] = None,
+        is_closed: bool = False,
+        layer: Optional[str] = None,
+    ) -> None: ...
+
+class Insert(Entity):
+    block_name: str
+    insertion_point: Vector3
+    rotation: float
+    layer: str
+    def __init__(
+        self,
+        block_name: str,
+        x: float = 0.0,
+        y: float = 0.0,
+        z: float = 0.0,
+        rotation: float = 0.0,
+        layer: Optional[str] = None,
+    ) -> None: ...
+
 
 class Document:
     version: int
@@ -130,3 +172,24 @@ def make_text(
     height: float = 2.5,
     layer: Optional[str] = None,
 ) -> Text: ...
+def make_mtext(
+    value: Optional[str] = None,
+    x: float = 0.0,
+    y: float = 0.0,
+    z: float = 0.0,
+    height: float = 2.5,
+    layer: Optional[str] = None,
+) -> MText: ...
+def make_lwpolyline(
+    vertices: Optional[List[Tuple[float, float, float]]] = None,
+    is_closed: bool = False,
+    layer: Optional[str] = None,
+) -> LwPolyline: ...
+def make_insert(
+    block_name: str,
+    x: float = 0.0,
+    y: float = 0.0,
+    z: float = 0.0,
+    rotation: float = 0.0,
+    layer: Optional[str] = None,
+) -> Insert: ...

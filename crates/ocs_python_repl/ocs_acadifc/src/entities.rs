@@ -260,6 +260,182 @@ impl PyText {
     }
 }
 
+#[pyclass(name = "MText")]
+#[derive(Clone)]
+pub struct PyMText {
+    pub value: String,
+    pub insertion_point: PyVector3,
+    pub height: f64,
+    pub layer: String,
+}
+
+#[pymethods]
+impl PyMText {
+    #[new]
+    #[pyo3(signature = (value=None, x=0.0, y=0.0, z=0.0, height=2.5, layer=None))]
+    fn new(
+        value: Option<String>,
+        x: f64,
+        y: f64,
+        z: f64,
+        height: f64,
+        layer: Option<String>,
+    ) -> Self {
+        Self {
+            value: value.unwrap_or_default(),
+            insertion_point: PyVector3 { x, y, z },
+            height,
+            layer: layer.unwrap_or_else(|| "0".to_string()),
+        }
+    }
+
+    #[getter]
+    fn value(&self) -> String {
+        self.value.clone()
+    }
+
+    #[getter]
+    fn insertion_point(&self) -> PyVector3 {
+        self.insertion_point.clone()
+    }
+
+    #[getter]
+    fn height(&self) -> f64 {
+        self.height
+    }
+
+    #[getter]
+    fn layer(&self) -> String {
+        self.layer.clone()
+    }
+}
+
+#[pyclass(name = "LwPolyline")]
+#[derive(Clone)]
+pub struct PyLwPolyline {
+    pub vertices: Vec<(f64, f64, f64)>, // x, y, bulge
+    pub is_closed: bool,
+    pub layer: String,
+}
+
+#[pymethods]
+impl PyLwPolyline {
+    #[new]
+    #[pyo3(signature = (vertices=None, is_closed=false, layer=None))]
+    fn new(
+        vertices: Option<Vec<(f64, f64, f64)>>,
+        is_closed: bool,
+        layer: Option<String>,
+    ) -> Self {
+        Self {
+            vertices: vertices.unwrap_or_default(),
+            is_closed,
+            layer: layer.unwrap_or_else(|| "0".to_string()),
+        }
+    }
+
+    #[getter]
+    fn vertices(&self) -> Vec<(f64, f64, f64)> {
+        self.vertices.clone()
+    }
+
+    #[getter]
+    fn is_closed(&self) -> bool {
+        self.is_closed
+    }
+
+    #[getter]
+    fn layer(&self) -> String {
+        self.layer.clone()
+    }
+}
+
+#[pyclass(name = "Insert")]
+#[derive(Clone)]
+pub struct PyInsert {
+    pub block_name: String,
+    pub insertion_point: PyVector3,
+    pub rotation: f64,
+    pub layer: String,
+}
+
+#[pymethods]
+impl PyInsert {
+    #[new]
+    #[pyo3(signature = (block_name, x=0.0, y=0.0, z=0.0, rotation=0.0, layer=None))]
+    fn new(
+        block_name: String,
+        x: f64,
+        y: f64,
+        z: f64,
+        rotation: f64,
+        layer: Option<String>,
+    ) -> Self {
+        Self {
+            block_name,
+            insertion_point: PyVector3 { x, y, z },
+            rotation,
+            layer: layer.unwrap_or_else(|| "0".to_string()),
+        }
+    }
+
+    #[getter]
+    fn block_name(&self) -> String {
+        self.block_name.clone()
+    }
+
+    #[getter]
+    fn insertion_point(&self) -> PyVector3 {
+        self.insertion_point.clone()
+    }
+
+    #[getter]
+    fn rotation(&self) -> f64 {
+        self.rotation
+    }
+
+    #[getter]
+    fn layer(&self) -> String {
+        self.layer.clone()
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (value=None, x=0.0, y=0.0, z=0.0, height=2.5, layer=None))]
+pub fn make_mtext(
+    value: Option<String>,
+    x: f64,
+    y: f64,
+    z: f64,
+    height: f64,
+    layer: Option<String>,
+) -> PyMText {
+    PyMText::new(value, x, y, z, height, layer)
+}
+
+#[pyfunction]
+#[pyo3(signature = (vertices=None, is_closed=false, layer=None))]
+pub fn make_lwpolyline(
+    vertices: Option<Vec<(f64, f64, f64)>>,
+    is_closed: bool,
+    layer: Option<String>,
+) -> PyLwPolyline {
+    PyLwPolyline::new(vertices, is_closed, layer)
+}
+
+#[pyfunction]
+#[pyo3(signature = (block_name, x=0.0, y=0.0, z=0.0, rotation=0.0, layer=None))]
+pub fn make_insert(
+    block_name: String,
+    x: f64,
+    y: f64,
+    z: f64,
+    rotation: f64,
+    layer: Option<String>,
+) -> PyInsert {
+    PyInsert::new(block_name, x, y, z, rotation, layer)
+}
+
 #[pyfunction]
 #[pyo3(signature = (x=0.0, y=0.0, z=0.0, layer=None))]
 pub fn make_point(x: f64, y: f64, z: f64, layer: Option<String>) -> PyPoint {
@@ -377,6 +553,47 @@ pub(crate) fn entity_to_py(py: Python, entity: &EntityType) -> PyResult<PyObject
             };
             Ok(py_text.into_py(py))
         }
+        EntityType::MText(m) => {
+            let loc = PyVector3 {
+                x: m.insertion_point.x,
+                y: m.insertion_point.y,
+                z: m.insertion_point.z,
+            };
+            let py_mtext = PyMText {
+                value: m.value.clone(),
+                insertion_point: loc,
+                height: m.height,
+                layer: m.common.layer.clone(),
+            };
+            Ok(py_mtext.into_py(py))
+        }
+        EntityType::LwPolyline(p) => {
+            let verts: Vec<(f64, f64, f64)> = p
+                .vertices
+                .iter()
+                .map(|v| (v.location.x, v.location.y, v.bulge))
+                .collect();
+            let py_poly = PyLwPolyline {
+                vertices: verts,
+                is_closed: p.is_closed,
+                layer: p.common.layer.clone(),
+            };
+            Ok(py_poly.into_py(py))
+        }
+        EntityType::Insert(ins) => {
+            let loc = PyVector3 {
+                x: ins.insert_point.x,
+                y: ins.insert_point.y,
+                z: ins.insert_point.z,
+            };
+            let py_ins = PyInsert {
+                block_name: ins.block_name.clone(),
+                insertion_point: loc,
+                rotation: ins.rotation,
+                layer: ins.common.layer.clone(),
+            };
+            Ok(py_ins.into_py(py))
+        }
         _ => {
             let generic = PyEntity {
                 handle: entity.common().handle.value(),
@@ -438,6 +655,44 @@ pub(crate) fn py_to_entity_op(obj: &Bound<'_, PyAny>) -> PyResult<EntityOp> {
                 .with_height(text.height);
         t.common.layer = text.layer;
         return Ok(EntityOp::Add(EntityType::Text(t)));
+    }
+    if let Ok(mtext) = obj.extract::<PyMText>() {
+        use acadrust::entities::MText;
+        use acadrust::types::Vector3;
+        let mut m = MText::new();
+        m.value = mtext.value;
+        m.insertion_point = Vector3::new(mtext.insertion_point.x, mtext.insertion_point.y, mtext.insertion_point.z);
+        m.height = mtext.height;
+        m.common.layer = mtext.layer;
+        return Ok(EntityOp::Add(EntityType::MText(m)));
+    }
+    if let Ok(poly) = obj.extract::<PyLwPolyline>() {
+        use acadrust::entities::{LwPolyline, LwVertex};
+        use acadrust::types::Vector2;
+        let mut p = LwPolyline::new();
+        p.is_closed = poly.is_closed;
+        p.vertices = poly
+            .vertices
+            .into_iter()
+            .map(|(x, y, bulge)| {
+                let mut v = LwVertex::new(Vector2::new(x, y));
+                v.bulge = bulge;
+                v
+            })
+            .collect();
+        p.common.layer = poly.layer;
+        return Ok(EntityOp::Add(EntityType::LwPolyline(p)));
+    }
+    if let Ok(insert) = obj.extract::<PyInsert>() {
+        use acadrust::entities::Insert;
+        use acadrust::types::Vector3;
+        let mut ins = Insert::new(
+            &insert.block_name,
+            Vector3::new(insert.insertion_point.x, insert.insertion_point.y, insert.insertion_point.z),
+        );
+        ins.rotation = insert.rotation;
+        ins.common.layer = insert.layer;
+        return Ok(EntityOp::Add(EntityType::Insert(ins)));
     }
     Err(pyo3::exceptions::PyTypeError::new_err(
         "entity type not supported",
