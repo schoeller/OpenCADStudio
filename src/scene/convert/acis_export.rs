@@ -12,6 +12,13 @@ pub fn solid_to_sat(body: &Body) -> Option<SatDocument> {
     append(body, &mut document).ok()?;
     let document = SatDocument::parse(&document.to_sat_string()).ok()?;
     let valid = |candidate: &SatDocument| {
+        // Structural SAT check first: pointer/index integrity of the document
+        // itself, independent of whether the kernel can lift it. This is the
+        // property the DWG/DXF SAT→SAB writers rely on (and now re-check) before
+        // embedding a SAB blob.
+        if !candidate.validate().is_empty() {
+            return false;
+        }
         let (restored, loss) = cadkernel::acis::lift(candidate);
         loss.is_empty() && restored.len() == 1 && restored[0].validate().is_empty()
     };
