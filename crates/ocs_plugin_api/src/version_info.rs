@@ -208,7 +208,7 @@ mod tests {
 
     #[test]
     fn extracts_full_hash_from_cargo_source() {
-        let src = "git+https://github.com/HakanSeven12/cadcodec.git?rev=94df2c3#94df2c3f87fa051b16ffc3923f80e9247c85c5fd";
+        let src = "git+https://github.com/schoeller/cadcodec.git?branch=gold-vs-silver#94df2c3f87fa051b16ffc3923f80e9247c85c5fd";
         assert_eq!(
             acadrust_source_hash(src),
             Some("94df2c3f87fa051b16ffc3923f80e9247c85c5fd")
@@ -228,22 +228,22 @@ mod tests {
 
     #[test]
     fn source_comparison_matches_full_hashes() {
-        let a = "git+https://github.com/HakanSeven12/cadcodec.git?rev=94df2c3#94df2c3f87fa051b16ffc3923f80e9247c85c5fd";
-        let b = "git+https://github.com/HakanSeven12/cadcodec.git?rev=94df2c3#94df2c3f87fa051b16ffc3923f80e9247c85c5fd";
+        let a = "git+https://github.com/schoeller/cadcodec.git?branch=gold-vs-silver#94df2c3f87fa051b16ffc3923f80e9247c85c5fd";
+        let b = "git+https://github.com/schoeller/cadcodec.git?branch=gold-vs-silver#94df2c3f87fa051b16ffc3923f80e9247c85c5fd";
         assert!(acadrust_sources_compatible(a, b));
     }
 
     #[test]
     fn source_comparison_detects_mismatch() {
-        let a = "git+https://github.com/HakanSeven12/cadcodec.git?rev=94df2c3#94df2c3f87fa051b16ffc3923f80e9247c85c5fd";
-        let b = "git+https://github.com/HakanSeven12/cadcodec.git?rev=0908da7#0908da7b6e4f702a6c78359a57f53e2b79cf39eb";
+        let a = "git+https://github.com/schoeller/cadcodec.git?branch=gold-vs-silver#94df2c3f87fa051b16ffc3923f80e9247c85c5fd";
+        let b = "git+https://github.com/schoeller/cadcodec.git?rev=0908da7#0908da7b6e4f702a6c78359a57f53e2b79cf39eb";
         assert!(!acadrust_sources_compatible(a, b));
     }
 
     #[test]
     fn source_comparison_case_insensitive() {
-        let a = "git+https://github.com/HakanSeven12/cadcodec.git?rev=94df2c3#94df2c3f87fa051b16ffc3923f80e9247c85c5fd";
-        let b = "git+https://github.com/HakanSeven12/cadcodec.git?rev=94df2c3#94DF2C3F87FA051B16FFC3923F80E9247C85C5FD";
+        let a = "git+https://github.com/schoeller/cadcodec.git?branch=gold-vs-silver#94df2c3f87fa051b16ffc3923f80e9247c85c5fd";
+        let b = "git+https://github.com/schoeller/cadcodec.git?branch=gold-vs-silver#94DF2C3F87FA051B16FFC3923F80E9247C85C5FD";
         assert!(acadrust_sources_compatible(a, b));
     }
 }
