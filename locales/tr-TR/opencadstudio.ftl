@@ -4530,7 +4530,6 @@ properties =
     .override-center-x = Merkez Geçersiz Kılma X
     .override-center-y = Merkez Geçersiz Kılma Y
     .override-center-z = Merkez Geçersiz Kılma Z
-    .override-option = Geçersiz Kılma Seçeneği
     .partial = Kısmi
     .pattern = Desen
     .pattern-name = Desen adı

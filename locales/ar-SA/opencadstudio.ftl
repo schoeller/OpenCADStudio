@@ -4602,7 +4602,6 @@ properties =
     .override-center-x = تجاوز المركز X
     .override-center-y = تجاوز المركز Y
     .override-center-z = تجاوز المركز Z
-    .override-option = خيار التجاوز
     .partial = جزئي
     .pattern = النمط
     .pattern-name = اسم النمط

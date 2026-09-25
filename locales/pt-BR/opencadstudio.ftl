@@ -4590,7 +4590,6 @@ properties =
     .override-center-x = Substituir centro X
     .override-center-y = Substituir centro Y
     .override-center-z = Substituir centro Z
-    .override-option = Opção de substituição
     .partial = Parcial
     .pattern = Padrão
     .pattern-name = Nome do padrão

@@ -4588,7 +4588,6 @@ properties =
     .override-center-x = Centrum X overschrijven
     .override-center-y = Y-punt overschrijven
     .override-center-z = Z-punt overschrijven
-    .override-option = Optie overschrijven
     .partial = Gedeeltelijk
     .pattern = Patroon
     .pattern-name = Patroonnaam

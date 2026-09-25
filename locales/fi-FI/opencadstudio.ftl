@@ -4589,7 +4589,6 @@ properties =
     .override-center-x = Ohita keskus X
     .override-center-y = Ohita keskus Y
     .override-center-z = Ohita keskus Z
-    .override-option = Ohitusvaihtoehto
     .partial = Osittainen
     .pattern = kuvio
     .pattern-name = Kuvion nimi

@@ -4591,7 +4591,6 @@ properties =
     .override-center-x = Очередной центр X
     .override-center-y = Центр по контролю над Y
     .override-center-z = Центр по контролю Z
-    .override-option = Переопределить вариант
     .partial = частичный
     .pattern = Рисунок
     .pattern-name = Имя модели

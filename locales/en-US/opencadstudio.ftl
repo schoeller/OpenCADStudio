@@ -4591,7 +4591,6 @@ properties =
     .override-center-x = Override Center X
     .override-center-y = Override Center Y
     .override-center-z = Override Center Z
-    .override-option = Override Option
     .partial = Partial
     .pattern = Pattern
     .pattern-name = Pattern name

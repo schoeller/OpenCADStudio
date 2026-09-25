@@ -4590,7 +4590,6 @@ properties =
     .override-center-x = Centre de dépassement X
     .override-center-y = Centre de dépassement Y
     .override-center-z = Centre de dépassement Z
-    .override-option = Option de dépassement
     .partial = Partielle
     .pattern = Motif
     .pattern-name = Nom du modèle

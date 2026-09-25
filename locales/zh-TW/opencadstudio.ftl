@@ -4585,7 +4585,6 @@ properties =
     .override-center-x = 替代中心 X
     .override-center-y = 替代中心 Y
     .override-center-z = 替代中心 Z
-    .override-option = 覆蓋選項
     .partial = 部分
     .pattern = 模式
     .pattern-name = 圖案名稱

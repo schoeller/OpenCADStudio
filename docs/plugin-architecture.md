@@ -243,7 +243,7 @@ command_prefixes = ["EX_"]
 xdata_apps = []
 # Both are filled at release-build time; see the CI step below.
 rustc_version = "rustc 1.98.0 (hash date)"
-acadrust_source = "git+https://github.com/HakanSeven12/cadcodec.git?rev=<short>#<full-40-char-commit>"
+acadrust_source = "git+https://github.com/schoeller/cadcodec.git?branch=gold-vs-silver#<full-40-char-commit>"
 ```
 
 The full, buildable scaffold is in [`docs/plugin-template/`](plugin-template);

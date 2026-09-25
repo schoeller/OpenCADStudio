@@ -4589,7 +4589,6 @@ properties =
     .override-center-x = Zastąp środek X
     .override-center-y = Zastąp środek Y
     .override-center-z = Zastąp środek Z
-    .override-option = Opcja zastąpienia
     .partial = Częściowe
     .pattern = Wzór
     .pattern-name = Nazwa wzoru
