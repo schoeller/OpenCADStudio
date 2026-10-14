@@ -226,7 +226,6 @@ impl OpenCADStudio {
             active_layer: None,
             structure: (!objects.is_empty()).then_some(StructureSnapshot::Objects(objects)),
             parametric_constraints: Vec::new(),
-            reference_designations: Vec::new(),
             named_parameters: None,
             label: label.into(),
         };
@@ -234,7 +233,7 @@ impl OpenCADStudio {
     }
 
     pub(super) fn defer_live_entity_history_after(&mut self, i: usize, handle: Handle) {
-        let Some(HistorySnapshot::Delta(delta)) = self.tabs[i].history.undo_stack.last_mut() else {
+        let Some(delta) = self.last_delta_mut(i) else {
             return;
         };
         if let Some((_, _, after)) = delta
@@ -253,7 +252,7 @@ impl OpenCADStudio {
         let selected_after = self.tabs[i].scene.selected.iter().copied().collect();
         let current_layout_after = self.tabs[i].scene.current_layout.clone();
         let dirty_after = self.tabs[i].dirty;
-        let Some(HistorySnapshot::Delta(delta)) = self.tabs[i].history.undo_stack.last_mut() else {
+        let Some(delta) = self.last_delta_mut(i) else {
             return;
         };
         let Some((_, _, entry_after)) = delta
@@ -354,11 +353,67 @@ impl OpenCADStudio {
             structure: structure_changed
                 .then_some(StructureSnapshot::Full(pending.structure_before)),
             parametric_constraints: Vec::new(),
-            reference_designations,
             named_parameters: None,
             label: pending.label,
         };
-        self.push_undo_entry(i, HistorySnapshot::Delta(Box::new(delta)));
+        // A step that also changed designations carries them on the
+        // wrapper variant (see `HistorySnapshot::DesignationDelta`); a step
+        // that did not stays a plain delta.
+        self.push_designation_aware_undo_entry(i, delta, reference_designations);
+    }
+
+    /// Push an undo entry for a finished delta, wrapping it with the
+    /// reference-only designation channel (API v9) when the step changed
+    /// any designation. The channel is scene state, not document state, so
+    /// it rides beside the delta instead of inside it.
+    fn push_designation_aware_undo_entry(
+        &mut self,
+        i: usize,
+        delta: DeltaSnapshot,
+        reference_designations: Vec<ReferenceDesignationDelta>,
+    ) {
+        if reference_designations.is_empty() {
+            self.push_undo_entry(i, HistorySnapshot::Delta(Box::new(delta)));
+        } else {
+            self.push_undo_entry(
+                i,
+                HistorySnapshot::DesignationDelta {
+                    delta: Box::new(delta),
+                    reference_designations,
+                },
+            );
+        }
+    }
+
+    /// The inner entity delta of the newest undo entry, through the plain
+    /// and the designation-wrapped variant alike, for live-entity join
+    /// (the block editor's live image patching).
+    fn last_delta_mut(&mut self, i: usize) -> Option<&mut DeltaSnapshot> {
+        match self.tabs[i].history.undo_stack.last_mut()? {
+            HistorySnapshot::Delta(delta) => Some(delta),
+            HistorySnapshot::DesignationDelta { delta, .. } => Some(delta),
+            _ => None,
+        }
+    }
+
+    /// Apply one side of the reference-only designation channel (API v9)
+    /// after the containing delta's entity side settled. Each actual flip
+    /// joins the change list so the deferred cache reseed and geometry bump
+    /// re-stamp that entity's wires.
+    fn apply_reference_designation_state(
+        &mut self,
+        i: usize,
+        designations: &[ReferenceDesignationDelta],
+        changes: &mut Vec<(Handle, crate::scene::ChangeKind)>,
+        undo: bool,
+    ) {
+        let scene = &mut self.tabs[i].scene;
+        for entry in designations {
+            let value = if undo { entry.before } else { entry.after };
+            if scene.set_reference_only_membership(entry.handle, value) {
+                changes.push((entry.handle, crate::scene::ChangeKind::Modified));
+            }
+        }
     }
 
     /// Finish the pending history step, dropping it when it changed nothing
@@ -509,7 +564,6 @@ impl OpenCADStudio {
             active_layer: None,
             structure: Some(StructureSnapshot::Layers(entries)),
             parametric_constraints: Vec::new(),
-            reference_designations: Vec::new(),
             named_parameters: None,
             label: pending.label,
         };
@@ -567,7 +621,6 @@ impl OpenCADStudio {
             active_layer: None,
             structure: Some(StructureSnapshot::TextStyles(entries)),
             parametric_constraints: Vec::new(),
-            reference_designations: Vec::new(),
             named_parameters: None,
             label: pending.label,
         };
@@ -625,7 +678,6 @@ impl OpenCADStudio {
             active_layer: None,
             structure: Some(StructureSnapshot::DimStyles(entries)),
             parametric_constraints: Vec::new(),
-            reference_designations: Vec::new(),
             named_parameters: None,
             label: pending.label,
         };
@@ -691,7 +743,6 @@ impl OpenCADStudio {
             active_layer: None,
             structure: Some(StructureSnapshot::Objects(entries)),
             parametric_constraints: Vec::new(),
-            reference_designations: Vec::new(),
             named_parameters: None,
             label: pending.label,
         };
@@ -727,7 +778,6 @@ impl OpenCADStudio {
                 object_handles,
             }),
             parametric_constraints: Vec::new(),
-            reference_designations: Vec::new(),
             named_parameters: None,
             label: "STYLE".to_string(),
         };
@@ -911,11 +961,10 @@ impl OpenCADStudio {
             active_layer: None,
             structure,
             parametric_constraints,
-            reference_designations,
             named_parameters,
             label: pending.label,
         };
-        self.push_undo_entry(i, HistorySnapshot::Delta(Box::new(delta)));
+        self.push_designation_aware_undo_entry(i, delta, reference_designations);
     }
 
     /// Apply one side of a delta entry in place: `undo` restores each entity's
@@ -1066,19 +1115,13 @@ impl OpenCADStudio {
                 }
             }
         }
-        let mut changes = self.tabs[i].scene.apply_entity_delta(&d.entities, undo);
+        let changes = self.tabs[i].scene.apply_entity_delta(&d.entities, undo);
         let scene = &mut self.tabs[i].scene;
-        // Designations: restore the chosen side's value on the scene-owned set
-        // (the entity images above already applied, so a restored entity is
-        // present before its designation is). Each actual flip joins the
-        // returned per-handle change list so the deferred cache reseed and
-        // geometry bump re-stamp that entity's wires.
-        for entry in &d.reference_designations {
-            let value = if undo { entry.before } else { entry.after };
-            if scene.set_reference_only_membership(entry.handle, value) {
-                changes.push((entry.handle, crate::scene::ChangeKind::Modified));
-            }
-        }
+        // Designations ride the `DesignationDelta` wrapper (scene state, not
+        // document state); the wrapper's caller applies them right after this
+        // snapshot's own sides, so a restored entity is present before its
+        // designation is, and each actual flip joins the change list the
+        // deferred cache reseed and geometry bump consume.
         if !d.parametric_constraints.is_empty() {
             scene.bump_constraints_epoch();
         }
@@ -1282,6 +1325,42 @@ impl OpenCADStudio {
                         .redo_stack
                         .push(HistorySnapshot::Delta(d));
                 }
+                HistorySnapshot::DesignationDelta {
+                    mut delta,
+                    reference_designations,
+                } => {
+                    // The designation channel is scene state: apply after the
+                    // entity side so a restored entity is present before its
+                    // designation resumes.
+                    layer_panel_changed |= delta.structure.as_ref().is_some_and(|structure| {
+                        matches!(
+                            structure,
+                            StructureSnapshot::Full(_) | StructureSnapshot::Layers(_)
+                        )
+                    }) || delta.active_layer.is_some()
+                        || delta.entities.iter().any(|(_, before, after)| {
+                            before
+                                .as_deref()
+                                .is_some_and(|entity| matches!(entity, EntityType::Viewport(_)))
+                                || after
+                                    .as_deref()
+                                    .is_some_and(|entity| matches!(entity, EntityType::Viewport(_)))
+                        });
+                    had_full |= delta.structure.as_ref().is_some_and(StructureSnapshot::is_full);
+                    changes.extend(self.apply_delta_state(i, &mut delta, true));
+                    self.apply_reference_designation_state(
+                        i,
+                        &reference_designations,
+                        &mut changes,
+                        true,
+                    );
+                    self.tabs[i].history.redo_stack.push(
+                        HistorySnapshot::DesignationDelta {
+                            delta,
+                            reference_designations,
+                        },
+                    );
+                }
                 HistorySnapshot::ObjectVisibility(v) => {
                     self.apply_object_visibility_state(i, &v, true);
                     self.tabs[i]
@@ -1338,6 +1417,39 @@ impl OpenCADStudio {
                         .history
                         .undo_stack
                         .push(HistorySnapshot::Delta(d));
+                }
+                HistorySnapshot::DesignationDelta {
+                    mut delta,
+                    reference_designations,
+                } => {
+                    layer_panel_changed |= delta.structure.as_ref().is_some_and(|structure| {
+                        matches!(
+                            structure,
+                            StructureSnapshot::Full(_) | StructureSnapshot::Layers(_)
+                        )
+                    }) || delta.active_layer.is_some()
+                        || delta.entities.iter().any(|(_, before, after)| {
+                            before
+                                .as_deref()
+                                .is_some_and(|entity| matches!(entity, EntityType::Viewport(_)))
+                                || after
+                                    .as_deref()
+                                    .is_some_and(|entity| matches!(entity, EntityType::Viewport(_)))
+                        });
+                    had_full |= delta.structure.as_ref().is_some_and(StructureSnapshot::is_full);
+                    changes.extend(self.apply_delta_state(i, &mut delta, false));
+                    self.apply_reference_designation_state(
+                        i,
+                        &reference_designations,
+                        &mut changes,
+                        false,
+                    );
+                    self.tabs[i].history.undo_stack.push(
+                        HistorySnapshot::DesignationDelta {
+                            delta,
+                            reference_designations,
+                        },
+                    );
                 }
                 HistorySnapshot::ObjectVisibility(v) => {
                     self.apply_object_visibility_state(i, &v, false);

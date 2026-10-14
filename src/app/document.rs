@@ -747,6 +747,16 @@ pub(super) enum HistorySnapshot {
     // stack slot costs as much as this enum's largest variant regardless of
     // which one it actually holds.
     Delta(Box<DeltaSnapshot>),
+    /// A `Delta` plus scene-owned reference-only designation before/afters
+    /// (API v9). The designation set lives on `Scene`, not the document, so
+    /// when a history step carries both its channel rides here beside the
+    /// entity delta instead of a `DeltaSnapshot` field — which keeps every
+    /// `DeltaSnapshot` constructor (e.g. the block-editor checkpointing)
+    /// source-compatible and the variant unused outside designation steps.
+    DesignationDelta {
+        delta: Box<DeltaSnapshot>,
+        reference_designations: Vec<ReferenceDesignationDelta>,
+    },
     ObjectVisibility(ObjectVisibilitySnapshot),
 }
 
@@ -754,6 +764,7 @@ impl HistorySnapshot {
     pub(super) fn label(&self) -> &str {
         match self {
             HistorySnapshot::Delta(d) => &d.label,
+            HistorySnapshot::DesignationDelta { delta, .. } => &delta.label,
             HistorySnapshot::ObjectVisibility(v) => &v.label,
         }
     }
@@ -763,38 +774,13 @@ impl HistorySnapshot {
     /// structure state to keep pathological histories bounded.
     pub(super) fn estimated_bytes(&self) -> usize {
         match self {
-            HistorySnapshot::Delta(d) => d
-                .entities
-                .len()
-                .saturating_mul(512)
-                .saturating_add(
-                    d.structure
-                        .as_ref()
-                        .map_or(0, StructureSnapshot::estimated_bytes),
-                )
-                .saturating_add(d.selected_before.len().saturating_mul(16))
-                .saturating_add(d.selected_after.len().saturating_mul(16))
-                .saturating_add(d.active_layer.as_ref().map_or(0, |(before, after)| {
-                    before.len().saturating_add(after.len())
-                }))
-                .saturating_add(
-                    d.parametric_constraints
-                        .iter()
-                        .map(|entry| {
-                            entry
-                                .before
-                                .constraints
-                                .len()
-                                .saturating_add(entry.after.constraints.len())
-                        })
-                        .sum::<usize>()
-                        .saturating_mul(96),
-                )
-                .saturating_add(d.named_parameters.as_ref().map_or(0, |(before, after)| {
-                    before.len().saturating_add(after.len()).saturating_mul(128)
-                }))
-                .saturating_add(d.reference_designations.len().saturating_mul(16))
-                .saturating_add(d.label.len()),
+            HistorySnapshot::Delta(d) => d.estimated_bytes(),
+            HistorySnapshot::DesignationDelta {
+                delta,
+                reference_designations,
+            } => delta
+                .estimated_bytes()
+                .saturating_add(reference_designations.len().saturating_mul(16)),
             HistorySnapshot::ObjectVisibility(v) => v
                 .before
                 .hidden
@@ -846,12 +832,6 @@ pub(super) struct DeltaSnapshot {
     /// `document.objects`, so it needs its own channel here rather than
     /// riding along with `entities`/`structure`. Almost always empty.
     pub(super) parametric_constraints: Vec<ParametricConstraintsEntryDelta>,
-    /// Reference-only designations (API v9) this same command changed — set
-    /// state on `Scene` (see `scene::reference_only`), recorded as explicit
-    /// first-touch before/afters so undo/redo restores the designation with
-    /// the entity it belongs to (e.g. a plugin scope that both erases and
-    /// re-designates). Almost always empty.
-    pub(super) reference_designations: Vec<ReferenceDesignationDelta>,
     /// Drawing-wide parameter table changed by this transaction.
     pub(super) named_parameters: Option<(
         crate::scene::named_parameters::ParameterTable,
@@ -928,13 +908,51 @@ pub(super) struct ParametricConstraintsEntryDelta {
 
 /// One reference-only designation's before/after value within an entity delta
 /// (API v9). The designation set lives on `Scene`, not in the document, so
-/// the value rides its own channel — symmetric like every other delta field,
-/// undo applies the before value, redo the after value.
+/// the value rides its own channel on the history entry —
+/// [`HistorySnapshot::DesignationDelta`] — symmetric like every other delta
+/// field; undo applies the before value, redo the after value.
 #[derive(Clone)]
 pub(super) struct ReferenceDesignationDelta {
     pub(super) handle: Handle,
     pub(super) before: bool,
     pub(super) after: bool,
+}
+
+impl DeltaSnapshot {
+    /// The entity-delta half of [`HistorySnapshot::estimated_bytes`]; the
+    /// `DesignationDelta` wrapper reuses it for its inner delta.
+    pub(super) fn estimated_bytes(&self) -> usize {
+        self.entities
+            .len()
+            .saturating_mul(512)
+            .saturating_add(
+                self.structure
+                    .as_ref()
+                    .map_or(0, StructureSnapshot::estimated_bytes),
+            )
+            .saturating_add(self.selected_before.len().saturating_mul(16))
+            .saturating_add(self.selected_after.len().saturating_mul(16))
+            .saturating_add(self.active_layer.as_ref().map_or(0, |(before, after)| {
+                before.len().saturating_add(after.len())
+            }))
+            .saturating_add(
+                self.parametric_constraints
+                    .iter()
+                    .map(|entry| {
+                        entry
+                            .before
+                            .constraints
+                            .len()
+                            .saturating_add(entry.after.constraints.len())
+                    })
+                    .sum::<usize>()
+                    .saturating_mul(96),
+            )
+            .saturating_add(self.named_parameters.as_ref().map_or(0, |(before, after)| {
+                before.len().saturating_add(after.len()).saturating_mul(128)
+            }))
+            .saturating_add(self.label.len())
+    }
 }
 
 #[derive(Default)]
