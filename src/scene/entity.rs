@@ -519,23 +519,47 @@ impl Scene {
     /// existing entity.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub fn update_entity(&mut self, entity: EntityType) -> bool {
-        let mut changed = Vec::with_capacity(1);
-        let mut block_change = false;
-        if !self.update_entity_impl(entity, &mut changed, &mut block_change) {
-            return false;
-        }
-        self.publish_entity_updates(changed, block_change);
-        true
+        self.update_entities_policy(vec![entity], false) == 1
     }
 
     /// Batched variant of [`update_entity`]: writes every replacement, then
     /// issues a single geometry bump for the whole set instead of one bump per
     /// entity.
     pub fn update_entities(&mut self, updates: Vec<EntityType>) -> usize {
+        self.update_entities_policy(updates, false)
+    }
+
+    /// Like [`update_entity`](Self::update_entity) but without the
+    /// reference-only refusal. The plugin owns reference-only entities and
+    /// keeps full write access through the plugin host API, so a plugin's own
+    /// refresh of derived display geometry must not be refused. Locked-layer
+    /// policy stays enforced either way.
+    pub fn update_entity_plugin(&mut self, entity: EntityType) -> bool {
+        self.update_entities_policy(vec![entity], true) == 1
+    }
+
+    /// Like [`update_entities`](Self::update_entities) but without the
+    /// reference-only refusal (see [`update_entity_plugin`](Self::update_entity_plugin)).
+    pub fn update_entities_plugin(&mut self, updates: Vec<EntityType>) -> usize {
+        self.update_entities_policy(updates, true)
+    }
+
+    /// Shared write path of the four `update_entity*` entry points. Locked
+    /// layers always refuse (inside `update_entity_impl`); reference-only
+    /// entities refuse every caller except the plugin-owned `_plugin`
+    /// variants, mirroring the `remove_entities` edit-policy split.
+    fn update_entities_policy(
+        &mut self,
+        updates: Vec<EntityType>,
+        allow_reference_only: bool,
+    ) -> usize {
         let mut moved = 0usize;
         let mut changed = Vec::with_capacity(updates.len());
         let mut block_change = false;
         for entity in updates {
+            if !allow_reference_only && self.is_reference_only(entity.common().handle) {
+                continue;
+            }
             if self.update_entity_impl(entity, &mut changed, &mut block_change) {
                 moved += 1;
             }

@@ -732,6 +732,9 @@ impl OpenCADStudio {
             bounds,
             candidate_handles.as_ref(),
         ));
+        // Reference-only entities (API v9) are plugin-owned display geometry:
+        // a box/window selection must not pick them.
+        handles.retain(|h| !scene.is_reference_only(*h));
         timing.hit = elapsed(t_hit);
         (handles, timing)
     }
@@ -5168,6 +5171,7 @@ properties={:.1}ms picked={}",
                             .into_iter()
                             .filter_map(|s| Scene::handle_from_wire_name(s))
                             .filter(|&h| self.tabs[i].scene.passes_selection_filter(h))
+                            .filter(|&h| !self.tabs[i].scene.is_reference_only(h))
                             .collect();
                             if cands.len() >= 2 {
                                 // Overlap: open the list box at the cursor.

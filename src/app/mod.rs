@@ -1118,6 +1118,12 @@ pub(super) struct OpenCADStudio {
     /// boundaries as well as after plugin-initiated writes.
     #[cfg(not(target_arch = "wasm32"))]
     last_plugin_document: Option<(u64, u64)>,
+    /// `(tab id, document generation)` last dispatched as `DocumentOpened` —
+    /// a tab's generation changes only when a whole document replaced its
+    /// content, so the opened notification fires once per load, never per
+    /// edit (API v9).
+    #[cfg(not(target_arch = "wasm32"))]
+    last_plugin_document_opened: Option<(u64, u64)>,
     /// External add-on packages found in the plugins folder, refreshed when the
     /// Plugin Manager opens.
     external_plugins: Vec<crate::plugin::external::ExternalPlugin>,
@@ -4735,6 +4741,8 @@ impl OpenCADStudio {
             last_plugin_selection: None,
             #[cfg(not(target_arch = "wasm32"))]
             last_plugin_document: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            last_plugin_document_opened: None,
             external_plugins: Vec::new(),
             loaded_plugin_ids: rustc_hash::FxHashSet::default(),
             plugin_load_errors: rustc_hash::FxHashMap::default(),

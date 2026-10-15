@@ -690,6 +690,10 @@ impl OpenCADStudio {
         self.notify_plugins_selection_changed();
         #[cfg(not(target_arch = "wasm32"))]
         self.notify_plugins_document_changed();
+        // The `new` / `open` / template ops replace a tab's whole document;
+        // announce it on the same post-op boundary (API v9).
+        #[cfg(not(target_arch = "wasm32"))]
+        self.notify_plugins_document_opened();
         res
     }
 
@@ -719,6 +723,9 @@ impl OpenCADStudio {
                 // The headless session starts on the welcome (Start) tab, which
                 // blocks drawing commands; turn it into a real drawing.
                 self.tabs[i].is_start = false;
+                // A fresh document became resident (API v9): mint a new
+                // generation so the post-op boundary announces `DocumentOpened`.
+                self.tabs[i].note_document_loaded();
                 self.entity_summary()
             }
             #[cfg(not(target_arch = "wasm32"))]
@@ -751,6 +758,10 @@ impl OpenCADStudio {
                         self.tabs[i].current_path = Some(path_buf);
                         self.tabs[i].is_start = false;
                         self.tabs[i].scene.rebuild_derived_caches();
+                        // The opened document settled (API v9): mint a new
+                        // generation so the post-op boundary announces
+                        // `DocumentOpened` once for this load.
+                        self.tabs[i].note_document_loaded();
                         let mut summary = self.entity_summary();
                         if dropped > 0 {
                             if let Some(obj) = summary.as_object_mut() {
@@ -1717,6 +1728,290 @@ mod tests {
         let published = app.last_plugin_document.expect("plugin write published");
         app.notify_plugins_document_changed();
         assert_eq!(app.last_plugin_document, Some(published));
+    }
+
+    // ── Native-plugin notification dispatch (API v9) ─────────────────────
+    //
+    // The app-level tests observe the dispatch seam in
+    // `plugin::v4_support`: one recorded entry stands for one broadcast to
+    // every loaded native plugin, so counts here are counts per plugin. The
+    // write-semantics rule under test: dispatch happens at the message
+    // boundary — after the mutation settled, never mid-undo/mid-pick — so
+    // handlers may write through the plugin host API, and the fingerprint
+    // guards plus idempotent re-marks keep that loop finite.
+
+    fn plugin_dispatch_log() -> Vec<String> {
+        crate::plugin::v4_support::take_test_dispatch_log()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn an_edit_dispatches_document_changed_once_per_epoch() {
+        use codec::entities::Point;
+        use codec::EntityType;
+
+        let mut app = super::OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let _ = plugin_dispatch_log();
+        let tab = app.active_tab;
+
+        let mut host = super::super::plugin_host::HostSession::new(&mut app, tab);
+        host.add_entity(EntityType::Point(Point::new()));
+        drop(host);
+        app.notify_plugins_document_changed();
+
+        let epoch = app.tabs[tab].scene.geometry_epoch;
+        let log = plugin_dispatch_log();
+        let changed: Vec<_> = log
+            .iter()
+            .filter(|entry| *entry == &format!("DocumentChanged({epoch})"))
+            .collect();
+        assert_eq!(
+            changed.len(),
+            1,
+            "one settled edit dispatches exactly one DocumentChanged per plugin: {log:?}"
+        );
+
+        // The same epoch at the next boundary dispatches nothing further.
+        app.notify_plugins_document_changed();
+        let log = plugin_dispatch_log();
+        assert!(
+            log.iter()
+                .all(|entry| *entry != format!("DocumentChanged({epoch})")),
+            "the fingerprint guard suppresses duplicate dispatches: {log:?}"
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_selection_change_dispatches_selection_changed() {
+        let mut app = super::OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+        let _ = plugin_dispatch_log();
+        let i = app.active_tab;
+
+        let handle = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .next()
+            .expect("the drawn line")
+            .common()
+            .handle;
+        let selection: rustc_hash::FxHashSet<codec::Handle> = std::iter::once(handle).collect();
+        app.tabs[i].scene.replace_selection(selection);
+        app.notify_plugins_selection_changed();
+
+        let log = plugin_dispatch_log();
+        assert!(
+            log.contains(&"SelectionChanged(1 handles)".to_string()),
+            "a real selection change dispatches SelectionChanged: {log:?}"
+        );
+
+        // Unchanged selection at the next boundary: nothing further.
+        app.notify_plugins_selection_changed();
+        let log = plugin_dispatch_log();
+        assert_eq!(log.len(), 0, "no duplicate dispatch: {log:?}");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_document_open_dispatches_document_opened_once() {
+        let mut app = super::OpenCADStudio::new_for_test();
+        let _ = plugin_dispatch_log();
+
+        app.automation_op(r#"{"op":"new"}"#);
+        let tab_id = app.tabs[app.active_tab].id;
+        let log = plugin_dispatch_log();
+        let opened: Vec<_> = log
+            .iter()
+            .filter(|entry| **entry == format!("DocumentOpened({tab_id})"))
+            .collect();
+        assert_eq!(
+            opened.len(),
+            1,
+            "a new document announces exactly one open: {log:?}"
+        );
+
+        // A follow-up op does not repeat it: generation-keyed dispatch.
+        app.automation_op(r#"{"op":"query","type":"Line"}"#);
+        let log = plugin_dispatch_log();
+        assert!(
+            log.iter()
+                .all(|entry| *entry != format!("DocumentOpened({tab_id})")),
+            "no duplicate open dispatch: {log:?}"
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_file_open_dispatches_document_opened_through_the_message_flow() {
+        let mut app = super::OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let path =
+            std::env::temp_dir().join(format!("ocs_opened_dispatch_{}.dxf", std::process::id(),));
+        crate::io::save(&app.tabs[app.active_tab].scene.document, &path)
+            .expect("save the open fixture");
+
+        app.opening = Some(crate::app::OpenProgress {
+            id: 7,
+            name: "ocs_opened_dispatch.dxf".to_string(),
+            source_path: Some(path.clone()),
+            size_bytes: 0,
+            state: std::sync::Arc::new(crate::io::OpenProgressState::new(
+                crate::app::OPEN_PHASE_CACHING,
+            )),
+            started: std::time::Instant::now(),
+            recovery_error: None,
+            recovery_read_stats: None,
+            fingerprint: None,
+        });
+        let bytes = std::fs::read(&path).expect("read the fixture back");
+        let (document, _dropped) =
+            crate::io::load_bytes_finalized(&path, bytes).expect("reparse the fixture");
+        let caches = crate::scene::build_derived_caches_with_progress(&document, &|_| {}, None);
+        let _ = plugin_dispatch_log();
+        let _ = app.update(crate::app::Message::FileOpened(
+            7,
+            Ok((
+                "ocs_opened_dispatch.dxf".to_string(),
+                path.clone(),
+                document,
+                caches,
+            )),
+        ));
+
+        let tab_id = app.tabs[app.active_tab].id;
+        let log = plugin_dispatch_log();
+        let opened: Vec<_> = log
+            .iter()
+            .filter(|entry| **entry == format!("DocumentOpened({tab_id})"))
+            .collect();
+        assert_eq!(
+            opened.len(),
+            1,
+            "the file-open message announces exactly one open: {log:?}"
+        );
+        // The next message boundary does not repeat it.
+        app.notify_plugins_document_opened();
+        let log = plugin_dispatch_log();
+        assert_eq!(log.len(), 0, "generation-keyed dispatch dedupes: {log:?}");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn idempotent_designation_remarks_cannot_loop_the_dispatch() {
+        use codec::entities::Point;
+        use codec::EntityType;
+
+        // Models the consumer plugin's re-mark handler: on DocumentChanged it
+        // re-marks its entities through the plugin host API. The write goes
+        // through, but because a re-mark of already-designated geometry is a
+        // documented no-op — no epoch bump, no undo step, no publish — the
+        // notification loop terminates instead of feeding itself.
+        let mut app = super::OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let _ = plugin_dispatch_log();
+        let tab = app.active_tab;
+
+        let mut host = super::super::plugin_host::HostSession::new(&mut app, tab);
+        let handle = host.add_entity(EntityType::Point(Point::new()));
+        host.set_reference_only(handle, true).expect("mark");
+        // The handler's "write": an idempotent re-mark after the notification.
+        host.set_reference_only(handle, true)
+            .expect("idempotent re-mark");
+        drop(host);
+        assert!(app.tabs[tab].scene.is_reference_only(handle));
+
+        app.notify_plugins_document_changed();
+        let epoch = app.tabs[tab].scene.geometry_epoch;
+        let log = plugin_dispatch_log();
+        let changed: Vec<_> = log
+            .iter()
+            .filter(|entry| **entry == format!("DocumentChanged({epoch})"))
+            .collect();
+        assert_eq!(
+            changed.len(),
+            1,
+            "the designation write dispatched once, not one per re-mark: {log:?}"
+        );
+
+        // A further boundary run finds the same epoch: the loop has ended.
+        app.notify_plugins_document_changed();
+        let log = plugin_dispatch_log();
+        assert_eq!(log.len(), 0, "idempotent re-marks emit nothing: {log:?}");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn history_replay_emits_no_plugin_notifications_itself() {
+        use codec::entities::Point;
+        use codec::EntityType;
+
+        // Undo/redo replay never publishes: the notification boundary is the
+        // only channel, so replaying history steps in isolation is silent.
+        let mut app = super::OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let _ = plugin_dispatch_log();
+        let tab = app.active_tab;
+
+        let mut host = super::super::plugin_host::HostSession::new(&mut app, tab);
+        let handle = host.add_entity(EntityType::Point(Point::new()));
+        host.set_reference_only(handle, true).expect("mark");
+        drop(host);
+
+        let _ = plugin_dispatch_log();
+        app.undo_steps(1);
+        assert!(
+            !app.tabs[tab].scene.is_reference_only(handle),
+            "undo reverted the designation"
+        );
+        let log = plugin_dispatch_log();
+        assert_eq!(
+            log.len(),
+            0,
+            "history replay itself emits no plugin notifications: {log:?}"
+        );
+
+        app.redo_steps(1);
+        assert!(app.tabs[tab].scene.is_reference_only(handle));
+        let log = plugin_dispatch_log();
+        assert_eq!(log.len(), 0, "redo replay is equally silent: {log:?}");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn dispatching_without_loaded_plugins_leaves_the_app_state_untouched() {
+        // The default `on_notification` is a no-op; with no plugin processes
+        // loaded, a full boundary pass must not disturb the host.
+        let mut app = super::OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let epoch = app.tabs[i].scene.geometry_epoch;
+        let selected: Vec<codec::Handle> = app.tabs[i].scene.selected.iter().copied().collect();
+
+        let _ = plugin_dispatch_log();
+        app.notify_plugins_selection_changed();
+        app.notify_plugins_document_changed();
+        app.notify_plugins_document_opened();
+        let log = plugin_dispatch_log();
+
+        assert_eq!(app.tabs[i].scene.geometry_epoch, epoch);
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .selected
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            selected
+        );
+        assert!(
+            log.iter().all(|entry| !entry.starts_with("DocumentOpened")),
+            "a start-tab-free app does not announce spurious opens: {log:?}"
+        );
     }
     use crate::app::OpenCADStudio;
     use serde_json::{json, Value};

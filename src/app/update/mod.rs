@@ -308,6 +308,11 @@ impl OpenCADStudio {
         self.last_plugin_selection = Some(key);
         let handles = self.tabs[i].scene.selected_handles_in_order();
         crate::plugin::v4_support::publish_selection_changed_v4(tab_id, handles.clone());
+        // Same guarded boundary, second surface (API v9): the plain
+        // `SelectionChanged` reaches every loaded native plugin through
+        // `BuiltinPlugin::on_notification`, without a shared-view
+        // subscription.
+        crate::plugin::v4_support::publish_selection_changed(handles.clone());
         self.control_record_selection_event(&handles);
     }
 
@@ -327,6 +332,35 @@ impl OpenCADStudio {
         self.last_plugin_document = Some(key);
         crate::plugin::v4_support::publish_drawing_changed(tab.id, tab.scene.geometry_epoch);
         crate::plugin::v4_support::publish_document_view_v4(tab.id, &tab.scene.document);
+        // Same guarded boundary, second surface (API v9): the plain
+        // `DocumentChanged` carries the settled geometry epoch to every
+        // loaded native plugin through `BuiltinPlugin::on_notification`.
+        crate::plugin::v4_support::publish_document_changed(tab.scene.geometry_epoch);
+    }
+
+    /// Announce that a whole document became resident in the active tab —
+    /// opened from file, created from a template, or loaded by a system open
+    /// (API v9). Keyed on `(tab id, document generation)`, which changes only
+    /// when a tab's content is wholesale replaced, so an edit can never fire
+    /// it twice and a reload fires it exactly once. Part of the same
+    /// post-message boundary as the selection and document dispatches: runs
+    /// after the mutation settles and pending history scopes closed, never
+    /// inside history replay or interactive picking.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn notify_plugins_document_opened(&mut self) {
+        if self.active_tab >= self.tabs.len() {
+            return;
+        }
+        let i = self.active_tab;
+        if self.tabs[i].is_start {
+            return;
+        }
+        let key = (self.tabs[i].id, self.tabs[i].document_generation);
+        if self.last_plugin_document_opened == Some(key) {
+            return;
+        }
+        self.last_plugin_document_opened = Some(key);
+        crate::plugin::v4_support::publish_document_opened(self.tabs[i].id);
     }
 
     pub fn update(&mut self, msg: Message) -> Task<Message> {
@@ -540,6 +574,10 @@ impl OpenCADStudio {
         self.notify_plugins_selection_changed();
         #[cfg(not(target_arch = "wasm32"))]
         self.notify_plugins_document_changed();
+        // A message may also have installed a whole document into a tab (file
+        // open, template new); announce it on the same boundary (API v9).
+        #[cfg(not(target_arch = "wasm32"))]
+        self.notify_plugins_document_opened();
         // OTRACK acquires tracking points only while a command or grip drag is
         // running; drop them once neither is active so the temporary tracking
         // points / vectors disappear when the command ends (issue #64). A grip

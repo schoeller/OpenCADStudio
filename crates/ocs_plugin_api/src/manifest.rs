@@ -24,8 +24,11 @@
 /// undoable replacement of a set of existing entities. v8 appends name-addressed
 /// XRecord object CRUD under named-object-dictionary paths
 /// (`HostApi::create_xrecord` / `read_xrecord` / `update_xrecord` /
-/// `delete_xrecord` / `list_xrecords`).
-pub const API_VERSION: u32 = 8;
+/// `delete_xrecord` / `list_xrecords`). v9 appends the reference-only entity
+/// designation (`HostApi::set_reference_only`): display-only geometry a plugin
+/// still owns and refreshes while the built-in edit paths treat it like a
+/// locked layer.
+pub const API_VERSION: u32 = 9;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the

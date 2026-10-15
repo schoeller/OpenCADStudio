@@ -226,6 +226,11 @@ pub enum PluginRequest {
     ListXRecords {
         dictionary_path: Vec<String>,
     },
+    /// V9 (additive): mark an entity reference-only (plugin-owned display data).
+    SetReferenceOnly {
+        handle: Handle,
+        reference_only: bool,
+    },
 }
 
 /// Responses the host sends back for `PluginRequest`.
@@ -272,6 +277,8 @@ pub enum PluginResponse {
     XRecordDeleteResult(Result<crate::host::XRecord, String>),
     /// V8 (additive): XRecord names under a dictionary path.
     XRecordNames(Result<Vec<String>, String>),
+    /// V9 (additive): outcome of the reference-only designation.
+    SetReferenceOnlyResult(Result<(), String>),
 }
 
 /// Messages sent from the host to the plugin runner.

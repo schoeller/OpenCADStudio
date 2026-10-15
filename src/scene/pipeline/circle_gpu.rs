@@ -588,6 +588,7 @@ mod tests {
         let h = doc.add_entity(donut).unwrap();
         let entity = doc.get_entity(h).unwrap();
         let selected = rustc_hash::FxHashSet::default();
+        let reference_only = rustc_hash::FxHashSet::default();
         let wires = crate::scene::convert::tess::tessellate_entity(
             &doc,
             &selected,
@@ -600,6 +601,7 @@ mod tests {
             None,
             None,
             false,
+            &reference_only,
         );
         assert_eq!(
             wires.len(),

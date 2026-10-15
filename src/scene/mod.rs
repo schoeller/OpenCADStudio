@@ -31,6 +31,8 @@ pub enum BlockScalePolicy {
 mod block_base_point_tests;
 mod boundary;
 mod camera_ops;
+#[cfg(test)]
+mod reference_only_tests;
 pub use camera_ops::{add_background, copy_background, erase_background};
 pub(crate) mod centerline;
 pub(crate) mod centermark;
@@ -56,6 +58,7 @@ mod page_setup;
 mod paper;
 mod preview;
 mod project;
+pub mod reference_only;
 mod scene_markers;
 mod selection;
 pub mod viewport_dimension_pick;
@@ -79,6 +82,10 @@ pub(crate) use convert::tess::{
 
 /// Keep construction-history curves in the same per-entity tessellation memo
 /// as their parent, so navigation never rebuilds them on every frame.
+///
+/// `reference_only` is the scene's designation set: its membership decides
+/// whether the produced wires carry the `WireModel::reference_only` click-
+/// through stamp (see `scene::reference_only`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tessellate_entity(
     document: &CadDocument,
@@ -92,6 +99,7 @@ pub(crate) fn tessellate_entity(
     view_aabb: Option<[f32; 4]>,
     world_per_pixel: Option<f32>,
     paper_space: bool,
+    reference_only: &HashSet<Handle>,
 ) -> Vec<WireModel> {
     let mut wires = convert::tess::tessellate_entity(
         document,
@@ -105,6 +113,7 @@ pub(crate) fn tessellate_entity(
         view_aabb,
         world_per_pixel,
         paper_space,
+        reference_only,
     );
     if matches!(entity, EntityType::Solid3D(_) | EntityType::Surface(_)) {
         let handle = entity.common().handle;
@@ -156,6 +165,7 @@ pub(crate) fn tessellate_entity(
                     view_aabb,
                     world_per_pixel,
                     paper_space,
+                    reference_only,
                 )
             };
             for wire in &mut construction {
@@ -755,6 +765,13 @@ pub struct UndoRecording {
     >,
     parametric_constraints_order: Vec<parametric_constraints::ParametricScope>,
     named_parameters_before: Option<named_parameters::ParameterTable>,
+    /// First-touch before-images of reference-only designations (API v9)
+    /// changed by the command — almost always empty. The designation set
+    /// lives on `Scene`, not in the document, so like
+    /// `parametric_constraints_before` it needs its own channel. Erasing a
+    /// designated entity drops its set entry here so undo restores entity
+    /// and designation together.
+    reference_designations_before: Vec<(Handle, bool)>,
     poisoned: bool,
 }
 
@@ -770,6 +787,7 @@ impl UndoRecording {
             && self.object_order.is_empty()
             && self.parametric_constraints_order.is_empty()
             && self.named_parameters_before.is_none()
+            && self.reference_designations_before.is_empty()
     }
 
     /// Consume the recording directories in deterministic first-touch
@@ -787,6 +805,7 @@ impl UndoRecording {
             parametric_constraints::ParametricConstraintSet,
         )>,
         Option<named_parameters::ParameterTable>,
+        Vec<(Handle, bool)>,
     ) {
         let entities = self
             .order
@@ -807,11 +826,13 @@ impl UndoRecording {
                     .map(|before| (scope, before))
             })
             .collect();
+        let reference_designations = std::mem::take(&mut self.reference_designations_before);
         (
             entities,
             objects,
             parametric_constraints,
             self.named_parameters_before,
+            reference_designations,
         )
     }
 
@@ -2059,6 +2080,11 @@ pub struct Scene {
     pub selected_constraint: Option<crate::scene::parametric_constraints::ConstraintId>,
     /// Session-only ISOLATEOBJECTS / HIDEOBJECTS state. Never written to DWG/DXF.
     pub object_isolation: ObjectIsolationState,
+    /// Scene-scoped reference-only designations (API v9): plugin-owned
+    /// display geometry the built-in edit paths refuse. In-memory only,
+    /// keyed by handle, lives and dies with this scene — never written to
+    /// DWG/DXF (see `scene::reference_only`).
+    pub(crate) reference_only: reference_only::ReferenceOnlyDesignation,
     /// Entity handles temporarily removed from the base render while an
     /// interactive grip preview draws their live replacement.
     /// Separate from object isolation so a grip can never activate the
@@ -2691,6 +2717,7 @@ impl Scene {
             selected_order: Vec::new(),
             selected_constraint: None,
             object_isolation: ObjectIsolationState::default(),
+            reference_only: Default::default(),
             preview_hidden: HashSet::default(),
             command_preview_hidden: HashSet::default(),
             refedit_keep: None,
@@ -3338,6 +3365,26 @@ impl Scene {
         }
     }
 
+    /// Record a reference-only designation's value before its first change
+    /// within the open delta recording (API v9). The designation set lives on
+    /// `Scene`, outside the document, so it needs its own channel — like
+    /// the parametric-constraint directory above — for undo to restore the
+    /// designation together with the entity it belongs to. First touch wins.
+    pub(crate) fn record_undo_reference_designation_before(&mut self, handle: Handle) {
+        if let Some(recording) = self.undo_recording.as_mut() {
+            if !recording
+                .reference_designations_before
+                .iter()
+                .any(|(recorded, _)| *recorded == handle)
+            {
+                let before = self.reference_only.is_marked(handle);
+                recording
+                    .reference_designations_before
+                    .push((handle, before));
+            }
+        }
+    }
+
     /// Flag the open recording as touching non-entity state (a new layer, a
     /// group edit, a `*D` block record) that a pure-entity delta cannot
     /// restore. The app's per-command predicate keeps this from firing.
@@ -3395,6 +3442,13 @@ impl Scene {
             }
         }
 
+        // History replay can apply an entity removal the designation channels
+        // predate (an "added" side rolled back). Sweep so the set never keeps
+        // an entry for an absent entity; exact designations come right after
+        // this from the delta's own channel.
+        if !self.reference_only.is_empty() {
+            self.reference_only.retain_present(&self.document);
+        }
         if !changes.is_empty() {
             self.invalidate_dependency_index();
         }
@@ -7247,6 +7301,7 @@ impl Scene {
                 None,
                 None,
                 anno_scale_override.is_some(),
+                self.reference_only.handles(),
             );
             // Solid B-rep corners snap via the mesh edge list (their wire
             // path is an empty shell). Enrich before the memo/assembly split
@@ -9145,6 +9200,22 @@ impl Scene {
                 .is_some_and(|l| l.is_locked())
     }
 
+    /// True when `handle` addresses a reference-only entity (API v9):
+    /// plugin-owned display geometry the built-in edit paths treat like a
+    /// locked-layer entity while its owning plugin keeps write access through
+    /// the plugin host API. Absent entities are never reference-only.
+    pub fn is_reference_only(&self, handle: Handle) -> bool {
+        self.reference_only.is_marked(handle) && self.document.get_entity(handle).is_some()
+    }
+
+    /// Insert or remove `handle` in the scene-scoped designation set,
+    /// returning whether membership changed. Pure storage: no epoch bump, no
+    /// undo bookkeeping — those belong to the callers (the plugin host API
+    /// mutation and the history channels).
+    pub(crate) fn set_reference_only_membership(&mut self, handle: Handle, on: bool) -> bool {
+        self.reference_only.set(handle, on)
+    }
+
     /// The name of the locked layer `handle` sits on, if any (for messages).
     pub fn locked_layer_name(&self, handle: Handle) -> Option<String> {
         let name = self
@@ -10399,6 +10470,21 @@ impl Scene {
         &self,
         candidates: &crate::scene::pick::interaction_index::InteractionCandidates,
     ) -> Option<HashSet<Handle>> {
+        let handles = self.interaction_candidate_handles_all(candidates);
+        // Reference-only entities (API v9) are plugin-owned display geometry:
+        // their fills, solids and instanced meshes are not pickable, so the
+        // click/hover fallback paths that consume this set skip them and a
+        // click passes through to the editable entity underneath.
+        handles.map(|mut handles| {
+            handles.retain(|h| !self.is_reference_only(*h));
+            handles
+        })
+    }
+
+    fn interaction_candidate_handles_all(
+        &self,
+        candidates: &crate::scene::pick::interaction_index::InteractionCandidates,
+    ) -> Option<HashSet<Handle>> {
         let mut handles: HashSet<Handle> = candidates
             .iter()
             .filter_map(|wire| Self::handle_from_wire_name(&wire.name))
@@ -10643,7 +10729,7 @@ impl Scene {
                 candidate_handles.as_ref(),
             ));
         }
-        handles.retain(|&h| self.passes_selection_filter(h));
+        handles.retain(|&h| self.passes_selection_filter(h) && !self.is_reference_only(h));
         handles
     }
 
@@ -11319,6 +11405,9 @@ impl Scene {
         // `world_offset` subtraction even though `current_layout != "Model"`.
         // Decide based on the block being tessellated, not the layout.
         let is_model_block = block_handle == self.model_space_block_handle();
+        // The reference-only designation set drives the wire stamp; captured
+        // as a shared ref like `doc`/`sel` so the rayon workers can read it.
+        let reference_only_set = self.reference_only.handles();
         let bg = if self.current_layout == "Model" {
             self.bg_color
         } else {
@@ -11442,6 +11531,7 @@ impl Scene {
                         view_aabb,
                         wpp,
                         paper,
+                        reference_only_set,
                     );
                     (e.common().handle, Arc::new(w))
                 })
@@ -11481,6 +11571,7 @@ impl Scene {
                         view_aabb,
                         wpp,
                         paper,
+                        reference_only_set,
                     )
                 })
                 .collect();
@@ -11515,6 +11606,7 @@ impl Scene {
                         view_aabb,
                         wpp,
                         paper,
+                        reference_only_set,
                     )),
                     Ok(None) => Some(Vec::new()),
                     Err(()) => None,
@@ -12535,6 +12627,7 @@ vis_index={:.1} visible_probe={:.1}",
             None,
             None,
             paper,
+            self.reference_only.handles(),
         );
         // Same solid-corner snaps as the resident paths, so one-off consumers
         // (overlay changed-wires, edit previews) agree with hit-test/snap.
@@ -12733,7 +12826,8 @@ vis_index={:.1} visible_probe={:.1}",
 }
 
 /// LAYOUTCREATEVIEWPORT: a layout opened for the first time gets a viewport.
-static LAYOUT_CREATE_VIEWPORT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+static LAYOUT_CREATE_VIEWPORT: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
 
 pub fn layout_create_viewport() -> bool {
     LAYOUT_CREATE_VIEWPORT.load(std::sync::atomic::Ordering::Relaxed)
@@ -14019,7 +14113,7 @@ mod delta_undo_tests {
         let handle = scene.add_entity(EntityType::RasterImage(image));
         let rec = scene.take_undo_recording().unwrap();
         assert!(!rec.is_poisoned());
-        let (entities, objects, _parametric_constraints, _named_parameters) =
+        let (entities, objects, _parametric_constraints, _named_parameters, _designations) =
             rec.into_recorded_images();
         assert_eq!(entities.len(), 1);
         assert_eq!(entities[0].0, handle);
@@ -14044,7 +14138,7 @@ mod delta_undo_tests {
         scene.erase_entities(&[h1]);
         let rec = scene.take_undo_recording().unwrap();
         assert!(!rec.is_poisoned());
-        let (entities, objects, _parametric_constraints, _named_parameters) =
+        let (entities, objects, _parametric_constraints, _named_parameters, _designations) =
             rec.into_recorded_images();
         assert_eq!(entities.len(), 1);
         assert_eq!(entities[0].0, h1);

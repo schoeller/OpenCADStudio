@@ -396,6 +396,15 @@ pub enum HostNotification {
         tab_id: u64,
         epoch: u64,
     },
+    /// V9 a document became resident in a tab: a whole document replaced the
+    /// tab's previous content — opened from file, created from a template, or
+    /// loaded by an automation/system open. The counterpart of
+    /// [`HostNotification::DocumentTabClosed`]: with both, a plugin can keep
+    /// per-document state (e.g. runtime designations) in sync from load to
+    /// close. Discriminant 10.
+    DocumentOpened {
+        tab_id: u64,
+    },
     /// Fallback for notification variants added in future minor revisions.
     /// Carries the raw bincode payload so an older peer can ignore it without
     /// failing deserialization.
@@ -447,6 +456,10 @@ impl Serialize for HostNotification {
                 bincode::serialize_into(&mut bytes, tab_id).map_err(serde::ser::Error::custom)?;
                 bincode::serialize_into(&mut bytes, epoch).map_err(serde::ser::Error::custom)?;
             }
+            HostNotification::DocumentOpened { tab_id } => {
+                bytes.push(10);
+                bincode::serialize_into(&mut bytes, tab_id).map_err(serde::ser::Error::custom)?;
+            }
             HostNotification::Unknown(raw) => bytes.extend_from_slice(raw),
         }
         bytes.serialize(serializer)
@@ -489,6 +502,9 @@ impl<'de> Deserialize<'de> for HostNotification {
                 .map_err(serde::de::Error::custom),
             9 => bincode::deserialize(rest)
                 .map(|(tab_id, epoch)| HostNotification::DrawingChanged { tab_id, epoch })
+                .map_err(serde::de::Error::custom),
+            10 => bincode::deserialize(rest)
+                .map(|tab_id| HostNotification::DocumentOpened { tab_id })
                 .map_err(serde::de::Error::custom),
             _ => Ok(HostNotification::Unknown(bytes)),
         }
@@ -1174,6 +1190,45 @@ pub trait HostApi {
     /// dictionary.
     fn list_xrecords(&self, _dictionary_path: &[&str]) -> Result<Vec<String>, String> {
         Err("XRecord listing is not supported by this host".to_owned())
+    }
+
+    // ── Reference-only designation (added in API v9; appended at the end to
+    // keep vtable indices stable for older plugins) ──────────────────────────
+
+    /// Mark (or unmark) an entity as reference-only (API v9, additive).
+    ///
+    /// A reference-only entity is plugin-owned display geometry: it renders
+    /// normally, but the built-in edit paths treat it like an entity on a
+    /// locked layer — it is neither grip-editable nor click-pickable (a click
+    /// passes through to the editable entity underneath), window and box
+    /// selections skip it, and user-driven writes refuse it. The owning
+    /// plugin keeps full write access through this API: `update_entity`,
+    /// [`update_entities_transaction`](HostApi::update_entities_transaction),
+    /// `remove_entity` and the XDATA record methods keep working, so derived
+    /// display geometry can be refreshed in place.
+    ///
+    /// The designation is a scene-scoped, in-memory set keyed by entity
+    /// handle: it is not written to the saved DWG/DXF (the host stores no
+    /// state of its own in the file), it lives and dies with the drawing tab,
+    /// and a reloaded drawing starts undesignated — the owning plugin
+    /// re-marks its entities when
+    /// [`on_notification`](BuiltinPlugin::on_notification) delivers
+    /// [`HostNotification::DocumentOpened`], making the in-memory designation
+    /// fully equivalent to a persisted one for its use case.
+    ///
+    /// Fails when the entity does not exist or is on a locked layer (the same
+    /// policy as the XDATA record methods). A call that would not change the
+    /// current designation succeeds without recording an undo step — and
+    /// without publishing a document change, so idempotent re-marks cannot
+    /// loop with the notification dispatch.
+    ///
+    /// Undo composition — the entity-write contract: a change performed
+    /// inside a plugin-opened [`HostApi::push_undo`] scope joins that scope,
+    /// so an operation composed of several writes is a single undo step under
+    /// the plugin's own label. With no scope open the change is one undo step
+    /// of its own. Refusals record no undo step.
+    fn set_reference_only(&mut self, _handle: Handle, _reference_only: bool) -> Result<(), String> {
+        Err("The reference-only designation is not supported by this host".to_owned())
     }
 }
 

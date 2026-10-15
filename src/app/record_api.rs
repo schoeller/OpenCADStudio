@@ -226,7 +226,7 @@ fn record(
     value
 }
 
-fn entity_record(entity: &codec::EntityType) -> Result<Value, String> {
+fn entity_record(entity: &codec::EntityType, reference_only: bool) -> Result<Value, String> {
     let (kind, properties) = enum_parts(entity)?;
     let mut value = record(
         "entities",
@@ -245,6 +245,9 @@ fn entity_record(entity: &codec::EntityType) -> Result<Value, String> {
         "record_type".into(),
         json!(crate::entities::names::dxf_name(entity)),
     );
+    // Scene-scoped designation (API v9): the set membership of this entity's
+    // handle, resolved by the caller from the live scene.
+    object.insert("reference_only".into(), json!(reference_only));
     Ok(value)
 }
 
@@ -305,12 +308,13 @@ fn map_records<T: Serialize>(
         .collect()
 }
 
-fn collection_records(
-    document: &codec::CadDocument,
-    collection: &str,
-) -> Result<Vec<Value>, String> {
+fn collection_records(scene: &crate::scene::Scene, collection: &str) -> Result<Vec<Value>, String> {
+    let document = &scene.document;
     match collection {
-        "entities" => document.entities().map(entity_record).collect(),
+        "entities" => document
+            .entities()
+            .map(|entity| entity_record(entity, scene.is_reference_only(entity.common().handle)))
+            .collect(),
         "objects" => {
             let mut objects: Vec<_> = document.objects.iter().collect();
             objects.sort_by_key(|(handle, _)| handle.value());
@@ -1385,7 +1389,7 @@ impl OpenCADStudio {
         }
         let definitions = referenced_definitions(&root_type);
         let runtime_schema = collection.and_then(|collection| {
-            collection_records(&self.tabs[self.active_tab].scene.document, collection)
+            collection_records(&self.tabs[self.active_tab].scene, collection)
                 .ok()?
                 .into_iter()
                 .find(|record| {
@@ -1429,20 +1433,20 @@ impl OpenCADStudio {
     }
 
     pub(super) fn record_query(&self, request: &Value) -> Value {
-        let document = &self.tabs[self.active_tab].scene.document;
+        let scene = &self.tabs[self.active_tab].scene;
         let Some(collection) = request["collection"].as_str() else {
             return self.record_capabilities();
         };
         let mut records = Vec::new();
         if collection == "all" {
             for (name, _) in COLLECTIONS {
-                match collection_records(document, name) {
+                match collection_records(scene, name) {
                     Ok(mut values) => records.append(&mut values),
                     Err(error) => return failure("serialization_failed", error),
                 }
             }
         } else {
-            match collection_records(document, collection) {
+            match collection_records(scene, collection) {
                 Ok(values) => records = values,
                 Err(error) => return failure("unknown_collection", error),
             }
@@ -1505,6 +1509,12 @@ impl OpenCADStudio {
                     requested_handle(request).map_err(|error| failure("invalid_handle", error))?;
                 if self.tabs[i].scene.is_layer_locked(handle) {
                     return Err(failure("layer_locked", "entity is on a locked layer"));
+                }
+                if self.tabs[i].scene.is_reference_only(handle) {
+                    return Err(failure(
+                        "reference_only",
+                        "entity is reference-only (plugin-owned display data)",
+                    ));
                 }
                 let source = self.tabs[i]
                     .scene
@@ -1690,6 +1700,59 @@ mod tests {
         object.insert("document_id".into(), state["document_id"].clone());
         object.insert("revision".into(), state["revision"].clone());
         app.automation_op(&request.to_string())
+    }
+
+    #[test]
+    fn entities_records_expose_the_reference_only_designation() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+
+        let handle = app.tabs[i].scene.add_entity(EntityType::Line(
+            codec::entities::Line::from_points(
+                Vector3::new(0.0, 0.0, 0.0),
+                Vector3::new(10.0, 0.0, 0.0),
+            ),
+        ));
+        // The designation is plugin-mutated scene state: mark through the
+        // same host API a plugin uses, so the read surface reflects the
+        // live set rather than any stored marker.
+        fn mark(app: &mut OpenCADStudio, handle: Handle, on: bool) {
+            let i = app.active_tab;
+            crate::app::plugin_host::HostSession::new(app, i)
+                .set_reference_only(handle, on)
+                .expect("mark through the plugin host API");
+        }
+
+        // The read surface reports the designation alongside the record.
+        mark(&mut app, handle, true);
+        let records = app.record_query(&json!({"collection":"entities"}));
+        assert_eq!(records["count"], 1);
+        assert_eq!(
+            records["records"][0]["handle"],
+            json!(format!("{:X}", handle.value()))
+        );
+        assert_eq!(records["records"][0]["reference_only"], json!(true));
+
+        // The MCP write path treats a reference-only entity like a locked
+        // layer: the edit is refused, honestly.
+        let refused = execute(
+            &mut app,
+            json!({
+                "op":"set_properties",
+                "collection":"entities",
+                "handle": format!("{:X}", handle.value()),
+                "updates":[{"path":"/end/x","value":20.0}],
+            }),
+            "reference-only",
+        );
+        assert_eq!(refused["ok"], json!(false));
+        assert_eq!(refused["code"], json!("reference_only"));
+
+        // Clearing the designation is reported too.
+        mark(&mut app, handle, false);
+        let records = app.record_query(&json!({"collection":"entities"}));
+        assert_eq!(records["records"][0]["reference_only"], json!(false));
     }
 
     #[test]

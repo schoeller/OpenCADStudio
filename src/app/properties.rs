@@ -2661,10 +2661,14 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
     /// reachable from Options and from the sysvar of the same name.
     pub(super) fn refresh_selected_grips(&mut self) {
         let i = self.active_tab;
+        // Reference-only targets are cancelled like locked-layer ones: the
+        // plugin that owns the display geometry may have just designated the
+        // entity, and a drag that edits it would be overwritten on refresh.
         let locked_active_grip = self.tabs[i].active_grip.as_ref().is_some_and(|grip| {
-            grip.targets
-                .iter()
-                .any(|target| self.tabs[i].scene.is_layer_locked(target.handle))
+            grip.targets.iter().any(|target| {
+                self.tabs[i].scene.is_layer_locked(target.handle)
+                    || self.tabs[i].scene.is_reference_only(target.handle)
+            })
         });
         if locked_active_grip {
             self.cancel_active_grip_edit();
@@ -2678,7 +2682,8 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
             let annotation_scale_handle = self.tabs[i].scene.displayed_annotation_scale_handle();
             let selected = self.tabs[i].scene.selected_entities();
             let single_handle = (selected.len() == 1
-                && !self.tabs[i].scene.is_layer_locked(selected[0].0))
+                && !self.tabs[i].scene.is_layer_locked(selected[0].0)
+                && !self.tabs[i].scene.is_reference_only(selected[0].0))
             .then(|| selected[0].0);
             let mut grips = Vec::new();
             let mut handles = Vec::new();
@@ -2691,7 +2696,9 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                 selected
             };
             for (handle, entity) in selected {
-                if self.tabs[i].scene.is_layer_locked(handle) {
+                if self.tabs[i].scene.is_layer_locked(handle)
+                    || self.tabs[i].scene.is_reference_only(handle)
+                {
                     continue;
                 }
                 let contextual = crate::scene::annotative::entity_for_annotation_context(

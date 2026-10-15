@@ -473,6 +473,7 @@ fn section_symbol_wires(
 /// so it picks up the standard text LOD ladder (baseline / greek / full),
 /// then re-color the returned wires with the dimension's resolved text colour
 /// (so DIMCLRT / DIMSTYLE colours win over the synthetic Text's defaults).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn tessellate_entity_dim_text(
     document: &codec::CadDocument,
     selected: &HashSet<Handle>,
@@ -483,6 +484,7 @@ pub(crate) fn tessellate_entity_dim_text(
     view_aabb: Option<[f32; 4]>,
     world_per_pixel: Option<f32>,
     text_color: [f32; 4],
+    reference_only: &HashSet<Handle>,
 ) -> Vec<WireModel> {
     let mut wires = tessellate_entity(
         document,
@@ -496,6 +498,7 @@ pub(crate) fn tessellate_entity_dim_text(
         view_aabb,
         world_per_pixel,
         false,
+        reference_only,
     );
     for w in &mut wires {
         // Synth dim text carries no real entity colour — paint everything
@@ -508,6 +511,7 @@ pub(crate) fn tessellate_entity_dim_text(
     }
     wires
 }
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn tessellate_entity(
     document: &codec::CadDocument,
     selected: &HashSet<Handle>,
@@ -520,6 +524,7 @@ pub(crate) fn tessellate_entity(
     view_aabb: Option<[f32; 4]>,
     world_per_pixel: Option<f32>,
     paper_space: bool,
+    reference_only: &HashSet<Handle>,
 ) -> Vec<WireModel> {
     let mut wires = tessellate_entity_inner(
         document,
@@ -533,6 +538,7 @@ pub(crate) fn tessellate_entity(
         view_aabb,
         world_per_pixel,
         paper_space,
+        reference_only,
     );
 
     let layer_plottable = document
@@ -547,8 +553,21 @@ pub(crate) fn tessellate_entity(
         }
     }
 
+    // Reference-only entities (API v9) render and snap normally but must not
+    // be picked by the built-in edit paths; the pick-side wire filters in
+    // `scene::pick::hit_test` and the selection-gather retains consume the
+    // flag. The stamp is driven by the scene's in-memory designation set —
+    // outside `Scene` this stays pure data, so the parallel tessellation
+    // workers only need the handle set, not scene access.
+    if reference_only.contains(&e.common().handle) {
+        for wire in &mut wires {
+            wire.reference_only = true;
+        }
+    }
+
     wires
 }
+#[allow(clippy::too_many_arguments)]
 fn tessellate_entity_inner(
     document: &codec::CadDocument,
     selected: &HashSet<Handle>,
@@ -567,6 +586,10 @@ fn tessellate_entity_inner(
     // Retained through recursive INSERT expansion; PSLTSCALE itself is applied
     // by the viewport's GPU uniform so it never changes resident wire content.
     _paper_space: bool,
+    // The scene's reference-only designation set (API v9): drives the
+    // `WireModel::reference_only` stamp for dimensions' synthesis paths that
+    // bypass the wrapper's post-stamp.
+    reference_only: &HashSet<Handle>,
 ) -> Vec<WireModel> {
     let contextual = crate::scene::annotative::entity_for_annotation_context(
         document,
@@ -1019,6 +1042,7 @@ fn tessellate_entity_inner(
             bg_color,
             view_aabb,
             world_per_pixel,
+            reference_only,
         );
         for w in &mut wires {
             w.aci = aci;

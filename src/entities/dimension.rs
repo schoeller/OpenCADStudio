@@ -3598,6 +3598,7 @@ fn apply_dimension_jog(
 }
 
 pub trait DimensionTess {
+    #[allow(clippy::too_many_arguments)]
     fn tessellate(
         &self,
         document: &CadDocument,
@@ -3611,10 +3612,12 @@ pub trait DimensionTess {
         bg_color: [f32; 4],
         view_aabb: Option<[f32; 4]>,
         world_per_pixel: Option<f32>,
+        reference_only: &rustc_hash::FxHashSet<codec::Handle>,
     ) -> Vec<WireModel>;
 }
 
 impl DimensionTess for Dimension {
+    #[allow(clippy::too_many_arguments)]
     fn tessellate(
         &self,
         document: &CadDocument,
@@ -3628,6 +3631,7 @@ impl DimensionTess for Dimension {
         bg_color: [f32; 4],
         view_aabb: Option<[f32; 4]>,
         world_per_pixel: Option<f32>,
+        reference_only: &rustc_hash::FxHashSet<codec::Handle>,
     ) -> Vec<WireModel> {
         tessellate_dimension_inner(
             document,
@@ -3642,10 +3646,12 @@ impl DimensionTess for Dimension {
             bg_color,
             view_aabb,
             world_per_pixel,
+            reference_only,
         )
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn tessellate_dimension_inner(
     document: &CadDocument,
     handle: Handle,
@@ -3662,6 +3668,7 @@ fn tessellate_dimension_inner(
     bg_color: [f32; 4],
     view_aabb: Option<[f32; 4]>,
     world_per_pixel: Option<f32>,
+    reference_only: &rustc_hash::FxHashSet<codec::Handle>,
 ) -> Vec<WireModel> {
     if let Dimension::Arc(arc) = dim {
         if let Some((local_arc, normal)) = arc_dimension_in_ocs(arc) {
@@ -3678,6 +3685,7 @@ fn tessellate_dimension_inner(
                 bg_color,
                 None,
                 world_per_pixel,
+                reference_only,
             );
             for wire in &mut wires {
                 map_wire_ocs_to_wcs(wire, normal);
@@ -3700,6 +3708,7 @@ fn tessellate_dimension_inner(
                 bg_color,
                 None,
                 world_per_pixel,
+                reference_only,
             );
             for wire in &mut wires {
                 map_wire_ocs_to_wcs(wire, normal);
@@ -3721,6 +3730,7 @@ fn tessellate_dimension_inner(
             bg_color,
             None,
             world_per_pixel,
+            reference_only,
         );
         for wire in &mut wires {
             map_wire_ocs_to_wcs(wire, normal);
@@ -4420,6 +4430,7 @@ fn tessellate_dimension_inner(
             view_aabb,
             world_per_pixel,
             text_color,
+            reference_only,
         );
         for mut w in text_wires {
             w.name = name.clone();
@@ -4437,6 +4448,7 @@ fn tessellate_dimension_inner(
                 view_aabb,
                 world_per_pixel,
                 text_color,
+                reference_only,
             );
             for mut w in tol_wires {
                 w.name = name.clone();
@@ -8890,6 +8902,7 @@ mod linear_transform_tests {
             [0.0, 0.0, 0.0, 1.0],
             None,
             None,
+            &rustc_hash::FxHashSet::default(),
         );
         let mut points = Vec::new();
         for wire in &wires {
@@ -9221,6 +9234,7 @@ mod layout_parity_tests {
             [0.0, 0.0, 0.0, 1.0],
             None,
             None,
+            &rustc_hash::FxHashSet::default(),
         );
         let mut points = Vec::new();
         let mut fills = 0;

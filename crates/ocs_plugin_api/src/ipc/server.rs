@@ -151,5 +151,11 @@ pub fn handle_plugin_request(
             let path: Vec<&str> = dictionary_path.iter().map(String::as_str).collect();
             PluginResponse::XRecordNames(host.list_xrecords(&path))
         }
+        SetReferenceOnly {
+            handle,
+            reference_only,
+        } => {
+            PluginResponse::SetReferenceOnlyResult(host.set_reference_only(handle, reference_only))
+        }
     }
 }

@@ -822,6 +822,11 @@ pub struct WireModel {
     /// (`display_visible` false) it is what object snaps find; drawn, it is
     /// display only and snaps skip it too ([`Self::is_display_only`]).
     pub snap_only: bool,
+    /// Plugin-owned reference-only source (API v9): the entity is display
+    /// geometry the built-in edit paths must not pick — clicks fall through
+    /// to the editable entity underneath. Rendering and snapping are
+    /// unaffected.
+    pub reference_only: bool,
     /// Whether this wire is included in plotted output.
     pub plot_visible: bool,
     /// `true` when [`fill_tris`] is a real 3-D surface (PolyfaceMesh /
@@ -907,6 +912,7 @@ impl WireModel {
             depth_override: None,
             display_visible: true,
             snap_only: false,
+            reference_only: false,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
@@ -1444,6 +1450,7 @@ impl Default for WireModel {
             depth_override: None,
             display_visible: true,
             snap_only: false,
+            reference_only: false,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,

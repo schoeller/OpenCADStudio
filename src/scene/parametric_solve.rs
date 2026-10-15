@@ -4502,7 +4502,7 @@ mod tests {
             .take_undo_recording()
             .expect("an undo recording should still be open");
 
-        let (entities, _objects, _parametric_constraints, _named_parameters) =
+        let (entities, _objects, _parametric_constraints, _named_parameters, _designations) =
             recording.into_recorded_images();
         let touched: std::collections::HashSet<_> = entities.iter().map(|(h, _)| *h).collect();
         assert!(
@@ -4559,7 +4559,7 @@ mod tests {
         let recording = scene
             .take_undo_recording()
             .expect("an undo recording should still be open");
-        let (_entities, _objects, parametric_constraints, _named_parameters) =
+        let (_entities, _objects, parametric_constraints, _named_parameters, _designations) =
             recording.into_recorded_images();
         assert_eq!(
             parametric_constraints.len(),

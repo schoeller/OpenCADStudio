@@ -2279,7 +2279,7 @@ mod tests {
         scene.sync_diameter_association_angle(dimension);
 
         let recording = scene.take_undo_recording().expect("undo recording");
-        let (_, objects, _, _) = recording.into_recorded_images();
+        let (_, objects, _, _, _) = recording.into_recorded_images();
         assert!(objects
             .iter()
             .any(|(handle, before)| *handle == association && before.is_some()));

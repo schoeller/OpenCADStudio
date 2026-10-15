@@ -463,6 +463,9 @@ impl OpenCADStudio {
         self.tabs[i].current_path = None;
         self.tabs[i].is_start = false;
         self.tabs[i].dirty = true;
+        // A whole document just became resident in the tab (API v9): mint a
+        // fresh generation so the boundary announces `DocumentOpened` once.
+        self.tabs[i].note_document_loaded();
         Ok(purged)
     }
 

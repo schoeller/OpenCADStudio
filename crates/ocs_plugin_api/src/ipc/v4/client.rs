@@ -987,6 +987,23 @@ impl HostApi for V4PluginHostApi {
             Err(error) => Err(error.to_string()),
         }
     }
+
+    fn set_reference_only(&mut self, handle: Handle, reference_only: bool) -> Result<(), String> {
+        match self.request(PluginRequest::SetReferenceOnly {
+            handle,
+            reference_only,
+        }) {
+            Ok(PluginResponse::SetReferenceOnlyResult(result)) => {
+                if result.is_ok() {
+                    self.document_cache = OnceCell::new();
+                }
+                result
+            }
+            Ok(PluginResponse::Error(error)) => Err(error),
+            Ok(other) => Err(format!("unexpected reference-only response: {other:?}")),
+            Err(error) => Err(error.to_string()),
+        }
+    }
 }
 
 #[cfg(test)]

@@ -520,6 +520,47 @@ mod tests {
     }
 
     #[test]
+    fn reference_only_request_and_response_roundtrip() {
+        // The V9 request marks an entity reference-only and the response
+        // carries the operation's outcome.
+        let bytes = bincode::serialize(&PluginRequest::SetReferenceOnly {
+            handle: codec::Handle::new(0x2A),
+            reference_only: true,
+        })
+        .unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginRequest>(&bytes).unwrap(),
+            PluginRequest::SetReferenceOnly { handle, reference_only } if
+                handle == codec::Handle::new(0x2A) && reference_only)
+        );
+        let bytes = bincode::serialize(&PluginRequest::SetReferenceOnly {
+            handle: codec::Handle::new(0x2A),
+            reference_only: false,
+        })
+        .unwrap();
+        assert!(matches!(
+            bincode::deserialize::<PluginRequest>(&bytes).unwrap(),
+            PluginRequest::SetReferenceOnly {
+                reference_only: false,
+                ..
+            }
+        ));
+        let bytes = bincode::serialize(&PluginResponse::SetReferenceOnlyResult(Ok(()))).unwrap();
+        assert!(matches!(
+            bincode::deserialize::<PluginResponse>(&bytes).unwrap(),
+            PluginResponse::SetReferenceOnlyResult(Ok(()))
+        ));
+        let bytes = bincode::serialize(&PluginResponse::SetReferenceOnlyResult(Err(
+            "entity is on a locked layer".to_owned(),
+        )))
+        .unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginResponse>(&bytes).unwrap(),
+            PluginResponse::SetReferenceOnlyResult(Err(error)) if error == "entity is on a locked layer")
+        );
+    }
+
+    #[test]
     fn unknown_notification_deserializes_as_unknown() {
         // Build a payload with an unknown discriminant (99) followed by some
         // bytes. The custom deserializer should return Unknown(raw_bytes).
