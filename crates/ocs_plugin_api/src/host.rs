@@ -1149,9 +1149,10 @@ pub struct CustomGripResponse {
     /// instance with: it bounds the drag's chord fits AND the per-move
     /// seam continuity reads (one declared accuracy). `Some` must accompany the Begin answer's `descriptor`
     /// (the host never invents a frame budget: a descriptor without a finite
-    /// positive tolerance leaves the v12 streaming semantics untouched, with
-    /// one headline in the error queue). Older hosts deserialize the field
-    /// to None.
+    /// positive tolerance — or with one past the host's declared-tolerance
+    /// ceiling, this host: 1e-2 — leaves the v12 streaming semantics
+    /// untouched, with one headline in the error queue). Older hosts
+    /// deserialize the field to None.
     #[serde(default)]
     pub descriptor_tolerance: Option<f64>,
 }
@@ -1790,6 +1791,11 @@ pub trait HostApi {
     /// [`MAX_PLUGIN_LIVE_ENTITIES`](self::MAX_PLUGIN_LIVE_ENTITIES) publishes
     /// nothing.
     ///
+    /// The declared accuracy is the plugin's own, under one host law: a
+    /// declaration past the host's ceiling (this host: 1e-2) refuses naming
+    /// the bound — the seam audit and the chord fits honor what is declared;
+    /// the ceiling only bounds what may be declared.
+    ///
     /// Undo composition follows the entity-write contract: inside a
     /// plugin-opened `push_undo` scope the staged set joins that scope; with
     /// no scope open it is one step of its own; a refusal records no step.
@@ -2245,7 +2251,9 @@ pub struct PluginClassInstance {
     /// continuity bound of the chain's audited welds: the point seam
     /// reads it as meters, the plan's bearing seam as radians, the
     /// profile's slope seam as the gradient family). The declared
-    /// accuracy is the record model's own declaration, one number.
+    /// accuracy is the record model's own declaration, one number, under
+    /// the host's ceiling (this host refuses a declaration past 1e-2,
+    /// naming the bound).
     #[serde(default)]
     pub tolerance: f64,
     /// Layer for the staged display set; empty = the host's default layer.

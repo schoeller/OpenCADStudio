@@ -602,7 +602,10 @@ host coalesces moves, settle stays the plugin's one write window).
 arc (the squash of the v15/v16 layers): a Begin answer hands the host a
 live *design* plus the per-move tolerance, and when the whole declaration
 is serviceable (the profile chain, the END-side drive row, the segment in
-range, the class stamp resolving a non-empty display set) the host
+range, a finite positive tolerance at or under the host ceiling — a
+past-ceiling one keeps the streaming path loudly, the drag's per-move
+re-derivation would refuse every move at the same ceiling — the class
+stamp resolving a non-empty display set) the host
 re-derives the display set LOCALLY per coalesced cursor move along the
 record model's own laws — **zero Move frames crossing the IPC**; a
 refused move keeps the last good design with one headline, and every

@@ -35,7 +35,10 @@
 //!   instance's `PluginClassInstance.tolerance` (or the raw staging call's
 //!   tolerance argument): the point seam reads it as meters, the plan's
 //!   bearing seam as radians, the profile's slope seam as the gradient
-//!   family (`tolerance * (1 + g^2)`) — and refusals name the audited pair; a chain
+//!   family (`tolerance * (1 + g^2)`) — and refusals name the audited pair;
+//!   the declaration itself is capped by [`MAX_DECLARED_TOLERANCE`] (a
+//!   looser declaration refuses — the audit honors what is declared, the
+//!   ceiling only bounds what may be declared); a chain
 //!   that would stage more display entities than `MAX_PLUGIN_LIVE_ENTITIES`
 //!   publishes nothing; non-finite or structurally broken ramp data
 //!   refuses at validation (the host refuses nothing it cannot state

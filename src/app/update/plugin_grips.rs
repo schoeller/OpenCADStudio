@@ -521,11 +521,12 @@ impl OpenCADStudio {
             // API v14 (the descriptor-backed drag): a Begin answer may hand
             // the host a live design. Engagement happens only when the whole
             // declaration is serviceable (the descriptor + a finite positive
-            // tolerance + a class-stamped anchor + the class schema's drive
-            // row + a profile-chain END re-anchor inside the segment range);
-            // anything else keeps the v12 streaming path with one headline
-            // naming the constraint — older plugins and old-style responses
-            // deserialize their fields to None and never reach the mode.
+            // tolerance at or under MAX_DECLARED_TOLERANCE + a class-stamped
+            // anchor + the class schema's drive row + a profile-chain END
+            // re-anchor inside the segment range); anything else keeps the
+            // v12 streaming path with one headline naming the constraint —
+            // older plugins and old-style responses deserialize their fields
+            // to None and never reach the mode.
             let tolerance = response
                 .descriptor_tolerance
                 .filter(|t| t.is_finite() && *t > 0.0);
@@ -533,8 +534,26 @@ impl OpenCADStudio {
                 (
                     Some(ocs_plugin_api::host::PluginDisplayDescriptor::ParametricChain(chain)),
                     Some(tolerance),
-                ) => {
+                ) if tolerance <= crate::parametric::MAX_DECLARED_TOLERANCE => {
                     self.engage_descriptor_grip_drag(tab, chain, tolerance);
+                }
+                (Some(descriptor), Some(tolerance)) => {
+                    // The finite-positive tolerance is past the ceiling: a
+                    // past-ceiling declaration must not engage, because the
+                    // per-move re-derivation would refuse every move at the
+                    // same ceiling and pin the drag to its start design. A
+                    // serviceable tolerance on a kind the host does not
+                    // evaluate arrives here too and stays silent, exactly
+                    // as before.
+                    if tolerance > crate::parametric::MAX_DECLARED_TOLERANCE {
+                        crate::plugin::push_guard_error(format!(
+                            "custom grip begin: {:?} handed a descriptor design with a \
+                             descriptor tolerance {tolerance} past the host ceiling {}; \
+                             the streaming path continues",
+                            descriptor.kind_label(),
+                            crate::parametric::MAX_DECLARED_TOLERANCE,
+                        ));
+                    }
                 }
                 (Some(descriptor), None) => {
                     crate::plugin::push_guard_error(format!(

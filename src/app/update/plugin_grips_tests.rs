@@ -2282,6 +2282,159 @@ fn descriptor_refusals_keep_the_streaming_path() {
 }
 
 #[test]
+fn descriptor_tolerance_past_the_ceiling_never_engages() {
+    // The ceiling is a host law (MAX_DECLARED_TOLERANCE): a declaration
+    // past it refuses at staging (the route through the staging build names
+    // the ceiling and records nothing), and a Begin answer carrying one
+    // never engages the descriptor mode — the per-move re-derivation would
+    // refuse every move at the same ceiling and pin the drag to its start
+    // design. The degradation headline names the bound; the v12 streaming
+    // path continues untouched.
+    let mut app = app();
+    let plugin = "PLUGIN";
+    let i = tab(&app);
+    // A sink first: the class register's own aliveness gate treats an in-process test sink as the loaded+alive marker (grip_points); the full handler installed below replaces this placeholder.
+    crate::plugin::grip_points::install_in_process_sink(plugin, |_host, _event| {
+        ocs_plugin_api::host::CustomGripResponse::default()
+    });
+    let instance = |tolerance| {
+        ocs_plugin_api::host::PluginClassInstance {
+            class_id: "PLUGIN_ALIGN_DISPLAY".to_string(),
+            schema_version: 4,
+            design: ocs_plugin_api::host::PluginDisplayDescriptor::ParametricChain(
+                crest_profile_chain(),
+            ),
+            tolerance,
+            layer: "PLUGIN_PLAN".to_string(),
+            design_record: "PLUGIN_ALIGN_PLAN".to_string(),
+        }
+    };
+    let handles = {
+        let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
+        host.register_plugin_class(
+            plugin,
+            &ocs_plugin_api::host::PluginClassDeclaration {
+                class_id: "PLUGIN_ALIGN_DISPLAY".to_string(),
+                schema_version: 4,
+                grip_schema: vec![ocs_plugin_api::host::PluginGripSchemaEntry {
+                    grip_id: 7,
+                    param_name: "peak_gradient".to_string(),
+                    drives: Some(ocs_plugin_api::host::PluginGripAnchor {
+                        segment: 1,
+                        at_start: false,
+                        anchor: ocs_plugin_api::host::AnchorLaw::EndElevation,
+                    }),
+                }],
+                parameters: vec![],
+            },
+        )
+        .expect("the class registers");
+        host.stage_plugin_class_instance(plugin, &instance(1e-3))
+            .expect("the serviceable tolerance stages")
+    };
+    let undo_after_good = undo_entry_count(&app);
+    let _ = crate::plugin::drain_errors();
+
+    // The stage-time ceiling: a tolerance past MAX_DECLARED_TOLERANCE
+    // refuses naming the ceiling; the refusal records nothing.
+    {
+        let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
+        let err = host
+            .stage_plugin_class_instance(plugin, &instance(2.0e-2))
+            .err()
+            .expect("the past-ceiling instance refuses");
+        assert!(err.contains("exceeds the host ceiling"), "{err}");
+    }
+    assert_eq!(
+        undo_entry_count(&app),
+        undo_after_good,
+        "the past-ceiling stage refusal records nothing"
+    );
+    let _ = crate::plugin::drain_errors();
+
+    // The drag-time ceiling: the Begin answer carries a past-ceiling
+    // tolerance with otherwise-serviceable everything; the mode refuses
+    // BEFORE engagement and the streaming path continues.
+    let undo_before = undo_entry_count(&app);
+    let events: Rc<RefCell<Vec<CustomGripEvent>>> = Rc::new(RefCell::new(Vec::new()));
+    {
+        let events2 = Rc::clone(&events);
+        let begin2 = Rc::new(RefCell::new(Some((
+            ocs_plugin_api::host::PluginDisplayDescriptor::ParametricChain(crest_profile_chain()),
+            5.0e-2,
+        ))));
+        grip_points::install_in_process_sink(plugin, move |_host, event| {
+            events2.borrow_mut().push(event.clone());
+            match event.phase {
+                CustomGripPhase::Begin => {
+                    if let Some((chain, tolerance)) = begin2.borrow_mut().take() {
+                        CustomGripResponse {
+                            preview: Vec::new(),
+                            live_entities: Vec::new(),
+                            descriptor: Some(chain),
+                            descriptor_tolerance: Some(tolerance),
+                        }
+                    } else {
+                        CustomGripResponse::default()
+                    }
+                }
+                _ => CustomGripResponse::default(),
+            }
+        });
+    }
+    // The grip anchors a staged carrier; the class stamp resolves.
+    let i = tab(&app);
+    let grip_point = [300.0, 8.0, 0.0];
+    app.tabs[i]
+        .plugin_grips
+        .declare(
+            plugin,
+            vec![PluginGrip {
+                grip_id: 7,
+                anchor: Some(handles[1]),
+                point: grip_point,
+                axis: None,
+                shape: PluginGripShape::Square,
+            }],
+        )
+        .expect("the grip declares");
+    let candidate = crate::plugin::grip_points::GripCandidate {
+        plugin: plugin.to_string(),
+        grip_id: 7,
+        anchor: Some(handles[1]),
+        point: glam::DVec3::new(300.0, 8.0, 0.0),
+        axis: None,
+        shape: crate::scene::model::object::GripShape::Square,
+    };
+    let _ = app.begin_plugin_grip_drag(i, &candidate);
+    assert!(
+        app.plugin_grip_descriptor_drag.is_none(),
+        "a past-ceiling tolerance never engages the descriptor mode"
+    );
+    let errors = crate::plugin::drain_errors();
+    assert!(
+        errors
+            .iter()
+            .any(|line| line.contains("past the host ceiling")),
+        "the degradation names the ceiling: {errors:?}"
+    );
+    let _ = app.move_plugin_grip_drag(i, glam::DVec3::new(300.0, 11.0, 0.0));
+    assert_eq!(
+        events.borrow().len(),
+        2,
+        "the Move frame still crosses: the streaming path is untouched"
+    );
+    let _ = app.settle_plugin_grip_drag();
+    assert_eq!(events.borrow().len(), 3, "the Settle phase crossed");
+    assert_eq!(
+        undo_entry_count(&app),
+        undo_before,
+        "the streaming drag records nothing by itself"
+    );
+    grip_points::remove_in_process_sink(plugin);
+}
+
+#[test]
 fn descriptor_moves_refused_by_the_model_keep_the_last_good_design() {
     // In the engaged mode a move the record model refuses (a backward run)
     // keeps the last good design on the screen, notes the constraint ONCE,
