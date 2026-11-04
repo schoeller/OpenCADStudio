@@ -8086,12 +8086,26 @@ impl OpenCADStudio {
             Message::SetModifiers { shift, ctrl, alt } => {
                 self.alt_down = alt;
                 let ctrl_changed = self.ctrl_down != ctrl;
+                let shift_changed = self.shift_down != shift;
                 self.shift_down = shift;
                 self.ctrl_down = ctrl;
                 // Releasing Shift drops the hard axis lock immediately (#312)
                 // — without this a lock could linger until the next move.
                 if !shift {
                     self.axis_lock_dir = None;
+                }
+                // Shift is what the quad's subentity gate reads
+                // (docs/quad-menu.md §3.5.1): a flip re-answers at the
+                // resting cursor immediately — an open Hover quad
+                // re-classifies without any dwell (panels + highlight), and
+                // a counting dwell re-runs its step (mode 1: the
+                // Shift+hover open skips the delay outright). Straight call,
+                // no re-drive: the quad state lives, nothing else here
+                // depends on a fresh pick.
+                if shift_changed {
+                    let i = self.active_tab;
+                    let p = self.tabs[i].last_cursor_screen;
+                    self.quad_on_modifier_flip(i, p);
                 }
                 // A live command may key its preview off Ctrl (arc-direction
                 // flip). Rebuild it at the current cursor so the flip shows

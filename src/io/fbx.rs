@@ -459,6 +459,7 @@ mod tests {
             indices,
             triangle_material_handles: Vec::new(),
             triangle_colors: Vec::new(),
+            triangle_face_keys: Vec::new(),
             color: [1.0; 4],
             selected: false,
         }

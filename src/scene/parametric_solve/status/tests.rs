@@ -381,6 +381,7 @@ fn block_constraint_mesh_shading_changes_only_display_materials() {
         indices: vec![0, 1, 2],
         triangle_material_handles: vec![],
         triangle_colors: vec![Some([1., 0., 0., 1.])],
+        triangle_face_keys: vec![],
         color: [1., 0., 0., 1.],
         selected: false,
     };

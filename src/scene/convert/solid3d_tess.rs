@@ -81,6 +81,7 @@ pub(crate) fn finalize_mesh(
     indices: Vec<u32>,
     triangle_material_handles: Vec<Option<codec::Handle>>,
     triangle_colors: Vec<Option<[f32; 4]>>,
+    triangle_face_keys: Vec<(u32, u32)>,
     color: [f32; 4],
     xform: Option<([f64; 9], [f64; 3], f64)>,
 ) -> MeshModel {
@@ -130,6 +131,7 @@ pub(crate) fn finalize_mesh(
             .collect(),
         None => normals,
     };
+    debug_assert!(triangle_face_keys.is_empty() || indices.len() / 3 == triangle_face_keys.len());
     MeshModel {
         name,
         verts: verts_high,
@@ -138,6 +140,7 @@ pub(crate) fn finalize_mesh(
         indices,
         triangle_material_handles,
         triangle_colors,
+        triangle_face_keys,
         color,
         selected: false,
     }

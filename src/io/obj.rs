@@ -138,6 +138,7 @@ pub fn parse_obj(src: &str, color: [f32; 4]) -> Option<MeshModel> {
         indices,
         triangle_material_handles: Vec::new(),
         triangle_colors: Vec::new(),
+        triangle_face_keys: Vec::new(),
         color,
         selected: false,
     })

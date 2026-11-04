@@ -116,6 +116,9 @@ pub struct AppPrefs {
     pub quad_command_launch: bool,
     /// Hover dwell before the quad appears, ms.
     pub quad_hover_delay_ms: u64,
+    /// The hover quad's ACIS subentity resolution (docs/quad-menu.md
+    /// §3.5.1): 0 = never, 1 = Shift+hover (default), 2 = plain hover.
+    pub quad_acis_faces: u8,
     /// Open the Plot / Page Setup dialog for every new layout.
     pub page_setup_on_new_layout: bool,
 }
@@ -330,6 +333,22 @@ pub fn view_window<'a>(
     let selected_right_click = right_click_options
         .iter()
         .find(|choice| choice.value == prefs.right_click_mode)
+        .cloned();
+
+    let acis_faces_options = [
+        (0u8, "Off"),
+        (1u8, "Shift+hover"),
+        (2u8, "Hover"),
+    ]
+    .into_iter()
+    .map(|(value, label)| Labelled {
+        label: crate::t!(label).into_owned(),
+        value,
+    })
+    .collect::<Vec<_>>();
+    let selected_acis_faces = acis_faces_options
+        .iter()
+        .find(|choice| choice.value == prefs.quad_acis_faces)
         .cloned();
 
     let palette = ui_theme.palette.to_iced();
@@ -1676,6 +1695,21 @@ pub fn view_window<'a>(
             .size(12),
         ]
         .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(12),
+        row![
+            text(crate::t!("Resolve ACIS subentities (faces, edges)")).size(12).width(150),
+            crate::ui::dropdown_list::pick_list(
+                selected_acis_faces,
+                acis_faces_options,
+                |choice| choice.label.clone(),
+            )
+            .on_select(|choice| Message::QuadOption(crate::QuadOptionMsg::AcisFaces(
+                choice.value
+            )))
+            .width(Fill),
+        ]
+        .spacing(10)
         .align_y(iced::Center),
         Space::new().height(6),
         text(crate::t!(

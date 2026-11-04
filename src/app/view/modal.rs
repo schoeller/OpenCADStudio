@@ -253,6 +253,7 @@ impl OpenCADStudio {
                             quad_width: self.quad_width,
                             quad_command_launch: self.quad_command_launch,
                             quad_hover_delay_ms: self.quad_hover_delay_ms,
+                            quad_acis_faces: self.quad_acis_faces,
                         },
                         crate::ui::window::options::spacemouse::view(
                             self.spacemouse_preferences,

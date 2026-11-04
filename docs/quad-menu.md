@@ -138,7 +138,21 @@ Keys are the canonical `entity_type_name()` strings ("Line", "LwPolyline",
 "CenterMark", "Revcloud", "Hatch", "Insert", …) — the same identifiers Quick
 Select / Select Similar already use — so hover typing and panel binding can
 never drift apart. Plugin-declared entity classes participate equally under
-their stable `class_id` (§4).
+their stable `class_id` (§4). Solid/ACIS types (`Solid3D`, `Body`, `Region`,
+`Surface` and the mesh families) carry their own rows: the boolean/edge/surface
+commands gate on these types at dispatch exactly like their command-line twins.
+The overlay renders whenever ANY panel has items, so a type with no curated
+commands still shows a plugin's registered tab; its collapsed default tile comes
+from that tab.
+
+For the face-bearing ACIS types (`QUAD_ACIS_FACE_TYPES`: `Solid3D`, `Body`,
+`Surface`, `Region`) the hover quad goes a level deeper: it *resolves the
+hovered subentity itself* and swaps the primary panel to the kind's functions
+(`QUAD_FACE_FUNCS`: `PRESSPULL`, `SOLIDEDIT`, `SLICE` for a face,
+`QUAD_EDGE_FUNCS`: `FILLETEDGE`, `CHAMFEREDGE` for an edge) — the full
+workflow lives in §3.5.1 below. The old separate "Faces" tab
+(`QUAD_ACIS_FACE_COMMANDS`, appended as `quad.faces`) is superseded and
+removed.
 
 Panel/label/icon resolution goes through `ribbon_commands()` (single source of
 truth with ribbon+search). Plugin plain commands (exact-name `try_dispatch`
@@ -184,12 +198,92 @@ stack in `src/app/view/mod.rs` next to `viewport_context_menu_overlay`:
   bottom edge, tab content expands on hover (BricsCAD layout), click-catcher
   background closes on outside press (pattern: `cycle_popup_overlay` /
   snap-override overlay), `anchored()` widget for tip toggle.
+- Tab toggle: the tabs carry their real panel index and the primary is
+  deliberately tab-less; hovering or pressing the *active* tab again resolves
+  to `Tab(0)` — back to the primary panel — so moving out and re-entering
+  toggles back (`quad_tab` in `src/ui/popup/quad_overlay.rs`).
 - Reuse `MenuIcon` and `icons.rs`/statics; theme via `icons.rs` helpers.
+
+### 3.5.1 Subentity quad (Shift+hover)
+
+The workflow the hover quad delivers for solids, exactly as specified:
+
+1. With no Shift: hover dwells open the solid-level functions quad (§3.4) —
+   shipped behaviour, untouched.
+2. With Shift + hover on a **face**: the face resolves as the target, the
+   quad's primary panel becomes the face functions, and the keyboard `Tab`
+   cycles through the faces (the candidates rank nearest-first with
+   vertices outranking edges outranking faces on distance ties — the
+   stage-1 ranked order is the reverse of this face-first phrasing only
+   in ties, see `SubKind::rank`), each step rebuilding the quad + highlight at once.
+3. With Shift + hover on an **edge**: the edge resolves, the primary becomes
+   the edge functions, `Tab` cycles through the edges.
+4. With Shift + hover on a **vertex**: the vertex resolves as the target and
+   cycles/highlights like the others, but the quad's primary stays the
+   solid-level panel — no vertex functions exist in OCS yet; they are queued
+   behind a kernel command (§10).
+
+Mechanics (all landed):
+
+- **Model** (`src/ui/popup/quad_menu.rs`): `QuadTarget::Hovered` carries the
+  resolved `sub: Option<SubTarget>` (stage-1 `src/scene/pick/subentity.rs`:
+  `SubKind::Face/Edge/Vertex`, `SubKey { idx, gen }`, resolution `point`);
+  `quad_panels_for_target` swaps the primary to `QUAD_FACE_FUNCS` /
+  `QUAD_EDGE_FUNCS` for a face/edge (id stays `"quad.primary"`, so the
+  collapsed default tile and the expanded grid key off it as before), and
+  the solid-level rows/groups stay reachable through the tab strip. A
+  vertex (or `sub: None`) keeps the solid-level MRU∪curated primary.
+  The Selection / NoSelection quads never resolve subentities.
+- **Gate**: `settings.quad_acis_faces` (no sysvar; clamp + serde tolerant
+  load preserved) now gates the *resolution*, not a tab — 0 = never resolve
+  (solid-level quads always), 1 = resolve only while Shift is held
+  (default), 2 = resolve on plain hover (no Shift needed; face-level
+  primary without pressing anything). `quad_subentity_gate(acis, shift)`
+  is the one predicate the hover classification, the assembly's payload
+  fold and the dwell rule all read.
+- **Resolution** (`src/app/update/context_menu.rs`): the hover classification
+  runs `subentity_candidates(scene, handle, world, tol)` at the cursor's
+  world point with the pick aperture converted to world units, anchoring the
+  richer answer to the same radius as the pick; model space (a live view
+  scale) only. The nearest candidate becomes `Hovered::sub`; the whole
+  nearest-first list stages into `QuadUi.sub_candidates` (+ `sub_index`) for
+  the cycle.
+- **Immediate response**: mode 1's Shift+hover over a face-bearing type
+  skips the quad dwell outright (`quad_hover_step` opens on the first
+  settled step); mode 2 keeps the regular dwell. A Shift flip while the
+  quad is already open — or while a dwell is counting — re-answers in the
+  same update (`SetModifiers` → `quad_on_modifier_flip`): the open Hover
+  quad re-classifies at its anchor without any dwell (window state
+  preserved; the quad collapses when the target folds out of the ACIS set).
+- **Live re-classification while open**: each settled move re-runs the
+  candidates; a changed nearest (kind or key) — or a changed entity under
+  the hover highlight — rebuilds panels + highlight immediately, no dwell,
+  anchor kept.
+- **Tab semantics**: with a Hover quad and staged candidates, the keyboard
+  `Tab` (the `DynTabNext`/`DynTabPrev` interception) cycles the SUBENTITY
+  candidates — sub_index wraps modulo the list; kind switches re-resolve the
+  primary at once (face → edge → vertex). Without candidates the hover quad
+  keeps today's law (the key falls through and closes it), and the
+  Selection / NoSelection quads keep panel cycling; the VIEW tab-strip
+  emission (`QuadMsg::Tab`) stays panel activation — mouse tab cycling is
+  untouched.
+- **Highlight**: the resolved subentity draws through the same preview-wire
+  overlay the PRESSPULL boundary hover feeds — wires from
+  `subentity_highlight_wires` tagged `QUAD-SUBENTITY-HOVER` (face = closed
+  boundary loops, edge = polyline, vertex = none), driven via
+  `scene.set_preview_wires` / cleared by `scene.clear_preview_wire()` in
+  every quad close path (the canonical `close_quad`, plus sub-change
+  replacements). The quad is idle-state only (never open during a command),
+  so the overlay is unowned outside it; quad picks still run plain
+  commands — PRESSPULL re-picks the face inside its own flow, the sub
+  target is context/highlight only (no pre-seeding).
 
 ### 3.6 Keyboard
 
-- `Tab` (phase 2): cycles coincident hover candidates using existing
-  `click_hits_all` + hover-highlight; the quad re-resolves to the cycled entity.
+- `Tab` (shipped for subentities, §3.5.1): cycles the staged subentity
+  candidates when the hover quad resolved any — faces/edges/vertices as
+  they rank, wrapping. The phase-2 plan (coincident hover *entities* via
+  `click_hits_all`) stays open in §10 and remains unwired.
 - Keytips (phase 2): per-item codes via the `Tip` pattern
   (`src/app/update/keytips.rs`), `intercept_context_menu_key`-style interception
   before other key handling when quad is open.
@@ -547,11 +641,14 @@ Python pyfunctions); entries below describe the landed state.
 
 The remaining quad backlog, in no particular order: rollover tips (entity
 properties next to the default icon, title-bar toggle) are declared but do
-not render yet; `Tab`-cycling coincident hover candidates (phase-2 §3.6) is
-not wired into the quad the way `click_hits_all` supports it; per-item keytip
+not render yet; the subentity keyboard `Tab` cycle shipped (§3.5.1), but
+`Tab`-cycling coincident hover *entities* (phase-2 §3.6) is still not wired
+into the quad the way `click_hits_all` supports it; per-item keytip
 codes (the `Tip` pattern) are absent, so keyboard-only quad use is
 `QUADTOGGLE`-less; MRU persistence (the optional `quad_persist_mru` flag) is
-still memory-only per session; and the legacy-menu closes that
+still memory-only per session; the subentity quad's **vertex functions gap**
+— no vertex commands exist yet, so a vertex target keeps the solid-level
+primary while its cycle/highlight work (§3.5.1); and the legacy-menu closes that
 still live inline in unrelated command paths —
 `src/app/update/qselect.rs:104`, `src/app/update/command.rs:1473`,
 `src/app/update/command.rs:2413` (hard-coded `menu.open_at = None`) — want

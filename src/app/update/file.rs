@@ -831,6 +831,7 @@ impl OpenCADStudio {
             quad_hover_delay_ms: crate::app::settings::clamp_quad_hover_delay_ms(
                 self.quad_hover_delay_ms,
             ),
+            quad_acis_faces: crate::app::settings::clamp_quad_acis_faces(self.quad_acis_faces),
             grip_object_limit: self.grip_object_limit,
             image_frame: crate::scene::frame::profile_image_mode(),
             attdef_on_screen: crate::modules::draw::draw::attdef::session().on_screen,
@@ -1020,6 +1021,7 @@ impl OpenCADStudio {
         self.quad_command_launch = s.quad_command_launch;
         self.quad_hover_delay_ms =
             crate::app::settings::clamp_quad_hover_delay_ms(s.quad_hover_delay_ms);
+        self.quad_acis_faces = crate::app::settings::clamp_quad_acis_faces(s.quad_acis_faces);
         self.grip_object_limit = s.grip_object_limit.clamp(0, 32767);
         crate::scene::frame::set_profile_image_mode(s.image_frame);
         crate::modules::draw::draw::attdef::session().on_screen = s.attdef_on_screen;

@@ -30,7 +30,9 @@ section, and the same settings:
 
 ## Hovering an entity
 
-Hover the line, hatch, insert, dimension, and the quad opens next to the cursor
+Hover the line, hatch, insert, dimension — or a 3D solid, whose boolean, edge
+and surface commands (`UNION`, `SOLIDEDIT`, `FILLETEDGE`, `SLICE`, …) arrive
+with it — and the quad opens next to the cursor
 after a short rest (300 ms by default; options cover 0–2000 ms). It starts as
 one tile: the **default command** for that entity type — the command you most
 recently used on that type, falling back to a built-in (for a line that is
@@ -44,6 +46,24 @@ and undo step behaves exactly like its command-line twin.
 The quad closes when you leave it, drift away, or open something else. Without
 the hover flag (or while hushed over a selection), hovering stays highlighting
 only, as before.
+
+Over a 3D solid or ACIS object the quad can resolve the **subentity under the
+cursor** — a face, an edge or a vertex — and make the functions of that kind
+the primary panel: **faces** (`PRESSPULL`, `SOLIDEDIT`, `SLICE`) or **edges**
+(`FILLETEDGE`, `CHAMFEREDGE`). By default you hold **Shift** while hovering
+and the quad answers immediately (no waiting out the 300 ms rest, and pressing
+Shift over an already-open quad re-classifies at once); the setting also
+allows resolution on plain hover or blocks it entirely (Options). With the
+quad open over a resolved target, the keyboard **Tab** cycles the
+subentities — faces, edges and vertices as they rank, wrapping — each step
+swapping the functions and the highlighted outline at once; the face/edge
+outlines trace the hovered element until the quad closes. A **vertex** is
+selected and cycles too, but keeps the solid-level panel: vertex commands do
+not exist yet (they are queued behind a kernel command). Subentities never
+resolve on the Selection or No-Selection quads; picking a tile still runs the
+plain command (`PRESSPULL` re-picks the face inside its own flow), so the
+sub target is context and highlight only. See
+[quad-menu.md](quad-menu.md) §3.5.1.
 
 ## Right-click
 
@@ -105,6 +125,7 @@ aligned, as above. Registered panels obey the display flags like built-in ones.
 | `quad_width` | Grid columns, `QUADWIDTH` (2–12). | 6 |
 | `quad_command_launch` | Quick right-click launches the default command (`QUADCOMMANDLAUNCH`). | off |
 | `quad_hover_delay_ms` | Hover rest before opening (0–2000). | 300 |
+| `quad_acis_faces` | Subentity resolution over solids: Off / Shift+hover (default) / Hover. | 1 |
 
 The design, invariants, and plugin API surface are documented in
 [quad-menu.md](quad-menu.md).

@@ -1,11 +1,12 @@
 //! Quad cursor menu — the *model*.
 //!
-//! Pure sibling of `context_menu.rs` (docs/quad-menu.md §1–§3.3, §3.9):
-//! `quad_panels_for_target` maps the cursor target, the most-recently-used
-//! memory and the registered plugin panels to the panels the quad shows,
-//! without knowing anything about iced. The view renders the panels and
-//! routes picks back through `QuadMsg`; the app layer classifies the target
-//! and records launches into [`QuadMru`].
+//! Pure sibling of `context_menu.rs` (docs/quad-menu.md §1–§3.3, §3.5.1,
+//! §3.9): `quad_panels_for_target` maps the cursor target, the
+//! most-recently-used memory and the registered plugin panels to the panels
+//! the quad shows, without knowing anything about iced. The view renders the
+//! panels and routes picks back through `QuadMsg`; the app layer classifies
+//! the target (subentity resolution included, docs/quad-menu.md §3.5.1) and
+//! records launches into [`QuadMru`].
 
 use codec::Handle;
 use iced::Point;
@@ -92,10 +93,15 @@ pub enum QuadTarget {
     /// Right-click in the void: the No Selection quad.
     None,
     /// A single hovered entity; `type_key` is the canonical
-    /// `entity_type_name()` string ("Line", "Insert", …).
+    /// `entity_type_name()` string ("Line", "Insert", …). `sub` is the
+    /// resolved ACIS subentity — the face / edge / vertex the Shift+hover
+    /// workflow addresses (docs/quad-menu.md §3.5.1); `None` = the
+    /// solid-level quad. Only the hover classification resolves subentities:
+    /// a Selection quad never carries one.
     Hovered {
         handle: Handle,
         type_key: String,
+        sub: Option<crate::scene::pick::subentity::SubTarget>,
     },
     /// The current selection set, possibly of mixed types.
     Selection {
@@ -145,6 +151,15 @@ pub struct QuadUi {
     /// Index into the open quad's panel list — over ALL panels, primary =
     /// `0` (tabs carry their real panel index); a collapsed quad keeps `0`.
     pub active_tab: usize,
+    /// The hovered entity's subentity candidates at quad stage time
+    /// (nearest first — docs/quad-menu.md §3.5.1): the keyboard Tab cycles
+    /// them instead of the panels while non-empty. Empty = no subentity
+    /// resolution (a solid-level quad: Tab keeps its panel fallback).
+    pub sub_candidates: Vec<crate::scene::pick::subentity::SubTarget>,
+    /// Index into [`QuadUi::sub_candidates`] the current `Hovered::sub`
+    /// presents; advanced by the keyboard Tab cycle, reset when the
+    /// hover re-classifies.
+    pub sub_index: usize,
 }
 
 impl QuadUi {
@@ -155,6 +170,8 @@ impl QuadUi {
             mode,
             expanded: false,
             active_tab: 0,
+            sub_candidates: Vec::new(),
+            sub_index: 0,
         }
     }
 }
@@ -308,6 +325,37 @@ fn is_universal(applies_to: &[String]) -> bool {
     applies_to.is_empty() || applies_to.iter().any(|k| k == "*")
 }
 
+/// Whether the quad resolves ACIS subentities for `acis_faces`
+/// (`settings::quad_acis_faces`: 0 = never, 1 = Shift+hover, 2 = plain
+/// hover) and the Shift state `shift` held. This gates both the *resolution*
+/// (the app-side hover classification skips the candidates sweep entirely
+/// when it fails) and the assembly's presentation of an already-resolved
+/// `Hovered::sub` (docs/quad-menu.md §3.5.1).
+pub fn quad_subentity_gate(acis_faces: u8, shift: bool) -> bool {
+    match acis_faces {
+        0 => false,
+        1 => shift,
+        _ => true,
+    }
+}
+
+/// The primary panel for a hover quad whose resolved subentity is a face
+/// or an edge (docs/quad-menu.md §3.5.1): the kind's own function row —
+/// id stays `"quad.primary"` — it *is* the primary in subentity mode, so
+/// the collapsed default tile and the expanded grid key off it exactly as
+/// the solid-level panel does.
+fn subentity_primary(funcs: &[&str]) -> QuadPanel {
+    QuadPanel {
+        id: "quad.primary".to_string(),
+        label: String::new(),
+        items: funcs
+            .iter()
+            .map(|c| QuadItem::from_command(c))
+            .collect(),
+        applies_to: Vec::new(),
+    }
+}
+
 /// Assemble the full quad: index 0 is the "primary" grid panel, `[1..]` are
 /// the bottom tabs.
 ///
@@ -318,6 +366,15 @@ fn is_universal(applies_to: &[String]) -> bool {
 /// table to `quad_width.max(1)` items. Commands that do not fit are filed
 /// into short-labelled groups, and plugin panels matching the target follow.
 ///
+/// A hover quad whose target carries a *resolved* ACIS subentity
+/// (`QuadTarget::Hovered::sub`, docs/quad-menu.md §3.5.1) instead leads
+/// with the kind's own function row: `QUAD_FACE_FUNCS` for a face,
+/// `QUAD_EDGE_FUNCS` for an edge — a vertex has no functions yet, so it
+/// keeps the solid-level panel. The gate (`acis_faces` setting × `shift`,
+/// [`quad_subentity_gate`]) folds an out-of-gate payload back to the
+/// solid-level quad. Hover quad only: a Selection quad never resolves
+/// subentities.
+///
 /// With no selection the primary panel lists the globally recent commands
 /// (falling back to the creation commands while empty) and the tabs are the
 /// static creation groups plus the universal plugin panels.
@@ -326,6 +383,8 @@ pub fn quad_panels_for_target(
     mru: &QuadMru,
     quad_width: usize,
     plugin_panels: &[QuadPanel],
+    acis_faces: u8,
+    shift: bool,
 ) -> Vec<QuadPanel> {
     let width = quad_width.max(1);
     let mut panels = Vec::new();
@@ -367,7 +426,29 @@ pub fn quad_panels_for_target(
                 }
             }
         }
-        QuadTarget::Hovered { type_key, .. } => {
+        QuadTarget::Hovered { type_key, sub, .. } => {
+            // The subentity panel set is gated the same way its RESOLUTION
+            // is ([`quad_subentity_gate`]): a caller may carry an already
+            // resolved `sub` whose gate has since flipped off — the pure
+            // assembly folds it back to the solid-level quad
+            // (docs/quad-menu.md §3.5.1).
+            let sub = if quad_subentity_gate(acis_faces, shift) {
+                sub.as_ref().map(|sub| *sub)
+            } else {
+                None
+            };
+            // The kind's own functions are the subentity quad's primary; a
+            // vertex has no functions yet — like the plain hover, it keeps
+            // the solid-level MRU∪curated panel (docs/quad-menu.md §10).
+            let funcs = match sub.map(|sub| sub.kind) {
+                Some(crate::scene::pick::subentity::SubKind::Face) => {
+                    crate::modules::registry::QUAD_FACE_FUNCS
+                }
+                Some(crate::scene::pick::subentity::SubKind::Edge) => {
+                    crate::modules::registry::QUAD_EDGE_FUNCS
+                }
+                _ => &[],
+            };
             let mut union: Vec<String> = Vec::new();
             for cmd in mru.recent_for(type_key, QUAD_MRU_CAP) {
                 push_unique(&mut union, cmd);
@@ -375,8 +456,20 @@ pub fn quad_panels_for_target(
             for cmd in crate::modules::registry::quad_entity_commands(type_key) {
                 push_unique(&mut union, (*cmd).to_string());
             }
-            panels.push(entity_primary(&union, width));
-            panels.extend(command_group_panels(&union[union.len().min(width)..]));
+            if funcs.is_empty() {
+                panels.push(entity_primary(&union, width));
+                panels.extend(command_group_panels(&union[union.len().min(width)..]));
+            } else {
+                panels.push(subentity_primary(funcs));
+                // The solid-level rows stay reachable through the same
+                // group-filed tab strip (the funcs themselves dedupe out —
+                // no panel shows a command twice).
+                let rest: Vec<String> = union
+                    .into_iter()
+                    .filter(|cmd| !funcs.contains(&cmd.as_str()))
+                    .collect();
+                panels.extend(command_group_panels(&rest));
+            }
             panels.extend(
                 plugin_panels
                     .iter()
@@ -457,6 +550,26 @@ fn plugin_panel(panel: &QuadPanel) -> QuadPanel {
 #[cfg(test)]
 mod quad_tests {
     use super::*;
+    use crate::scene::pick::subentity::{SubKey, SubKind, SubTarget};
+
+    /// A `Hovered` target for the assembly tests; `sub` = the resolved
+    /// subentity payload (the app resolution gates it, the assembly is pure).
+    fn hovered(handle: Handle, type_key: &str, sub: Option<SubTarget>) -> QuadTarget {
+        QuadTarget::Hovered {
+            handle,
+            type_key: type_key.to_string(),
+            sub,
+        }
+    }
+
+    /// A subentity candidate at a point — only `kind` matters here.
+    fn sub(kind: SubKind) -> SubTarget {
+        SubTarget {
+            kind,
+            key: SubKey { idx: 0, gen: 0 },
+            point: glam::DVec3::ZERO,
+        }
+    }
 
     fn plugin_panel(id: &str, applies_to: &[&str]) -> QuadPanel {
         QuadPanel {
@@ -500,14 +613,11 @@ mod quad_tests {
         let mut mru = QuadMru::new();
         mru.record_for("Line", "PEDIT");
         mru.record_for("Line", "BREAK");
-        let target = QuadTarget::Hovered {
-            handle: Handle::new(1),
-            type_key: "Line".to_string(),
-        };
+        let target = hovered(Handle::new(1), "Line", None);
 
         // MRU leads (moves the type-specific edit commands to the front);
         // the primary panel is capped at the given width exactly.
-        let panels = quad_panels_for_target(&target, &mru, 3, &[]);
+        let panels = quad_panels_for_target(&target, &mru, 3, &[], 0, false);
         assert_eq!(panels.len(), 2);
         assert_eq!(panels[0].id, "quad.primary");
         assert_eq!(panels[0].label, "");
@@ -517,8 +627,8 @@ mod quad_tests {
         assert_eq!(panels[0].items[0].command, "BREAK");
 
         // Overflow files into a short-labelled static group panel.
-        let panels = quad_panels_for_target(&target, &mru, QUAD_WIDTH_DEFAULT as usize, &[]);
-        let primary = quad_panels_for_target(&target, &mru, 6, &[]).remove(0);
+        let panels = quad_panels_for_target(&target, &mru, QUAD_WIDTH_DEFAULT as usize, &[], 0, false);
+        let primary = quad_panels_for_target(&target, &mru, 6, &[], 0, false).remove(0);
         assert_eq!(primary.items.len(), 6);
         let primaries: Vec<&str> = primary.items.iter().map(|i| i.command.as_str()).collect();
         assert!(primaries.contains(&"PEDIT"));
@@ -536,7 +646,7 @@ mod quad_tests {
         }
 
         // No MRU yet: the first curated command of the type is the default.
-        let panels = quad_panels_for_target(&target, &QuadMru::new(), 2, &[]);
+        let panels = quad_panels_for_target(&target, &QuadMru::new(), 2, &[], 0, false);
         let curated = crate::modules::registry::quad_entity_commands("Line");
         assert!(!curated.is_empty());
         assert_eq!(panels[0].items[0].command, curated[0]);
@@ -550,7 +660,7 @@ mod quad_tests {
             handles: vec![Handle::new(1), Handle::new(2)],
             type_keys: vec!["Line".to_string(), "Circle".to_string()],
         };
-        let panels = quad_panels_for_target(&target, &mru, 4, &[]);
+        let panels = quad_panels_for_target(&target, &mru, 4, &[], 0, false);
         assert_eq!(panels[0].items[0].command, "OFFSET");
         let curated = crate::modules::registry::quad_entity_commands("Line");
         let cmds: Vec<&str> = panels[0].items.iter().map(|i| i.command.as_str()).collect();
@@ -565,7 +675,7 @@ mod quad_tests {
             plugin_panel("plugin:c:open", &[]),
         ];
         let panels =
-            quad_panels_for_target(&QuadTarget::None, &QuadMru::new(), 4, &plugins);
+            quad_panels_for_target(&QuadTarget::None, &QuadMru::new(), 4, &plugins, 0, false);
         // Only universal plugins survive the No Selection quad.
         let ids: Vec<&str> = panels.iter().map(|p| p.id.as_str()).collect();
         assert!(ids.contains(&"plugin:b:all"));
@@ -598,7 +708,7 @@ mod quad_tests {
         let mut mru = QuadMru::new();
         mru.record_global("OFFSET");
         mru.record_global("LIST");
-        let panels = quad_panels_for_target(&QuadTarget::None, &mru, 2, &[]);
+        let panels = quad_panels_for_target(&QuadTarget::None, &mru, 2, &[], 0, false);
         let cmds: Vec<&str> = panels[0].items.iter().map(|i| i.command.as_str()).collect();
         assert_eq!(cmds, vec!["LIST", "OFFSET"]);
         assert!(panels[1..]
@@ -617,10 +727,7 @@ mod quad_tests {
         assert!(QuadTarget::None.matches_applies(&[any.clone()]));
         assert!(!QuadTarget::None.matches_applies(&[line.clone()]));
 
-        let hovered = QuadTarget::Hovered {
-            handle: Handle::new(7),
-            type_key: line.clone(),
-        };
+        let hovered = hovered(Handle::new(7), "Line", None);
         assert!(hovered.matches_applies(&[line.clone()]));
         assert!(hovered.matches_applies(&[any.clone()]));
         assert!(hovered.matches_applies(&[circle.clone(), line.clone()]));
@@ -638,6 +745,171 @@ mod quad_tests {
 
         assert!(!hovered.is_none());
         assert!(QuadTarget::None.is_none());
+    }
+
+    #[test]
+    fn subentity_panels_per_kind_and_gate() {
+        // A face subentity makes the FACE functions the primary (id stays
+        // "quad.primary"); the solid-level rows stay reachable through the
+        // tab strip, the plugins still join, and no "quad.faces" tab exists
+        // anywhere any more.
+        let solid = hovered(Handle::new(2), "Solid3D", Some(sub(SubKind::Face)));
+        let plugins = [plugin_panel("plugin:a:solid", &["Solid3D"])];
+        let panels = quad_panels_for_target(&solid, &QuadMru::new(), 6, &plugins, 1, true);
+        assert_eq!(panels[0].id, "quad.primary");
+        assert_eq!(panels[0].label, "");
+        assert_eq!(
+            panels[0].items.iter().map(|i| i.command.as_str()).collect::<Vec<_>>(),
+            crate::modules::registry::QUAD_FACE_FUNCS,
+            "a resolved face leads the quad with PRESSPULL/SOLIDEDIT/SLICE"
+        );
+        assert!(!panels.iter().any(|p| p.id == "quad.faces"));
+        assert!(
+            panels.iter().any(|p| p.id == "plugin:a:solid"),
+            "plugin panels join the subentity quad unchanged"
+        );
+        // The solid rows remain reachable: every solid command (and every
+        // func) is reachable exactly once across primary + tabs — the funcs
+        // dedupe out of the group filing, curated rows the funcs replaced
+        // stay tabs.
+        let curated: Vec<&'static str> = crate::modules::registry::quad_entity_commands("Solid3D")
+            .to_vec()
+            .iter()
+            .map(|cmd| *cmd)
+            .collect();
+        for cmd in &curated {
+            let count = panels
+                .iter()
+                .map(|panel| {
+                    panel
+                        .items
+                        .iter()
+                        .filter(|item| item.command.as_str() == *cmd)
+                        .count()
+                })
+                .sum::<usize>();
+            assert_eq!(count, 1, "the row {cmd} is reachable exactly once");
+        }
+
+        // An edge subentity swaps the primary to the EDGE functions.
+        let solid = hovered(Handle::new(3), "Solid3D", Some(sub(SubKind::Edge)));
+        let panels = quad_panels_for_target(&solid, &QuadMru::new(), 6, &[], 1, true);
+        assert_eq!(
+            panels[0].items.iter().map(|i| i.command.as_str()).collect::<Vec<_>>(),
+            crate::modules::registry::QUAD_EDGE_FUNCS,
+            "a resolved edge leads with FILLETEDGE/CHAMFEREDGE"
+        );
+
+        // A vertex has no functions yet: the solid-level MRU∪curated panel
+        // stays (the vertex is selected/highlighted/cycled regardless).
+        let solid = hovered(Handle::new(4), "Solid3D", Some(sub(SubKind::Vertex)));
+        let panels = quad_panels_for_target(&solid, &QuadMru::new(), 6, &[], 1, true);
+        assert_eq!(panels[0].id, "quad.primary");
+        assert_eq!(
+            panels[0].items.iter().map(|i| i.command.as_str()).collect::<Vec<_>>(),
+            quad_panels_for_target(&hovered(Handle::new(5), "Solid3D", None), &QuadMru::new(), 6, &[], 1, true)
+                .first()
+                .expect("solid primary")
+                .items
+                .iter()
+                .map(|i| i.command.as_str())
+                .collect::<Vec<_>>(),
+            "the vertex quad falls back to the solid-level primary"
+        );
+    }
+
+    #[test]
+    fn subentity_gate_folds_the_resolved_sub_back_to_solid_level() {
+        // Gate matrix (type × settings × shift) — the SAME quad target with
+        // a resolved face: 0 = never, even with Shift held.
+        let face = hovered(Handle::new(2), "Solid3D", Some(sub(SubKind::Face)));
+        assert!(!quad_subentity_gate(0, true));
+        let panels = quad_panels_for_target(&face, &QuadMru::new(), 6, &[], 0, true);
+        assert_eq!(
+            panels.first().expect("primary").items[0].command,
+            crate::modules::registry::quad_entity_commands("Solid3D")[0],
+            "acis 0 folds the face back to the solid-level primary"
+        );
+        // 1 = Shift+hover: no Shift, solid-level quad.
+        assert!(!quad_subentity_gate(1, false));
+        assert!(!quad_panels_for_target(&face, &QuadMru::new(), 6, &[], 1, false)
+            .first()
+            .expect("primary")
+            .items
+            .iter()
+            .any(|item| item.command == "PRESSPULL"));
+        assert!(quad_subentity_gate(1, true));
+        assert!(quad_panels_for_target(&face, &QuadMru::new(), 6, &[], 1, true)
+            .first()
+            .expect("primary")
+            .items
+            .iter()
+            .any(|item| item.command == "PRESSPULL"));
+        // 2 = plain hover: both shift states show the face funcs.
+        assert!(quad_subentity_gate(2, false) && quad_subentity_gate(2, true));
+        for shift in [false, true] {
+            assert!(quad_panels_for_target(&face, &QuadMru::new(), 6, &[], 2, shift)
+                .first()
+                .expect("primary")
+                .items
+                .iter()
+                .any(|item| item.command == "PRESSPULL"));
+        }
+
+        // The same gate on a Selection quad's article — a Selection NEVER
+        // resolves subentities, whatever the settings claim (the
+        // classification is hover-only by construction).
+        let selected = QuadTarget::Selection {
+            handles: vec![Handle::new(3), Handle::new(4)],
+            type_keys: vec!["Solid3D".to_string()],
+        };
+        for acis in 0..=2u8 {
+            for shift in [false, true] {
+                let panels = quad_panels_for_target(&selected, &QuadMru::new(), 6, &[], acis, shift);
+                assert!(
+                    panels.iter().all(|p| p.items.iter().all(|item| item.command != "PRESSPULL")),
+                    "selection quad must not offer subentity funcs (acis {acis}, shift {shift})"
+                );
+            }
+        }
+
+        // A non-solid hover never offers the funcs either (no sub resolved).
+        let line = hovered(Handle::new(5), "Line", None);
+        let panels = quad_panels_for_target(&line, &QuadMru::new(), 6, &[], 2, true);
+        assert!(panels
+            .iter()
+            .all(|p| p.items.iter().all(|item| item.command != "PRESSPULL")));
+        // And a Line hover target with an (impossible,
+        // resolution-gated-away) face payload folds to the Line rows.
+        let line_face = hovered(Handle::new(5), "Line", Some(sub(SubKind::Face)));
+        assert!(quad_subentity_gate(2, true));
+        let panels = quad_panels_for_target(&line_face, &QuadMru::new(), 6, &[], 2, true);
+        assert!(
+            panels
+                .first()
+                .expect("primary")
+                .items
+                .iter()
+                .any(|item| item.command == "PRESSPULL"),
+            "the assembly is pure to its inputs: the funcs follow the payload"
+        );
+    }
+
+    #[test]
+    fn subentity_gate_matches_its_domain() {
+        use crate::app::settings::QUAD_ACIS_FACES_MAX;
+        assert!(!quad_subentity_gate(0, false));
+        assert!(!quad_subentity_gate(0, true));
+        assert!(!quad_subentity_gate(1, false));
+        assert!(quad_subentity_gate(1, true));
+        assert!(quad_subentity_gate(2, false));
+        assert!(quad_subentity_gate(2, true));
+        // Out of a hand-written config, anything above the domain is "on".
+        assert_eq!(crate::app::settings::clamp_quad_acis_faces(255), QUAD_ACIS_FACES_MAX);
+        assert!(quad_subentity_gate(
+            crate::app::settings::clamp_quad_acis_faces(255),
+            false
+        ));
     }
 
     #[test]

@@ -1348,7 +1348,107 @@ pub static QUAD_ENTITY_COMMANDS: &[(&str, &[&str])] = &[
             "ERASE",
         ],
     ),
+    // Solid/ACIS rows (docs/quad-menu.md §3.3): 3D solids and ACIS objects
+    // endorse their transforms through the dispatcher's ACIS placement, and
+    // the boolean/edge/surface commands gate on Solid3D/Region/Body at
+    // dispatch time, exactly like their command-line twins.
+    (
+        "Solid3D",
+        &[
+            "MOVE",
+            "COPY",
+            "ROTATE",
+            "SCALE",
+            "MIRROR",
+            "3DARRAY",
+            "UNION",
+            "SUBTRACT",
+            "INTERSECT",
+            "SLICE",
+            "SOLIDEDIT",
+            "FILLETEDGE",
+            "ERASE",
+        ],
+    ),
+    (
+        "Body",
+        &[
+            "MOVE",
+            "COPY",
+            "ROTATE",
+            "SCALE",
+            "MIRROR",
+            "3DARRAY",
+            "UNION",
+            "SUBTRACT",
+            "INTERSECT",
+            "SLICE",
+            "ERASE",
+        ],
+    ),
+    (
+        "Region",
+        &[
+            "MOVE",
+            "COPY",
+            "ROTATE",
+            "SCALE",
+            "MIRROR",
+            "ARRAYRECT",
+            "PRESSPULL",
+            "ERASE",
+        ],
+    ),
+    (
+        "Surface",
+        &[
+            "MOVE",
+            "COPY",
+            "ROTATE",
+            "SCALE",
+            "MIRROR",
+            "THICKEN",
+            "FLATSHOT",
+            "ERASE",
+        ],
+    ),
+    (
+        "Mesh",
+        &["MOVE", "COPY", "ROTATE", "SCALE", "MIRROR", "EXPLODE", "ERASE"],
+    ),
+    (
+        "3DFace",
+        &["MOVE", "COPY", "ROTATE", "SCALE", "MIRROR", "EXPLODE", "ERASE"],
+    ),
+    (
+        "PolyfaceMesh",
+        &["MOVE", "COPY", "ROTATE", "SCALE", "MIRROR", "EXPLODE", "ERASE"],
+    ),
+    (
+        "PolygonMesh",
+        &["MOVE", "COPY", "ROTATE", "SCALE", "MIRROR", "EXPLODE", "ERASE"],
+    ),
 ];
+
+/// The ACIS face-bearing types the hover quad resolves subentities over
+/// (docs/quad-menu.md §3.5.1), keyed like `QUAD_ENTITY_COMMANDS`: the
+/// hovered object's faces and edges are what `PRESSPULL` / the edge edits
+/// work on, so subentity resolution belongs to the *hover* quad only — no
+/// Selection-quad variant. The list also gates the Shift+hover open without
+/// the dwell (the quad skips its delay for exactly these types).
+pub static QUAD_ACIS_FACE_TYPES: &[&str] = &["Solid3D", "Body", "Surface", "Region"];
+
+/// The subentity quad's FACE functions (docs/quad-menu.md §3.5.1): the
+/// primary panel of a hover quad whose resolved subentity is a face. Every
+/// command resolves a ribbon icon exactly like the curated tables (the
+/// `quad_registry_tests` icon pass covers both function tables).
+pub static QUAD_FACE_FUNCS: &[&str] = &["PRESSPULL", "SOLIDEDIT", "SLICE"];
+
+/// The subentity quad's EDGE functions (docs/quad-menu.md §3.5.1): the
+/// primary panel of a hover quad whose resolved subentity is an edge. No
+/// vertex functions exist yet — a vertex target keeps the solid-level
+/// panel until a kernel command lands (docs/quad-menu.md §10).
+pub static QUAD_EDGE_FUNCS: &[&str] = &["FILLETEDGE", "CHAMFEREDGE"];
 
 /// The applicable commands of one entity type key: exact canonical
 /// (`entity_type_name()`) match first, then a case-insensitive fallback, so
@@ -1446,6 +1546,34 @@ mod quad_registry_tests {
             all.extend_from_slice(cmds);
         }
         assert!(all.contains(&"MOVE"), "generic modify must lead the tables");
+    }
+
+    #[test]
+    fn quad_subentity_funcs_resolve_icons_and_match_their_types() {
+        assert!(!QUAD_ACIS_FACE_TYPES.is_empty());
+        for funcs in [QUAD_FACE_FUNCS, QUAD_EDGE_FUNCS] {
+            assert!(!funcs.is_empty());
+            for cmd in funcs {
+                if !QUAD_GLYPH_FALLBACK_WHITELIST.contains(cmd) {
+                    assert!(
+                        command_icon(cmd).is_some(),
+                        "expected command_icon({cmd:?}) to resolve an icon (subentity quad funcs)"
+                    );
+                }
+            }
+        }
+        // The face functions are the vertex quad's gap: none exist yet, so
+        // a vertex target keeps the solid-level panel (docs §10).
+        assert!(!QUAD_FACE_FUNCS.contains(&"FILLETEDGE"), "edge funcs are not face funcs");
+        assert!(!QUAD_EDGE_FUNCS.contains(&"PRESSPULL"), "face funcs are not edge funcs");
+        // The ACIS types keep their curated rows, so the quad's primary
+        // panel is non-empty in every resolved mode (vertex fallback).
+        for type_key in QUAD_ACIS_FACE_TYPES {
+            assert!(
+                !quad_entity_commands(type_key).is_empty(),
+                "the subentity type {type_key} must still have curated commands"
+            );
+        }
     }
 
     #[test]

@@ -28,17 +28,23 @@ pub enum QuadOptionMsg {
     /// Milliseconds of rest before the hover quad opens (clamped in
     /// settings).
     HoverDelay(u64),
+    /// The hover quad's ACIS subentity resolution gate over a solid
+    /// (docs/quad-menu.md §3.5.1): 0 = never, 1 = Shift+hover (default),
+    /// 2 = plain hover (clamped in settings; no sysvar reflects it).
+    AcisFaces(u8),
 }
 
 use crate::app::{ArrowKey, ContextMenuNav, Message, OpenCADStudio};
+use glam::DVec3;
 use crate::command::StepInput;
 use crate::scene::pick::grip::GripEditMode;
 use crate::ui::popup::context_menu::{
     build_context_menu, ContextMenu, GripMenuCmd, GripMenuContext, MenuAction, MenuContext,
     SubmenuId,
 };
+use crate::scene::pick::subentity::SubTarget;
 use crate::ui::popup::quad_menu::{
-    quad_panels_for_target, QuadMode, QuadMsg, QuadTarget, QuadUi,
+    quad_panels_for_target, quad_subentity_gate, QuadMode, QuadMsg, QuadTarget, QuadUi,
 };
 use codec::Handle;
 use iced::{Point, Task};
@@ -564,6 +570,11 @@ impl OpenCADStudio {
                 return QuadTarget::Hovered {
                     handle,
                     type_key: crate::entities::traits::entity_type_name(entity).to_string(),
+                    // The plain classification carries no subentity; only
+                    // the hover quad's own paths resolve one
+                    // ([`Self::quad_hover_classified`], docs/quad-menu.md
+                    // §3.5.1).
+                    sub: None,
                 };
             }
         }
@@ -603,37 +614,326 @@ impl OpenCADStudio {
         }
     }
 
-    /// Open the quad cursor menu at `anchor` for `mode` (docs/quad-menu.md
-    /// §3.1): classify the target, build the panels once (per-type MRU +
-    /// curated tables + the visible plugins' registered quad panels) and open
-    /// the window state on the selection boundary. Replaces any open context
-    /// menu.
-    pub(crate) fn open_quad(&mut self, mode: QuadMode, anchor: Point) -> bool {
-        let target = self.quad_target_for(mode);
-        // API v15: the visible plugins' registered panels join after the
-        // builtin catalog (registration order; the disabled and dead drop
-        // out, the grips' visibility law). The web build has no plugin
-        // surface.
+    /// The visible plugins' registered quad panels (docs/quad-menu.md §4,
+    /// API v15): registration order, the disabled and dead dropped. The web
+    /// build has no plugin surface.
+    fn quad_plugin_panels(&self) -> Vec<crate::ui::popup::quad_menu::QuadPanel> {
         #[cfg(target_arch = "wasm32")]
-        let plugin_panels: Vec<crate::ui::popup::quad_menu::QuadPanel> = Vec::new();
+        {
+            let _ = self;
+            return Vec::new();
+        }
         #[cfg(not(target_arch = "wasm32"))]
-        let plugin_panels = crate::app::plugin_host::plugin_quad_panels(&self.disabled_plugins);
+        crate::app::plugin_host::plugin_quad_panels(&self.disabled_plugins)
+    }
+
+    /// The hovered entity's subentity candidates for the quad
+    /// (docs/quad-menu.md §3.5.1), nearest first — gated by
+    /// `quad_acis_faces` × Shift ([`quad_subentity_gate`]): 0 = never
+    /// resolve, 1 = only while Shift is held, 2 = always. The resolution
+    /// radius is the pick aperture in world units, so the quad's richer
+    /// answer shares the pick's forgiveness; with no model-space view scale
+    /// (paper space, no settled frame) nothing resolves and the quad keeps
+    /// its solid level.
+    fn quad_subentity_candidates(&self, i: usize, handle: Handle, world: DVec3) -> Vec<SubTarget> {
+        if !quad_subentity_gate(self.quad_acis_faces, self.shift_down) {
+            return Vec::new();
+        }
+        let scene = &self.tabs[i].scene;
+        let Some(world_per_px) = scene.world_per_pixel() else {
+            return Vec::new();
+        };
+        let aperture = crate::ui::overlay::pick_box_aperture_px(self.pick_box) as f64;
+        crate::scene::pick::subentity::subentity_candidates(
+            scene,
+            handle,
+            world,
+            aperture * world_per_px as f64,
+        )
+    }
+
+    /// The Hover quad's classification *with* subentity resolution
+    /// (docs/quad-menu.md §3.5.1): over a face-bearing solid the nearest
+    /// candidate becomes [`QuadTarget::Hovered`]'s `sub` (the primary panel
+    /// switches to the kind's functions) and every candidate returns so the
+    /// keyboard Tab can cycle them. Selection / NoSelection /
+    /// hover-highlight-less targets never resolve subentities.
+    fn quad_hover_classified(&self, i: usize, world: DVec3) -> (QuadTarget, Vec<SubTarget>) {
+        let target = self.quad_target();
+        let QuadTarget::Hovered {
+            handle,
+            type_key,
+            sub: None,
+        } = &target
+        else {
+            return (target, Vec::new());
+        };
+        let (handle, type_key) = (*handle, type_key.clone());
+        let candidates = self.quad_subentity_candidates(i, handle, world);
+        let sub = candidates.first().copied();
+        (
+            QuadTarget::Hovered {
+                handle,
+                type_key,
+                sub,
+            },
+            candidates,
+        )
+    }
+
+    /// Drive the quad's subentity highlight (docs/quad-menu.md §3.5.1):
+    /// the Stage-1 `subentity_highlight_wires` geometry through the same
+    /// preview-wire overlay the PRESSPULL boundary hover feeds, tagged on
+    /// that wire's naming scheme. `None` (solid level, a body that fell
+    /// away) clears. The quad lives outside any command, so the preview
+    /// wires are *its* overlay surface while open — and
+    /// [`Self::close_quad`] hands them back.
+    fn quad_refresh_subentity_highlight(&mut self, i: usize, handle: Handle, sub: Option<SubTarget>) {
+        let wires = match sub {
+            Some(sub) => crate::scene::pick::subentity::subentity_highlight_wires(
+                &self.tabs[i].scene,
+                handle,
+                sub,
+            ),
+            None => Vec::new(),
+        };
+        let mut models: Vec<crate::scene::WireModel> = Vec::new();
+        for points in wires {
+            if points.len() < 2 {
+                continue;
+            }
+            let mut wire = crate::scene::WireModel::solid_f64(
+                "QUAD-SUBENTITY-HOVER".to_owned(),
+                points.into_iter().map(|p| p.to_array()).collect::<Vec<_>>(),
+                crate::scene::WireModel::HOVER,
+                false,
+            );
+            wire.line_weight_px = 2.0;
+            models.push(wire);
+        }
+        if models.is_empty() {
+            self.tabs[i].scene.clear_preview_wire();
+        } else {
+            self.tabs[i].scene.set_preview_wires(models);
+        }
+    }
+
+    /// Rebuild an open Hover quad in place for `target`
+    /// (docs/quad-menu.md §3.5.1): panels, open-target classification,
+    /// staged candidates + cycle index and the subentity highlight —
+    /// everything but the anchor recomputed. `expanded`/`active_tab` are the
+    /// previous window state, preserved by the callers (a solid-level fold
+    /// collapses first). A target with nothing to offer closes the quad —
+    /// same offer law as [`Self::open_quad`].
+    fn quad_rebuild_hover_panels(
+        &mut self,
+        i: usize,
+        target: QuadTarget,
+        candidates: Vec<SubTarget>,
+        sub_index: usize,
+        expanded: bool,
+        active_tab: usize,
+    ) {
+        let plugin_panels = self.quad_plugin_panels();
+        let shift = self.shift_down;
         let panels = quad_panels_for_target(
             &target,
             &self.quad_mru,
             self.quad_width as usize,
             &plugin_panels,
+            self.quad_acis_faces,
+            shift,
+        );
+        if !panels.iter().any(|panel| !panel.items.is_empty()) {
+            self.close_quad();
+            return;
+        }
+        let mut sel = self.tabs[i].scene.selection.borrow_mut();
+        if let Some(quad) = sel.menu.quad.as_mut() {
+            quad.sub_candidates = candidates;
+            quad.sub_index = sub_index;
+            // The kept tab index clamps to the NEW panel count: kind
+            // switches change how many group tabs exist.
+            quad.active_tab = active_tab.min(panels.len().saturating_sub(1));
+            quad.expanded = expanded;
+        }
+        drop(sel);
+        self.quad_open_target = Some(target);
+        self.quad_panels = panels;
+        match &self.quad_open_target {
+            Some(QuadTarget::Hovered { handle, sub, .. }) => {
+                self.quad_refresh_subentity_highlight(i, *handle, *sub);
+            }
+            _ => self.quad_refresh_subentity_highlight(i, Handle::new(0), None),
+        }
+    }
+
+    /// Re-classify the OPEN Hover quad at the cursor (docs/quad-menu.md
+    /// §3.5.1) — per settled move and per Shift flip: the hovered entity's
+    /// subentity candidates re-resolve and a changed nearest (kind or key)
+    /// — or a changed entity beneath the hover highlight — rebuilds the
+    /// panels + highlight immediately, no dwell, anchor kept. A cursor over
+    /// the quad's own tile (no hover entity) changes nothing; the gate going
+    /// off (Shift released, the setting flipped) folds the quad back to its
+    /// solid level and collapses it.
+    fn quad_reclassify_open_hover(&mut self, i: usize, pos: Point) {
+        let (expanded, active_tab) = {
+            let sel = self.tabs[i].scene.selection.borrow();
+            let Some(quad) = sel.menu.quad.as_ref() else {
+                return;
+            };
+            if quad.mode != QuadMode::Hover {
+                return;
+            }
+            (quad.expanded, quad.active_tab)
+        };
+        let Some(handle) = self.tabs[i].scene.hover_highlight else {
+            return;
+        };
+        let Some(entity) = self.tabs[i].scene.document.get_entity(handle) else {
+            return;
+        };
+        let type_key = crate::entities::traits::entity_type_name(entity).to_string();
+        let world = self.cursor_world_at(i, pos);
+        let candidates = self.quad_subentity_candidates(i, handle, world);
+        let nearest = candidates.first().copied();
+        let changed = match self.quad_open_target.as_ref() {
+            Some(QuadTarget::Hovered {
+                handle: open_handle,
+                sub: open_sub,
+                ..
+            }) => {
+                let entity_changed = *open_handle != handle;
+                let sub_changed = match (open_sub, &nearest) {
+                    (None, None) => false,
+                    (None, Some(_)) | (Some(_), None) => true,
+                    (Some(a), Some(b)) => a.kind != b.kind || a.key != b.key,
+                };
+                entity_changed || sub_changed
+            }
+            _ => true,
+        };
+        if !changed {
+            return;
+        }
+        let target = QuadTarget::Hovered {
+            handle,
+            type_key,
+            sub: nearest,
+        };
+        let keep_expanded = expanded && nearest.is_some();
+        self.quad_rebuild_hover_panels(
+            i,
+            target,
+            candidates,
+            0,
+            keep_expanded,
+            active_tab,
+        );
+    }
+
+    /// Shift's flip re-answers the quad immediately (docs/quad-menu.md
+    /// §3.5.1): the open Hover quad re-classifies at its anchor without any
+    /// dwell, and a counting dwell re-runs its step — mode 1's Shift+hover
+    /// open skips the delay outright; anything else keeps counting. `pos` is
+    /// the resting cursor position.
+    pub(in crate::app) fn quad_on_modifier_flip(&mut self, i: usize, pos: Point) {
+        if self.quad_open() {
+            self.quad_reclassify_open_hover(i, pos);
+        } else if self.quad_hover_counting() {
+            self.quad_hover_step(i, pos, 0);
+        }
+    }
+
+    /// Keyboard Tab with the quad open in subentity mode
+    /// (docs/quad-menu.md §3.5.1): cycle the staged candidates — faces,
+    /// edges and vertices as they ranked — wrapping, each step re-resolving
+    /// the primary panel + highlight instantly. `false` (no candidates
+    /// staged, i.e. a solid-level quad) hands the key back so the quad keeps
+    /// every other key's fall-through law.
+    pub(in crate::app) fn quad_cycle_subentities(&mut self, step: isize) -> bool {
+        let i = self.active_tab;
+        let (candidates, index, quad_open_state) = {
+            let sel = self.tabs[i].scene.selection.borrow();
+            let Some(quad) = sel.menu.quad.as_ref() else {
+                return false;
+            };
+            (
+                quad.sub_candidates.clone(),
+                quad.sub_index,
+                (quad.expanded, quad.active_tab),
+            )
+        };
+        if candidates.is_empty() {
+            return false;
+        }
+        let Some(sub) = candidates.get(
+            (index as isize + step).rem_euclid(candidates.len() as isize) as usize
+        ) else {
+            return false;
+        };
+        let Some(QuadTarget::Hovered {
+            handle,
+            type_key,
+            sub: Some(_),
+        }) = self.quad_open_target.clone()
+        else {
+            return false;
+        };
+        let next = (index as isize + step).rem_euclid(candidates.len() as isize) as usize;
+        let target = QuadTarget::Hovered {
+            handle,
+            type_key,
+            sub: Some(*sub),
+        };
+        self.quad_rebuild_hover_panels(
+            i,
+            target,
+            candidates,
+            next,
+            quad_open_state.0,
+            quad_open_state.1,
+        );
+        true
+    }
+
+    /// Open the quad cursor menu at `anchor` for `mode` (docs/quad-menu.md
+    /// §3.1): classify the target, build the panels once (per-type MRU +
+    /// curated tables + the visible plugins' registered quad panels) and open
+    /// the window state on the selection boundary. Replaces any open context
+    /// menu.
+    #[allow(clippy::too_many_lines)]
+    pub(crate) fn open_quad(&mut self, mode: QuadMode, anchor: Point) -> bool {
+        // The Hover quad resolves subentities at open time
+        // (docs/quad-menu.md §3.5.1): the hovered face/edge/vertex under the
+        // cursor — gated by `quad_acis_faces` × Shift read live here, so
+        // every trigger picks it up from the current modifier state
+        // (`self.shift_down`, maintained by `ModifiersChanged` →
+        // `SetModifiers`). Selection / NoSelection never resolve.
+        let (target, sub_candidates) = match mode {
+            QuadMode::Hover => {
+                let i = self.active_tab;
+                let world = self.cursor_world_at(i, anchor);
+                self.quad_hover_classified(i, world)
+            }
+            _ => (self.quad_target_for(mode), Vec::new()),
+        };
+        let plugin_panels = self.quad_plugin_panels();
+        let shift = self.shift_down;
+        let panels = quad_panels_for_target(
+            &target,
+            &self.quad_mru,
+            self.quad_width as usize,
+            &plugin_panels,
+            self.quad_acis_faces,
+            shift,
         );
         // Nothing to offer (an object type with no commands, an empty
         // creation catalogue): no quad, so the shortcut menu still answers
-        // and Enter keeps its meaning. The hover and selection quads show
-        // their primary panel collapsed; the void quad any of its panels.
-        let offers = match mode {
-            QuadMode::Hover | QuadMode::Selection => {
-                panels.first().is_some_and(|panel| !panel.items.is_empty())
-            }
-            QuadMode::NoSelection => panels.iter().any(|panel| !panel.items.is_empty()),
-        };
+        // and Enter keeps its meaning. Any mode renders when ANY panel has
+        // items: hover/selection usually fill the primary panel, while a
+        // type without curated commands can still offer a plugin's tab.
+        let offers = panels.iter().any(|panel| !panel.items.is_empty());
         if !offers {
             return false;
         }
@@ -644,27 +944,38 @@ impl OpenCADStudio {
             // goes away, and a pick counts as "another interaction" for the
             // Enter-first right-click cycle.
             sel.menu.close();
-            sel.menu.quad = Some(QuadUi::open(anchor, mode));
+            let mut quad = QuadUi::open(anchor, mode);
+            quad.sub_candidates = sub_candidates.clone();
+            quad.sub_index = 0;
+            sel.menu.quad = Some(quad);
             sel.input.right_click_entered = false;
         }
         self.quad_open_target = Some(target);
         self.quad_panels = panels;
         self.quad_hover_since = None;
+        // The resolved subentity highlights at once through the preview-wire
+        // overlay (a solid-level or vertex target clears instead).
+        if let Some(QuadTarget::Hovered { handle, sub, .. }) = &self.quad_open_target {
+            self.quad_refresh_subentity_highlight(i, *handle, *sub);
+        }
         true
     }
 
     /// Close the quad: drop the window state on the active tab's selection
     /// boundary (the same `SelectionMenu::close` every disruptive transition
     /// runs — quad and legacy menu are mutually exclusive) plus the built
-    /// panels and the hover dwell. The single teardown point for every quad
-    /// close, including the disrupted document tabs (`TabSwitch`): whoever
-    /// tears the quad down on an app-global level must drop the app-global
-    /// panel state with it. Leaves focus alone; see
+    /// panels, the hover dwell and the subentity highlight wires
+    /// (docs/quad-menu.md §3.5.1 — the preview-wire overlay belongs to the
+    /// open quad; no command is active while it is). The single teardown
+    /// point for every quad close, including the disrupted document tabs
+    /// (`TabSwitch`): whoever tears the quad down on an app-global level
+    /// must drop the app-global panel state with it. Leaves focus alone; see
     /// [`Self::close_quad_refocus`].
     pub(crate) fn close_quad(&mut self) {
         let i = self.active_tab;
-        if let Some(tab) = self.tabs.get(i) {
+        if let Some(tab) = self.tabs.get_mut(i) {
             tab.scene.selection.borrow_mut().menu.close();
+            tab.scene.clear_preview_wire();
         }
         self.quad_panels.clear();
         self.quad_open_target = None;
@@ -747,6 +1058,9 @@ impl OpenCADStudio {
             QuadOptionMsg::HoverDelay(ms) => {
                 self.quad_hover_delay_ms =
                     crate::app::settings::clamp_quad_hover_delay_ms(ms)
+            }
+            QuadOptionMsg::AcisFaces(faces) => {
+                self.quad_acis_faces = crate::app::settings::clamp_quad_acis_faces(faces)
             }
         }
         // Turning the quad off must not leave an open quad behind.
@@ -893,7 +1207,7 @@ impl OpenCADStudio {
         // is not an open-and-act: like the void's, it opens the No
         // Selection quad — quick right-click launches, hold displays.
         if self.quad_command_launch {
-            if let QuadTarget::Hovered { handle, type_key } = &target {
+            if let QuadTarget::Hovered { handle, type_key, .. } = &target {
                 if held_ms >= self.right_click_hold_ms {
                     if self.open_quad(QuadMode::NoSelection, at) {
                         return Some(self.unfocus_widgets());
@@ -971,6 +1285,13 @@ impl OpenCADStudio {
                     && (-QUAD_DRIFT_PX..=reach).contains(&dy);
                 if !toward_tile {
                     self.close_quad();
+                } else {
+                    // Live subentity re-classification while open
+                    // (docs/quad-menu.md §3.5.1): the nearest face/edge/
+                    // vertex is recomputed on every settled move — a changed
+                    // nearest (or entity) rebuilds the panels + highlight at
+                    // once, no dwell, anchor kept.
+                    self.quad_reclassify_open_hover(i, pos);
                 }
             }
             return;
@@ -983,6 +1304,20 @@ impl OpenCADStudio {
             self.quad_hover_since = None;
             return;
         }
+        // Shift+hover over a face-bearing type skips the dwell outright
+        // (mode 1 — docs/quad-menu.md §3.5.1): pressing Shift while the
+        // cursor rests on the solid must answer without waiting the delay
+        // out. Mode 2 resolves subentities on the regular delay instead.
+        let immediate = self.quad_acis_faces == 1
+            && self.shift_down
+            && tab.scene.hover_highlight.is_some_and(|handle| {
+                tab.scene.document.get_entity(handle).is_some_and(|entity| {
+                    let type_key = crate::entities::traits::entity_type_name(entity);
+                    crate::modules::registry::QUAD_ACIS_FACE_TYPES
+                        .iter()
+                        .any(|k| k.eq_ignore_ascii_case(type_key))
+                })
+            });
         let due = match self.quad_hover_since {
             Some(since) => {
                 (since.elapsed().as_millis() as u64).max(rest_ms) >= self.quad_hover_delay_ms
@@ -996,7 +1331,7 @@ impl OpenCADStudio {
                 already_due
             }
         };
-        if due {
+        if due || immediate {
             self.quad_hover_since = None;
             let _ = self.open_quad(QuadMode::Hover, pos);
         }
@@ -1078,6 +1413,22 @@ impl OpenCADStudio {
                 | Message::CommandInput(_)
         );
         if hover && key {
+            // The Shift+hover subentity quad owns the keyboard Tab while
+            // candidates are staged (docs/quad-menu.md §3.5.1): cycling
+            // faces → edges → vertices instead of closing. Without the
+            // resolution the hover quad keeps the fall-through law above
+            // (the VIEW tab-strip emission, `QuadMsg::Tab`, is untouched —
+            // the Selection / NoSelection quads below keep cycling panels).
+            let step = match msg {
+                Message::DynTabNext => Some(1),
+                Message::DynTabPrev => Some(-1),
+                _ => None,
+            };
+            if let Some(step) = step {
+                if self.quad_cycle_subentities(step) {
+                    return Some(Task::none());
+                }
+            }
             self.close_quad();
             return None;
         }
@@ -2232,6 +2583,352 @@ mod quad_tests {
             assert_eq!(app.quad_hover_delay_ms, 2_000);
             let _ = app.update(Message::QuadOption(QuadOptionMsg::Quad(false)));
             assert!(!app.quad);
+        });
+    }
+
+    /// The hover quad's subentity test fixture: the hovered SOLID carries a
+    /// read body under a fixed crosshair spot, so the resolution machinery
+    /// (candidates, wire highlight, gate matrix) is exercised end-to-end —
+    /// docs/quad-menu.md §3.5.1.
+    fn quadded_solid_app() -> (OpenCADStudio, Handle, Point) {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.tabs[0].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+        app.quad = true;
+        app.snapper.snap_enabled = false;
+        app.snapper.grid_snap_on = false;
+        app.polar_mode = false;
+        app.ortho_mode = false;
+        let solid = app.tabs[0].scene.add_entity(codec::EntityType::Solid3D(
+            codec::entities::Solid3D::new(),
+        ));
+        // A read body under the fixed crosshair spot, so the hover
+        // classification resolves: the box's top face *contains* the
+        // cursor's world point exactly.
+        let pos = Point::new(300.0, 300.0);
+        let world = app.cursor_world_at(0, pos);
+        let body = crate::scene::model::solid_model::box_solid(
+            [world.x, world.y, world.z - 5.0],
+            10.0,
+            10.0,
+            10.0,
+        )
+        .expect("box body");
+        app.tabs[0].scene.solid_models.insert(solid, body);
+        app.tabs[0].scene.hover_highlight = Some(solid);
+        // The settled crosshair, so the re-classification reads the same
+        // spot (the move pipeline keeps this fresh in production).
+        app.tabs[0].last_cursor_screen = pos;
+        // A real view scale so the pick aperture converts to world units.
+        app.tabs[0].scene.set_render_pixel_scale(800.0, 600.0);
+        (app, solid, pos)
+    }
+
+    /// `quad_acis_faces` gates the hover quad's SUBENTITY resolution now
+    /// (docs/quad-menu.md §3.5.1): 0 = never, 1 = Shift+hover (default,
+    /// read at open), 2 = plain hover — face-bearing types only (Solid3D
+    /// et al.), and the hover quad only; the Selection quad is out of the
+    /// game entirely. The kind-function panels ride `QuadTarget::Hovered::sub`
+    /// as the primary panel (the old separate "Faces" tab is gone), and the
+    /// wire overlay ("QUAD-SUBENTITY-HOVER") carries the highlight.
+    #[test]
+    fn hover_quad_resolves_subentities_per_setting_and_shift() {
+        use crate::scene::pick::subentity::SubKind;
+        with_stack(|| {
+            let (mut app, solid, pos) = quadded_solid_app();
+            // Defaults (mode 1 = Shift+hover, no Shift held): the solid-level quad.
+            assert!(app.open_quad(QuadMode::Hover, pos));
+            assert!(
+                matches!(
+                    app.quad_open_target,
+                    Some(QuadTarget::Hovered { sub: None, .. })
+                ),
+                "the default gate resolves nothing while Shift is not held"
+            );
+            assert!(!app.quad_panels[0].items.iter().any(|i| i.command == "PRESSPULL"));
+            assert!(app.tabs[0].scene.preview_wires.is_empty());
+
+            // Holding Shift at (re-)open: the nearest subentity resolves
+            // (the box's top face here), becomes the target's sub, the
+            // funcs become the primary, the candidates stage for Tab and
+            // the highlight wire lands.
+            app.shift_down = true;
+            assert!(app.open_quad(QuadMode::Hover, pos));
+            let Some(QuadTarget::Hovered { sub: Some(resolved), .. }) = &app.quad_open_target else {
+                panic!("a Shift+hover open resolves the hovered face");
+            };
+            assert_eq!(resolved.kind, SubKind::Face);
+            assert!(app.quad_panels[0]
+                .items
+                .iter()
+                .any(|i| i.command == "PRESSPULL"), "the face funcs are the primary");
+            assert!(!app.tabs[0].scene.preview_wires.is_empty(),
+                "the highlight wires carry the resolved face");
+            assert!(
+                !quad_state(&app)
+                    .expect("open")
+                    .sub_candidates
+                    .is_empty(),
+                "the resolved candidates stage for the Tab cycle"
+            );
+
+            // Mode 0 keeps everything solid-level even while Shift is held.
+            let _ = app.update(Message::QuadOption(QuadOptionMsg::AcisFaces(0)));
+            assert_eq!(app.quad_acis_faces, 0);
+            assert!(app.open_quad(QuadMode::Hover, pos));
+            assert!(matches!(
+                app.quad_open_target,
+                Some(QuadTarget::Hovered { sub: None, .. })
+            ));
+            assert!(app.tabs[0].scene.preview_wires.is_empty());
+
+            // Mode 2 (plain hover) resolves without Shift; an out-of-range
+            // value clamps back into the domain (2 = "always on").
+            let _ = app.update(Message::QuadOption(QuadOptionMsg::AcisFaces(2)));
+            assert_eq!(app.quad_acis_faces, 2);
+            app.shift_down = false;
+            assert!(app.open_quad(QuadMode::Hover, pos));
+            assert!(matches!(
+                app.quad_open_target,
+                Some(QuadTarget::Hovered { sub: Some(_), .. })
+            ));
+            let _ = app.update(Message::QuadOption(QuadOptionMsg::AcisFaces(77)));
+            assert_eq!(app.quad_acis_faces, 2, "an oversized mode clamps to 'always on'");
+
+            // Selection-mode opens never resolve subentities, whatever the
+            // setting and Shift state.
+            app.quad_acis_faces = 2;
+            app.shift_down = true;
+            app.tabs[0].scene.select_entities(&[solid]);
+            assert!(app.open_quad(QuadMode::Selection, pos));
+            assert!(matches!(app.quad_open_target, Some(QuadTarget::Selection { .. })));
+        });
+    }
+
+    #[test]
+    fn quad_subentity_wires_clear_on_close() {
+        with_stack(|| {
+            let (mut app, _solid, pos) = quadded_solid_app();
+            app.quad_acis_faces = 2;
+            assert!(app.open_quad(QuadMode::Hover, pos));
+            assert!(!app.tabs[0].scene.preview_wires.is_empty());
+            let _ = app.update(Message::Quad(QuadMsg::Close));
+            assert!(app.tabs[0].scene.preview_wires.is_empty(), "the wires clear");
+            assert!(app.quad_panels.is_empty());
+        });
+    }
+
+    /// The subentity workflow's immediate answer (docs/quad-menu.md
+    /// §3.5.1): mode 1's Shift+hover on a face-bearing type opens the quad
+    /// without waiting the configured dwell out — and the Shift flip while
+    /// the quad is already open (or a dwell is counting) re-classifies in
+    /// the same update.
+    #[test]
+    fn shift_held_hover_on_a_solid_opens_without_the_dwell() {
+        with_stack(|| {
+            let (mut app, _solid, pos) = quadded_solid_app();
+            // Defaults (mode 1, no Shift): the dwell counts.
+            app.quad_hover_step(0, pos, 0);
+            assert!(quad_state(&app).is_none(), "no Shift: the dwell counts");
+            assert!(app.quad_hover_since.is_some());
+            // Pressing Shift re-runs the settled step from the flip: mode 1
+            // opens without the dwell, the face resolves at once.
+            app.shift_down = true;
+            app.quad_hover_step(0, pos, 0);
+            let quad = quad_state(&app).expect("Shift+hover opens without the dwell");
+            assert_eq!(quad.mode, QuadMode::Hover);
+            assert!(app.quad_panels[0].items.iter().any(|i| i.command == "PRESSPULL"));
+            assert!(!app.tabs[0].scene.preview_wires.is_empty());
+            assert_eq!(quad.anchor, pos, "opened at the resting cursor");
+        });
+    }
+
+    #[test]
+    fn shift_flip_reanswers_an_open_hover_quad_without_the_dwell() {
+        use crate::scene::pick::subentity::SubKind;
+        with_stack(|| {
+            let (mut app, _solid, pos) = quadded_solid_app();
+            // A solid-level hover quad is open (mode 1, no Shift, dwell-late).
+            app.quad_hover_step(0, pos, 0);
+            app.quad_hover_step(0, pos, 320);
+            let quad = quad_state(&app).expect("opened after the dwell");
+            assert_eq!(quad.anchor, pos);
+            let anchor = quad.anchor;
+            assert!(matches!(
+                app.quad_open_target,
+                Some(QuadTarget::Hovered { sub: None, .. })
+            ));
+            // The SetModifiers flip re-classifies in the same update: no
+            // dwell, no re-anchor — the sub resolves, the funcs show, the
+            // wire appears. The window state stays collapsed (nothing was
+            // expanded for the flip to preserve).
+            let _ = app.update(Message::SetModifiers {
+                shift: true,
+                ctrl: false,
+                alt: false,
+            });
+            let Some(QuadTarget::Hovered { sub: Some(resolved), .. }) = &app.quad_open_target else {
+                panic!("the flip resolved the face subentity");
+            };
+            assert_eq!(resolved.kind, SubKind::Face);
+            assert!(app.quad_panels[0].items.iter().any(|i| i.command == "PRESSPULL"));
+            assert!(!app.tabs[0].scene.preview_wires.is_empty());
+            assert_eq!(quad_state(&app).expect("open").anchor, anchor,
+                "the anchor survives the re-classification");
+
+            // Releasing Shift folds the target back out of the ACIS set:
+            // the solid-level quad (and the wire with it), collapsed.
+            let _ = app.update(Message::SetModifiers {
+                shift: false,
+                ctrl: false,
+                alt: false,
+            });
+            assert!(matches!(
+                app.quad_open_target,
+                Some(QuadTarget::Hovered { sub: None, .. })
+            ));
+            assert!(app.tabs[0].scene.preview_wires.is_empty());
+            assert!(!quad_state(&app).expect("open").expanded, "the ACIS-leaving fold collapses");
+        });
+    }
+
+    /// A flip while only the hover dwell counts re-runs the step at the
+    /// resting cursor — mode 1's Shift+hover rule opens it without waiting
+    /// the quad delay out.
+    #[test]
+    fn shift_flip_reanswers_the_counting_dwell_immediately_too() {
+        with_stack(|| {
+            let (mut app, _solid, pos) = quadded_solid_app();
+            app.tabs[0].last_cursor_screen = pos;
+            app.quad_hover_step(0, pos, 0); // arming only (mode 1, no Shift)
+            assert!(quad_state(&app).is_none());
+            let _ = app.update(Message::SetModifiers {
+                shift: true,
+                ctrl: false,
+                alt: false,
+            });
+            assert!(quad_state(&app).is_some(), "the flip opened the quad");
+            assert!(app.quad_panels[0].items.iter().any(|i| i.command == "PRESSPULL"));
+        });
+    }
+
+    /// The keyboard Tab with a subentity quad open cycles the staged
+    /// candidates — faces, edges and vertices as they rank, wrapping —
+    /// each step swapping the primary panel (and the wire highlight) at
+    /// once; without candidates the hover quad keeps its key fall-through.
+    #[test]
+    fn quad_tab_cycles_the_staged_subentities() {
+        use crate::scene::pick::subentity::{SubKey, SubKind, SubTarget};
+        with_stack(|| {
+            let (mut app, _solid, pos) = quadded_solid_app();
+            // Mode 1 + Shift first settled step: open + face resolved.
+            app.shift_down = true;
+            app.quad_hover_step(0, pos, 0);
+            assert!(quad_state(&app).is_some());
+            // Stub the cycle universe: face → edge → vertex (the stage-1
+            // ranked order), the face as the live sub.
+            let subtarget = |kind, idx| SubTarget {
+                kind,
+                key: SubKey { idx, gen: 0 },
+                point: glam::DVec3::ZERO,
+            };
+            let (face, edge, vertex) = (
+                subtarget(SubKind::Face, 1),
+                subtarget(SubKind::Edge, 2),
+                subtarget(SubKind::Vertex, 3),
+            );
+            {
+                let mut sel = app.tabs[0].scene.selection.borrow_mut();
+                let quad = sel.menu.quad.as_mut().expect("open");
+                quad.sub_candidates = vec![face.clone(), edge.clone(), vertex.clone()];
+                quad.sub_index = 0;
+            }
+            // The keyboard Tab (DynTabNext through the update router)
+            // cycles subentity kind — off the face funcs row to the edge
+            // ones — and re-draws the highlight at once.
+            let _ = app.update(Message::DynTabNext);
+            let Some(QuadTarget::Hovered { sub: Some(resolved), .. }) = &app.quad_open_target else {
+                panic!("the cycle re-pointed the sub");
+            };
+            assert_eq!(resolved.kind, SubKind::Edge);
+            assert!(app.quad_panels[0]
+                .items
+                .iter()
+                .all(|i| ["FILLETEDGE", "CHAMFEREDGE"].contains(&i.command.as_str())),
+                "the edge funcs are the primary after the turn to an edge"
+            );
+            assert!(!app.tabs[0].scene.preview_wires.is_empty());
+
+            // Vertex: no functions yet — the solid-level panel returns
+            // (and a vertex carries no highlight wire at all).
+            let _ = app.update(Message::DynTabNext);
+            let Some(QuadTarget::Hovered { sub: Some(resolved), .. }) = &app.quad_open_target else {
+                panic!("the cycle re-pointed the sub");
+            };
+            assert_eq!(resolved.kind, SubKind::Vertex);
+            assert!(app.quad_panels[0].items.iter().any(|i| i.command == "MOVE"),
+                "the solid-level primary survives the vertex turn");
+            assert!(app.tabs[0].scene.preview_wires.is_empty(),
+                "a vertex carries no highlight wire");
+
+            // Wraps forward (vertex → face), and backward from the current
+            // one (face → vertex) — the wrap is modulo ALL candidates.
+            let _ = app.update(Message::DynTabNext);
+            assert!(matches!(
+                &app.quad_open_target,
+                Some(QuadTarget::Hovered { sub: Some(resolved), .. }) if resolved.kind == SubKind::Face
+            ));
+            let _ = app.update(Message::DynTabPrev);
+            assert!(matches!(
+                &app.quad_open_target,
+                Some(QuadTarget::Hovered { sub: Some(resolved), .. }) if resolved.kind == SubKind::Vertex
+            ));
+        });
+    }
+
+    /// No staged candidates (a non-solid hover / the gate off): the
+    /// keyboard Tab keeps the hover quad's fall-through law — it closes the
+    /// quad and lets the key through, exactly like every other key.
+    #[test]
+    fn quad_tab_without_candidates_keeps_the_fall_through() {
+        with_stack(|| {
+            let (mut app, handle) = quadded_line_app();
+            app.tabs[0].scene.hover_highlight = Some(handle);
+            app.quad_hover_step(0, Point::new(100.0, 100.0), 0);
+            app.quad_hover_step(0, Point::new(100.0, 100.0), 320);
+            assert!(quad_state(&app).is_some());
+            let _ = app.update(Message::DynTabNext);
+            assert!(
+                quad_state(&app).is_none(),
+                "no candidates: the Tab closes the hover quad like before"
+            );
+        });
+    }
+
+    /// The active tab toggles back through the router: `Tab(0)` keeps the
+    /// quad open and expanded on the primary panel (`active_tab` 0), the
+    /// state the view's active-tab emission (`quad_tab`) resolves to.
+    #[test]
+    fn quad_tab_zero_returns_the_primary_and_stays_expanded() {
+        with_stack(|| {
+            let (mut app, handle) = quadded_line_app();
+            // A Line overflows into group tabs at a narrow width.
+            let _ = app.update(Message::QuadOption(QuadOptionMsg::Width(3)));
+            app.tabs[0].scene.hover_highlight = Some(handle);
+            app.quad_hover_step(0, Point::new(100.0, 100.0), 0);
+            app.quad_hover_step(0, Point::new(100.0, 100.0), 320);
+            let quad = quad_state(&app).expect("the hover quad opened");
+            assert_eq!(quad.mode, QuadMode::Hover);
+            assert!(app.quad_panels.len() > 1, "the test needs at least one tab");
+            let _ = app.update(Message::Quad(QuadMsg::Tab(1)));
+            assert_eq!(quad_state(&app).expect("open").active_tab, 1);
+            // The toggle-back emissions (`Tab(0)`) resolve to the primary,
+            // still expanded — no re-collapse, no close.
+            let _ = app.update(Message::Quad(QuadMsg::Tab(0)));
+            let quad = quad_state(&app).expect("still open");
+            assert_eq!(quad.active_tab, 0);
+            assert!(quad.expanded);
+            assert_eq!(app.quad_panels[0].id, "quad.primary");
         });
     }
 

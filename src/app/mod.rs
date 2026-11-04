@@ -988,6 +988,10 @@ pub(super) struct OpenCADStudio {
     /// Milliseconds the cursor must rest on an entity before the hover quad
     /// opens (0..=2000).
     quad_hover_delay_ms: u64,
+    /// Whether the hover quad offers its ACIS "Faces" tab over a solid:
+    /// 0 = never, 1 = Shift+hover (default), 2 = plain hover, per
+    /// `UserSettings::quad_acis_faces` (no sysvar — a UI choice only).
+    quad_acis_faces: u8,
     /// The panels the open quad currently shows — the pure model built by
     /// `quad_panels_for_target` when the quad opened. Cleared on close.
     pub quad_panels: Vec<crate::ui::popup::quad_menu::QuadPanel>,
@@ -5876,6 +5880,7 @@ impl OpenCADStudio {
             quad_width: crate::ui::popup::quad_menu::QUAD_WIDTH_DEFAULT,
             quad_command_launch: false,
             quad_hover_delay_ms: 300,
+            quad_acis_faces: 1,
             quad_panels: Vec::new(),
             quad_hover_since: None,
             quad_dwell_pick: None,

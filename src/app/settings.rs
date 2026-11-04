@@ -260,6 +260,20 @@ pub fn clamp_quad_hover_delay_ms(v: u64) -> u64 {
     v.min(QUAD_HOVER_DELAY_MAX)
 }
 
+/// The hover quad's ACIS subentity resolution gate (`quad_acis_faces`,
+/// docs/quad-menu.md §3.5.1): 0 = never resolve (solid-level quads always),
+/// 1 = resolve only while Shift is held over the hovered object
+/// (COMSOL/BricsCAD's own Shift+hover habit), 2 = resolve on plain hover.
+/// A UI choice only — no SETVAR sysvar reflects it, unlike `QUADWIDTH`.
+pub const QUAD_ACIS_FACES_MAX: u8 = 2;
+
+/// Hold the `quad_acis_faces` mode inside its domain, wherever it arrives
+/// from — the Options field, or a configuration file written by hand or by
+/// an older build (a value above the domain reads as "always on").
+pub fn clamp_quad_acis_faces(v: u8) -> u8 {
+    v.min(QUAD_ACIS_FACES_MAX)
+}
+
 /// In-code default when the `quad_width` key is absent (serde's bare
 /// `default` would fall back to `u8::default()` = 0, off the domain).
 fn default_quad_width() -> u8 {
@@ -269,6 +283,11 @@ fn default_quad_width() -> u8 {
 /// In-code default when the `quad_hover_delay_ms` key is absent.
 fn default_quad_hover_delay_ms() -> u64 {
     300
+}
+
+/// In-code default when the `quad_acis_faces` key is absent (Shift+hover).
+fn default_quad_acis_faces() -> u8 {
+    clamp_quad_acis_faces(1)
 }
 
 /// Tolerant load for a hand-edited `quad_width` (`serde(deserialize_with)`):
@@ -295,6 +314,19 @@ where
 {
     let raw = i64::deserialize(deserializer)?;
     Ok(clamp_quad_hover_delay_ms(raw.max(0) as u64))
+}
+
+/// Tolerant load for a hand-edited `quad_acis_faces` (`serde(deserialize_with)`):
+/// any JSON number parses as `i64` and clamps into the mode's domain instead
+/// of failing the whole settings parse; a negative one (never written here)
+/// latches to 0 = off. A value that is not a number at all still errors,
+/// exactly like the neighbouring strict fields.
+fn deserialize_quad_acis_faces<'de, D>(deserializer: D) -> Result<u8, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = i64::deserialize(deserializer)?;
+    Ok(clamp_quad_acis_faces((raw.max(0).min(u8::MAX as i64)) as u8))
 }
 
 /// Hold a ZOOMFACTOR inside the range the application can store, wherever it
@@ -880,6 +912,14 @@ pub struct UserSettings {
     /// loads clamped instead of failing the whole config parse.
     #[serde(default = "default_quad_hover_delay_ms", deserialize_with = "deserialize_quad_hover_delay_ms")]
     pub quad_hover_delay_ms: u64,
+    /// When the hover quad resolves ACIS subentities over a solid
+    /// (docs/quad-menu.md §3.5.1): 0 = never, 1 = Shift+hover (default),
+    /// 2 = plain hover. The reader is the tolerant one above: an oversized
+    /// or negative hand-written number loads clamped instead of failing the
+    /// whole config parse. UI-only — there is deliberately no SETVAR sysvar
+    /// for this one.
+    #[serde(default = "default_quad_acis_faces", deserialize_with = "deserialize_quad_acis_faces")]
+    pub quad_acis_faces: u8,
     /// GRIPOBJLIMIT: past this many selected objects, no grips are drawn at
     /// all. 0 means no limit. The drawing header carries no slot for it.
     pub grip_object_limit: i32,
@@ -1446,6 +1486,7 @@ impl Default for UserSettings {
             quad_width: 6,
             quad_command_launch: false,
             quad_hover_delay_ms: 300,
+            quad_acis_faces: 1,
             grip_object_limit: DEFAULT_GRIP_OBJECT_LIMIT,
             image_frame: 1,
             attdef_on_screen: true,
@@ -1723,6 +1764,11 @@ mod tests {
         assert_eq!(defaults.quad_width, 6);
         assert!(!defaults.quad_command_launch);
         assert_eq!(defaults.quad_hover_delay_ms, 300);
+        assert_eq!(
+            defaults.quad_acis_faces,
+            1,
+            "subentity resolution defaults to Shift+hover"
+        );
 
         // A minimal old config: the quad keys are missing, not merely false.
         let old: crate::app::config::AppConfig =
@@ -1734,6 +1780,7 @@ mod tests {
         assert_eq!(s.quad_width, 6);
         assert!(!s.quad_command_launch);
         assert_eq!(s.quad_hover_delay_ms, 300);
+        assert_eq!(s.quad_acis_faces, 1);
     }
 
     /// What a user configured on the quad comes back from a save/load. An
@@ -1751,12 +1798,17 @@ mod tests {
         set.quad_width = 9;
         set.quad_command_launch = true;
         set.quad_hover_delay_ms = 450;
+        set.quad_acis_faces = 2;
         let text = serde_json::to_string(&set).unwrap();
         let back: UserSettings = serde_json::from_str(&text).unwrap();
         assert_eq!(back, set);
 
         for (raw, clamped) in [(0, 2), (1, 2), (6, 6), (13, 12), (255, 12)] {
             assert_eq!(clamp_quad_width(raw), clamped);
+        }
+        // The Faces-tab mode's whole domain passes through.
+        for (raw, clamped) in [(0u8, 0), (1, 1), (2, 2), (3, 2), (255, 2)] {
+            assert_eq!(clamp_quad_acis_faces(raw), clamped);
         }
     }
 
@@ -1768,13 +1820,17 @@ mod tests {
     #[test]
     fn quad_numeric_settings_tolerate_out_of_domain_numbers() {
         let loose: UserSettings = serde_json::from_str(
-            r#"{"pick_add": true, "quad_width": 300, "quad_hover_delay_ms": -50}"#,
+            r#"{"pick_add": true, "quad_width": 300, "quad_hover_delay_ms": -50, "quad_acis_faces": 9}"#,
         )
         .expect("a tolerant numeric parse must not fail the settings");
         assert_eq!(loose.quad_width, 12, "an oversized width loads clamped");
         assert_eq!(
             loose.quad_hover_delay_ms, 0,
             "a negative dwell loads clamped"
+        );
+        assert_eq!(
+            loose.quad_acis_faces, 2,
+            "an oversized Faces-tab mode loads clamped to 'always on'"
         );
         assert!(loose.pick_add, "the rest of the file survived the parse");
 
@@ -1783,6 +1839,10 @@ mod tests {
             serde_json::from_str::<UserSettings>(r#"{"quad_width": "wide"}"#).is_err(),
             "a non-numeric quad_width must still fail the parse"
         );
+        assert!(
+            serde_json::from_str::<UserSettings>(r#"{"quad_acis_faces": "hover"}"#).is_err(),
+            "a non-numeric quad_acis_faces must still fail the parse"
+        );
 
         // Absent keys keep the in-code defaults (struct-level serde
         // default untouched).
@@ -1790,6 +1850,7 @@ mod tests {
             serde_json::from_str(r#"{"pick_add": true}"#).unwrap();
         assert_eq!(minimal.quad_width, 6);
         assert_eq!(minimal.quad_hover_delay_ms, 300);
+        assert_eq!(minimal.quad_acis_faces, 1);
     }
 
     /// The hover quad opens on a dwell, so one above a couple of seconds is

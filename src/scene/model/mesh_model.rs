@@ -24,6 +24,15 @@ pub struct MeshModel {
     pub triangle_material_handles: Vec<Option<codec::Handle>>,
     /// Optional ACIS face colour per triangle, aligned with `indices` triplets.
     pub triangle_colors: Vec<Option<[f32; 4]>>,
+    /// ACIS face identity per triangle, aligned with `indices` triplets:
+    /// `(face slot, generation)` of the kernel `FaceKey` the triangle came
+    /// from, so a triangle can be read back as the subentity it tessellates.
+    /// The kernel's key keeps its generation private and exposes the slot
+    /// (`Key::slot`), so the second element is always 0 for now and a key is
+    /// matched back onto a body by slot. Empty for meshes without subentity
+    /// identity (plain meshes) — every consumer must treat empty as "no face
+    /// identity".
+    pub triangle_face_keys: Vec<(u32, u32)>,
     /// RGBA colour in [0, 1].
     pub color: [f32; 4],
     /// Whether this mesh is currently selected.

@@ -571,6 +571,7 @@ fn mesh_from_tessellation(
 ) -> Option<MeshLodSet> {
     let silhouette = tessellation.silhouette_source();
     let mesh = tessellation.mesh;
+    let triangle_faces = tessellation.triangle_faces;
     if mesh.is_empty() {
         return None;
     }
@@ -606,6 +607,10 @@ fn mesh_from_tessellation(
         indices,
         triangle_material_handles: Vec::new(),
         triangle_colors: Vec::new(),
+        triangle_face_keys: triangle_faces
+            .iter()
+            .map(|face| (face.slot(), 0))
+            .collect(),
         color,
         selected: false,
     });

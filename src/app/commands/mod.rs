@@ -194,6 +194,11 @@ impl OpenCADStudio {
     }
 
     fn dispatch_command_inner(&mut self, cmd: &str, allow_suggest: bool) -> Task<Message> {
+        // A started command tears the quad down with the same discipline the
+        // pick path applies (wires + app-global panels + the menu state) —
+        // the pickup path already closed it, so this is idempotent cleanup
+        // for command-line / ribbon / menu launches fired while it was open.
+        self.close_quad();
         self.try_dispatch_command(cmd, allow_suggest)
             .unwrap_or_else(|| {
                 self.command_line

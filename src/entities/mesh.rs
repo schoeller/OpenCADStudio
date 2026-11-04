@@ -1293,6 +1293,7 @@ fn make_mesh_lod_set(
         indices,
         Vec::new(),
         triangle_colors,
+        Vec::new(),
         color,
         None,
     );

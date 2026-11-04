@@ -2751,11 +2751,10 @@ bg={bg_ms:.1}ms n={view_count}"
             if !tab.is_start {
                 let quad = tab.scene.selection.borrow().menu.quad.clone();
                 if let Some(quad) = quad {
-                    if self
-                        .quad_panels
-                        .first()
-                        .is_some_and(|panel| !panel.items.is_empty())
-                    {
+                    // Any panel with items renders — the primary panel can be
+                    // empty on entity types without curated rows, where only a
+                    // plugin's registered tab applies (docs/quad-menu.md §3.3).
+                    if self.quad_panels.iter().any(|panel| !panel.items.is_empty()) {
                         viewport_stack = viewport_stack.push(viewport_quad_overlay(
                             &quad,
                             &self.quad_panels,

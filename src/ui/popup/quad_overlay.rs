@@ -47,7 +47,9 @@ pub fn quad_expanded_card(
     quad_width: usize,
 ) -> Element<'static, Message> {
     let cols = quad_width.max(1);
-    // An out-of-range or empty tab falls back to the primary grid.
+    // An out-of-range or empty tab falls back to the primary grid; an empty
+    // primary (no curated commands for the type) falls to the first non-empty
+    // tab — usually a plugin panel bound to the entity type.
     let active = if quad.active_tab > 0 {
         panels
             .get(quad.active_tab)
@@ -55,7 +57,7 @@ pub fn quad_expanded_card(
     } else {
         None
     }
-    .or_else(|| panels.first());
+    .or_else(|| panels.iter().find(|panel| !panel.items.is_empty()));
 
     let mut card = column![].spacing(QUAD_TILE_GAP);
     if let Some(panel) = active {
@@ -300,8 +302,16 @@ fn quad_tile_style(theme: &Theme, status: button::Status) -> button::Style {
 /// A bottom tab: the panel's label on a narrow strip. Hovering or pressing
 /// the tab activates it (`QuadMsg::Tab`, which the pick router keeps
 /// expanded — the tab's items show under the cursor, as in commercial
-/// solutions).
+/// solutions). The tab toggles: the active strip returns to the primary
+/// panel (`Tab(0)`) on both hover and press — re-entering it after moving
+/// away re-fires the toggle, so there is always a way back (the primary is
+/// deliberately tab-less).
 fn quad_tab(index: usize, panel: &QuadPanel, active: bool) -> Element<'static, Message> {
+    let msg = if active {
+        QuadMsg::Tab(0)
+    } else {
+        QuadMsg::Tab(index)
+    };
     let btn = button(
         container(text(crate::t!(&panel.label).into_owned()).size(11))
             .align_x(iced::Center)
@@ -311,9 +321,9 @@ fn quad_tab(index: usize, panel: &QuadPanel, active: bool) -> Element<'static, M
     .height(Length::Fixed(QUAD_TAB_H))
     .padding([2, 10])
     .style(move |theme: &Theme, status| quad_tab_style(theme, status, active))
-    .on_press(Message::Quad(QuadMsg::Tab(index)));
+    .on_press(Message::Quad(msg.clone()));
     mouse_area(btn)
-        .on_enter(Message::Quad(QuadMsg::Tab(index)))
+        .on_enter(Message::Quad(msg))
         .into()
 }
 

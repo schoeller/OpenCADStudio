@@ -1519,17 +1519,21 @@ pub(super) fn viewport_quad_overlay<'a>(
 ) -> Element<'a, Message> {
     use crate::ui::popup::quad_overlay;
 
-    // Collapsed the quad is one tile; expanded the pinned panel card. An
-    // empty primary panel (nothing applicable) has nothing to show.
+    // Collapsed the quad is one tile; expanded the pinned panel card. With no
+    // curated commands the default tile comes from the first tab (usually a
+    // plugin panel bound to the type), so plugin-only quotas still surface.
     let quad_element = if quad.expanded {
         Some(quad_overlay::quad_expanded_card(quad, panels, quad_width))
     } else {
-        panels.first().and_then(|panel| {
-            panel
-                .items
-                .first()
-                .map(|item| quad_overlay::quad_collapsed_tile(item, &panel.id))
-        })
+        panels
+            .iter()
+            .find(|panel| !panel.items.is_empty())
+            .and_then(|panel| {
+                panel
+                    .items
+                    .first()
+                    .map(|item| quad_overlay::quad_collapsed_tile(item, &panel.id))
+            })
     };
 
     // The hover quad opens on its own beside the cursor: it catches no clicks
@@ -2313,6 +2317,85 @@ mod quad_view_tests {
         let middle = QUAD_HOVER_GAP + QUAD_TILE * 0.5;
         let on_tile = press_at(hover(), iced::Point::new(300.0 + middle, 225.0 - middle));
         assert!(on_tile.iter().any(|m| matches!(m, Message::Quad(QuadMsg::Pick { .. }))), "{on_tile:?}");
+    }
+
+    /// The expanded card's own panels: a primary grid and one follow-up tab
+    /// (an entity type whose commands overflow into a group panel — the
+    /// strip the toggle behaviour is about).
+    fn tabbed_panels() -> Vec<QuadPanel> {
+        vec![
+            QuadPanel {
+                id: "quad.primary".to_string(),
+                label: String::new(),
+                items: vec![quad_item("Move", "MOVE"), quad_item("Copy", "COPY")],
+                applies_to: Vec::new(),
+            },
+            QuadPanel {
+                id: "quad.grp.0".to_string(),
+                label: "Edges".to_string(),
+                items: vec![quad_item("Slice", "SLICE")],
+                applies_to: Vec::new(),
+            },
+        ]
+    }
+
+    fn expanded_tabbed_quad(active_tab: usize) -> Element<'static, Message> {
+        let mut quad = QuadUi::open(iced::Point::new(300.0, 225.0), QuadMode::Hover);
+        quad.expanded = true;
+        quad.active_tab = active_tab;
+        viewport_quad_overlay(&quad, &tabbed_panels(), 6, 60.0)
+    }
+
+    #[test]
+    fn active_tab_toggles_back_to_the_primary() {
+        // The primary is deliberately tab-less, so the active tab is the way
+        // back: clicking (or just entering, on_enter) the strip's marked tab
+        // resolves to `QuadMsg::Tab(0)` — the primary grid — while an idle
+        // tab still activates itself (`Tab(index)`).
+        // Tab "Edges" flagged active: the card shows its own grid (the click
+        // target below), and a click on the tab emits Tab(0) — and no Tab(1)
+        // on either the enter or press path.
+        let mut ui = iced_test::simulator::Simulator::with_size(
+            Default::default(),
+            iced::Size::new(600.0, 450.0),
+            expanded_tabbed_quad(1),
+        );
+        find_tile(&mut ui, "SL");
+        let _ = ui.point_at(iced::Point::new(40.0, 400.0));
+        let _ = ui.click("Edges");
+        let messages: Vec<_> = ui.into_messages().collect();
+        assert!(
+            messages.iter().any(|m| matches!(m, Message::Quad(QuadMsg::Tab(0)))),
+            "{messages:?}"
+        );
+        assert!(
+            !messages.iter().any(|m| matches!(m, Message::Quad(QuadMsg::Tab(1)))),
+            "{messages:?}"
+        );
+
+        // And `Tab(0)` shows the primary grid again (the router's index-0
+        // state through the expanded card's fallback): the Move/Copy tiles
+        // of the primary in the tree — the state the toggle returns to.
+        let mut ui = iced_test::simulator::Simulator::with_size(
+            Default::default(),
+            iced::Size::new(600.0, 450.0),
+            expanded_tabbed_quad(0),
+        );
+        find_tile(&mut ui, "MO");
+        find_tile(&mut ui, "CO");
+
+        // The same tab not marked active still activates itself on click.
+        let mut ui = iced_test::simulator::Simulator::with_size(
+            Default::default(),
+            iced::Size::new(600.0, 450.0),
+            expanded_tabbed_quad(0),
+        );
+        let _ = ui.click("Edges");
+        let messages: Vec<_> = ui.into_messages().collect();
+        assert!(
+            messages.iter().any(|m| matches!(m, Message::Quad(QuadMsg::Tab(1)))),
+            "{messages:?}"
+        );
     }
 
     #[test]

@@ -59,6 +59,7 @@ pub fn tessellate_sat(
     let mut edges: Vec<[f64; 3]> = Vec::new();
     let mut triangle_materials = Vec::new();
     let mut triangle_colors = Vec::new();
+    let mut triangle_face_keys = Vec::new();
     let mut curved_gens = Vec::new();
     let face_materials: std::collections::HashMap<i32, codec::Handle> = document
         .records
@@ -134,6 +135,7 @@ pub fn tessellate_sat(
                 .map(|source| source.index() as i32);
             triangle_materials.push(record.and_then(|record| face_materials.get(&record).copied()));
             triangle_colors.push(record.and_then(|record| face_colors.get(&record).copied()));
+            triangle_face_keys.push((face.slot(), 0));
         }
         curved_gens.push(CurvedGen {
             source: tessellation.silhouette_source(),
@@ -180,6 +182,7 @@ pub fn tessellate_sat(
         indices,
         triangle_materials,
         triangle_colors,
+        triangle_face_keys,
         color,
         None,
     ));

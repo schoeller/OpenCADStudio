@@ -250,6 +250,7 @@ fn bounded_gpu_uploads_preserve_geometry_and_instancing() {
             indices: (0..triangles as u32 * 3).collect(),
             triangle_material_handles: Vec::new(),
             triangle_colors: Vec::new(),
+            triangle_face_keys: Vec::new(),
             color: [1.0; 4],
             selected: false,
         });

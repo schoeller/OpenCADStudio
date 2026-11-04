@@ -3358,6 +3358,7 @@ mod behind_eye_tests {
             indices: vec![0, 1, 2, 0, 2, 3],
             triangle_material_handles: Vec::new(),
             triangle_colors: Vec::new(),
+            triangle_face_keys: Vec::new(),
             color: [1.0; 4],
             selected: false,
         }
